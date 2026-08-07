@@ -174,6 +174,102 @@ def get_tmdb_id_from_plex(plex, anime_name):
         console.print(f"[bold red]Error getting TMDB ID: {str(e)}[/bold red]")
         return None
 
+def get_plex_anime_show(plex, anime_name):
+    """Find and return an anime show from the configured Plex libraries."""
+    try:
+        mapped_anime_name = CONFIG.get('mappings', {}).get(
+            anime_name.lower(),
+            anime_name
+        )
+
+        libraries = get_anime_libraries(plex)
+
+        for anime_library in libraries:
+            for show in anime_library.all():
+                if show.title.lower() == mapped_anime_name.lower():
+                    return show
+
+        logger.warning(
+            f"Could not find Plex show for '{mapped_anime_name}'"
+        )
+        return None
+
+    except Exception as e:
+        logger.error(
+            f"Error finding Plex show '{anime_name}': {str(e)}"
+        )
+        return None
+
+
+def build_plex_absolute_episode_map(show):
+    """
+    Build a mapping from absolute episode number to the episode's
+    Plex aired-order season/episode coordinates.
+
+    Specials (season 0) are excluded from absolute numbering.
+    """
+    episode_map = {}
+    absolute_number = 1
+
+    try:
+        seasons = sorted(
+            [season for season in show.seasons() if season.index > 0],
+            key=lambda season: season.index
+        )
+
+        for season in seasons:
+            episodes = sorted(
+                season.episodes(),
+                key=lambda episode: episode.index
+            )
+
+            for episode in episodes:
+                tvdb_episode_id = None
+
+                for guid in getattr(episode, 'guids', []):
+                    if guid.id.startswith('tvdb://'):
+                        tvdb_episode_id = guid.id.split('//', 1)[1]
+                        break
+
+                episode_map[str(absolute_number)] = {
+                    'season': season.index,
+                    'episode': episode.index,
+                    'title': episode.title,
+                    'rating_key': episode.ratingKey,
+                    'tvdb_episode_id': tvdb_episode_id
+                }
+
+                absolute_number += 1
+
+        return episode_map
+
+    except Exception as e:
+        logger.error(
+            f"Error building Plex episode map for "
+            f"'{getattr(show, 'title', 'Unknown')}': {str(e)}"
+        )
+        return {}
+
+def get_tvdb_id_from_show(show):
+    """Return the TVDb show ID exposed by Plex."""
+    try:
+        for guid in getattr(show, 'guids', []):
+            if guid.id.startswith('tvdb://'):
+                return guid.id.split('//', 1)[1]
+
+        logger.warning(
+            f"No TVDb GUID found for "
+            f"'{getattr(show, 'title', 'Unknown')}'"
+        )
+        return None
+
+    except Exception as e:
+        logger.error(
+            f"Error getting TVDb ID for "
+            f"'{getattr(show, 'title', 'Unknown')}': {str(e)}"
+        )
+        return None
+
 def get_anime_episodes(anime_name, episode_type_filter=None, silent=False):
     """Get episodes from AnimeFillerList website."""
     global CONFIG
