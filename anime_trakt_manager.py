@@ -175,29 +175,61 @@ def get_tmdb_id_from_plex(plex, anime_name):
         return None
 
 def get_plex_anime_show(plex, anime_name):
-    """Find and return an anime show from the configured Plex libraries."""
+    """Find a Plex anime show using Dakosys mappings."""
     try:
-        mapped_anime_name = CONFIG.get('mappings', {}).get(
-            anime_name.lower(),
-            anime_name
-        )
+        mapped_anime_name = None
+
+        # Production Dakosys stores mappings separately from config.yaml.
+        try:
+            import mappings_manager
+
+            mappings_data = mappings_manager.load_mappings()
+
+            mapped_anime_name = (
+                mappings_data
+                .get("mappings", {})
+                .get(anime_name.lower())
+            )
+
+        except Exception as e:
+            logger.warning(
+                f"Could not load mappings_manager mappings: {e}"
+            )
+
+        # Fallback for tests / legacy configs that still include mappings.
+        if not mapped_anime_name:
+            mapped_anime_name = (
+                CONFIG
+                .get("mappings", {})
+                .get(
+                    anime_name.lower(),
+                    anime_name,
+                )
+            )
 
         libraries = get_anime_libraries(plex)
 
         for anime_library in libraries:
             for show in anime_library.all():
-                if show.title.lower() == mapped_anime_name.lower():
+                if (
+                    show.title.lower()
+                    == mapped_anime_name.lower()
+                ):
                     return show
 
-        logger.warning(
-            f"Could not find Plex show for '{mapped_anime_name}'"
+        console.print(
+            f"[yellow]WARNING: Could not find Plex show for "
+            f"'{mapped_anime_name}'[/yellow]"
         )
+
         return None
 
     except Exception as e:
-        logger.error(
-            f"Error finding Plex show '{anime_name}': {str(e)}"
+        console.print(
+            f"[bold red]Error finding Plex show: "
+            f"{str(e)}[/bold red]"
         )
+
         return None
 
 
