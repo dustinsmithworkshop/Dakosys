@@ -302,99 +302,347 @@ def get_tvdb_id_from_show(show):
         )
         return None
 
-def get_anime_episodes(anime_name, episode_type_filter=None, silent=False):
+def _normalize_afl_show_identity(value):
+    """Normalize an AnimeFillerList show title or slug for comparison."""
+    value = value or ""
+    value = value.lower()
+
+    # Strip common AFL page-title boilerplate.
+    value = re.sub(r"\bfiller list\b", " ", value)
+    value = re.sub(r"\bthe ultimate anime filler guide\b", " ", value)
+
+    # Normalize punctuation/spacing.
+    value = re.sub(r"[^a-z0-9]+", " ", value)
+
+    return " ".join(value.split())
+
+
+def _validate_afl_page_identity(anime_name, soup, threshold=0.55):
+    """
+    Validate that an AnimeFillerList page appears to represent the requested show.
+
+    Returns:
+        (is_valid, page_title, similarity)
+    """
+    requested_identity = _normalize_afl_show_identity(
+        anime_name.replace("-", " ")
+    )
+
+    h1 = soup.find("h1")
+    page_title = (
+        h1.get_text(" ", strip=True)
+        if h1
+        else ""
+    )
+
+    page_identity = _normalize_afl_show_identity(page_title)
+
+    if not requested_identity or not page_identity:
+        return False, page_title, 0.0
+
+    if requested_identity == page_identity:
+        return True, page_title, 1.0
+
+    similarity = difflib.SequenceMatcher(
+        None,
+        requested_identity,
+        page_identity,
+    ).ratio()
+
+    return (
+        similarity >= threshold,
+        page_title,
+        similarity,
+    )
+
+def get_anime_episodes(
+    anime_name,
+    episode_type_filter=None,
+    silent=False,
+):
     """Get episodes from AnimeFillerList website."""
     global CONFIG
+
     try:
-        base_url = 'https://www.animefillerlist.com/shows/'
-        anime_url = f'{base_url}{anime_name}'
+        base_url = "https://www.animefillerlist.com/shows/"
+        anime_url = f"{base_url}{anime_name}"
 
         if not silent:
-            logger.info(f"Fetching episode data from {anime_url}")
-
-        response = requests.get(anime_url)
-        if response.status_code == 404:
-            logger.warning(f"AFL slug '{anime_name}' not found (404), trying AFL search...")
-            search_query = anime_name.replace('-', ' ')
-            search_resp = requests.get(
-                f"https://www.animefillerlist.com/search/node/{search_query}",
-                timeout=10
+            logger.info(
+                f"Fetching episode data from {anime_url}"
             )
+
+        response = requests.get(
+            anime_url,
+            timeout=15,
+        )
+
+        # If the requested slug does not exist, retain Dakosys'
+        # existing search fallback behavior. Any candidate returned
+        # from search will still be identity-validated below.
+        if response.status_code == 404:
+            logger.warning(
+                f"AFL slug '{anime_name}' not found (404), "
+                f"trying AFL search..."
+            )
+
+            search_query = anime_name.replace("-", " ")
+
+            search_resp = requests.get(
+                (
+                    "https://www.animefillerlist.com/"
+                    f"search/node/{search_query}"
+                ),
+                timeout=10,
+            )
+
+            resolved = False
+
             if search_resp.status_code == 200:
-                from bs4 import BeautifulSoup as _BS
-                _soup = _BS(search_resp.text, 'html.parser')
-                for h3 in _soup.find_all("h3"):
+                search_soup = BeautifulSoup(
+                    search_resp.text,
+                    "html.parser",
+                )
+
+                for h3 in search_soup.find_all("h3"):
                     link = h3.find("a", href=True)
+
                     if not link:
                         continue
+
                     href = link["href"]
-                    if "/shows/" in href:
-                        slug = href.split("/shows/")[-1].strip("/")
-                        if slug and "/" not in slug:
-                            retry_url = f"https://www.animefillerlist.com/shows/{slug}"
-                            retry_resp = requests.get(retry_url)
-                            if retry_resp.status_code == 200:
-                                logger.info(f"AFL search resolved '{anime_name}' → '{slug}'")
-                                response = retry_resp
-                                anime_url = retry_url
-                                break
+
+                    if "/shows/" not in href:
+                        continue
+
+                    slug = (
+                        href
+                        .split("/shows/")[-1]
+                        .strip("/")
+                    )
+
+                    if not slug or "/" in slug:
+                        continue
+
+                    retry_url = (
+                        "https://www.animefillerlist.com/"
+                        f"shows/{slug}"
+                    )
+
+                    try:
+                        retry_resp = requests.get(
+                            retry_url,
+                            timeout=15,
+                        )
+                    except requests.RequestException:
+                        continue
+
+                    if retry_resp.status_code != 200:
+                        continue
+
+                    retry_soup = BeautifulSoup(
+                        retry_resp.text,
+                        "html.parser",
+                    )
+
+                    (
+                        valid_identity,
+                        page_title,
+                        similarity,
+                    ) = _validate_afl_page_identity(
+                        anime_name,
+                        retry_soup,
+                    )
+
+                    if not valid_identity:
+                        logger.warning(
+                            f"AFL search candidate rejected for "
+                            f"'{anime_name}': slug '{slug}' "
+                            f"reports '{page_title}' "
+                            f"({similarity:.0%} similarity)"
+                        )
+                        continue
+
+                    logger.info(
+                        f"AFL search resolved "
+                        f"'{anime_name}' -> '{slug}'"
+                    )
+
+                    response = retry_resp
+                    anime_url = retry_url
+                    resolved = True
+                    break
+
+            if not resolved:
+                logger.error(
+                    f"Could not resolve a valid AnimeFillerList "
+                    f"page for '{anime_name}'"
+                )
+                return []
+
         if response.status_code != 200:
-            logger.error(f"Failed to fetch data from AnimeFillerList. Status Code: {response.status_code}")
+            logger.error(
+                f"Failed to fetch data from AnimeFillerList. "
+                f"Status Code: {response.status_code}"
+            )
             return []
 
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(response.text, 'html.parser')
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser",
+        )
+
+        # AnimeFillerList currently has some valid-looking /shows/<slug>
+        # URLs that return HTTP 200 but contain data for an entirely
+        # different anime. Never parse episodes from a page whose
+        # identity does not reasonably match the requested show.
+        (
+            valid_identity,
+            page_title,
+            similarity,
+        ) = _validate_afl_page_identity(
+            anime_name,
+            soup,
+        )
+
+        if not valid_identity:
+            logger.error(
+                f"AFL page identity mismatch for "
+                f"'{anime_name}': "
+                f"page reports '{page_title}' "
+                f"({similarity:.0%} similarity). "
+                f"Skipping this show to avoid generating "
+                f"incorrect episode mappings."
+            )
+            return []
+
         filtered_episodes = []
 
         config_data = CONFIG
+
         if config_data is None:
             if trakt_auth:
-                config_data = trakt_auth.load_config() or {}
+                config_data = (
+                    trakt_auth.load_config()
+                    or {}
+                )
             else:
                 config_data = {}
 
-        title_mappings = config_data.get('title_mappings', {}) or {}
-        anime_mapping = title_mappings.get(anime_name, {}) or {}
+        title_mappings = (
+            config_data
+            .get("title_mappings", {})
+            or {}
+        )
 
-        for row in soup.find_all('tr'):
-            columns = row.find_all('td')
-            if len(columns) >= 3:
-                episode_number = columns[0].text.strip()
-                episode_name = columns[1].text.strip()
-                episode_type = columns[2].text.strip()
+        anime_mapping = (
+            title_mappings
+            .get(anime_name, {})
+            or {}
+        )
 
-                if anime_mapping:
-                    remove_patterns = anime_mapping.get('remove_patterns', []) or []
-                    for pattern in remove_patterns:
-                        episode_name = episode_name.replace(pattern, '').strip()
+        for row in soup.find_all("tr"):
+            columns = row.find_all("td")
 
-                    remove_numbers = anime_mapping.get('remove_numbers', []) or []
-                    for number in remove_numbers:
-                        try:
-                            episode_name = episode_name.replace(f'{number:02d}', '').strip()
-                        except:
-                            pass
+            if len(columns) < 3:
+                continue
 
-                    if anime_mapping.get('remove_dashes', False):
-                        episode_name = episode_name.replace('-', '').strip()
+            episode_number = (
+                columns[0]
+                .get_text(" ", strip=True)
+            )
 
-                    special_matches = anime_mapping.get('special_matches', {}) or {}
-                    special_match = special_matches.get(episode_name)
-                    if special_match:
-                        episode_name = special_match
+            episode_name = (
+                columns[1]
+                .get_text(" ", strip=True)
+            )
 
-                if not episode_type_filter or episode_type.lower() == episode_type_filter.lower():
-                    filtered_episodes.append({
-                        'number': episode_number,
-                        'name': episode_name,
-                        'type': episode_type
-                    })
+            episode_type = (
+                columns[2]
+                .get_text(" ", strip=True)
+            )
+
+            if anime_mapping:
+                remove_patterns = (
+                    anime_mapping
+                    .get("remove_patterns", [])
+                    or []
+                )
+
+                for pattern in remove_patterns:
+                    episode_name = (
+                        episode_name
+                        .replace(pattern, "")
+                        .strip()
+                    )
+
+                remove_numbers = (
+                    anime_mapping
+                    .get("remove_numbers", [])
+                    or []
+                )
+
+                for number in remove_numbers:
+                    try:
+                        episode_name = (
+                            episode_name
+                            .replace(
+                                f"{number:02d}",
+                                "",
+                            )
+                            .strip()
+                        )
+                    except Exception:
+                        pass
+
+                if anime_mapping.get(
+                    "remove_dashes",
+                    False,
+                ):
+                    episode_name = (
+                        episode_name
+                        .replace("-", "")
+                        .strip()
+                    )
+
+                special_matches = (
+                    anime_mapping
+                    .get("special_matches", {})
+                    or {}
+                )
+
+                special_match = special_matches.get(
+                    episode_name
+                )
+
+                if special_match:
+                    episode_name = special_match
+
+            if (
+                not episode_type_filter
+                or episode_type.lower()
+                == episode_type_filter.lower()
+            ):
+                filtered_episodes.append(
+                    {
+                        "number": episode_number,
+                        "name": episode_name,
+                        "type": episode_type,
+                    }
+                )
 
         if not silent:
-            logger.info(f"Found {len(filtered_episodes)} episodes matching filter: {episode_type_filter}")
+            logger.info(
+                f"Found {len(filtered_episodes)} episodes "
+                f"matching filter: {episode_type_filter}"
+            )
+
         return filtered_episodes
+
     except Exception as e:
-        logger.error(f"Error fetching episodes: {str(e)}")
+        logger.error(
+            f"Error fetching episodes: {str(e)}"
+        )
         return []
 
 def get_trakt_show_id(access_token, tmdb_id):
