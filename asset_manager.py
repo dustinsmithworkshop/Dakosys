@@ -117,14 +117,12 @@ def setup_fonts(config):
     return False
 
 def sync_anime_episode_collections(config, force_update=False):
-    """Synchronize the anime episode type collections file with actual Trakt lists.
+    """
+    Generate Kometa anime episode-type collections using Plex aired-order
+    numbering instead of Trakt's season/episode numbering.
 
-    Args:
-        config: The application configuration
-        force_update: Whether to force update even if no changes detected
-
-    Returns:
-        bool: True if update was successful, False otherwise
+    Trakt list names are still used to determine which Dakosys anime/type
+    combinations currently exist.
     """
     logger = logging.getLogger("asset_manager")
 
@@ -135,123 +133,232 @@ def sync_anime_episode_collections(config, force_update=False):
 
     trakt_username = config.get('trakt', {}).get('username')
     if not trakt_username:
-        logger.error("Trakt username not found in config - cannot proceed without it")
+        logger.error(
+            "Trakt username not found in config - "
+            "cannot discover Dakosys episode lists"
+        )
         return False
 
     import trakt_auth
+
     access_token = trakt_auth.ensure_trakt_auth(quiet=True)
     if not access_token:
         logger.error("Failed to get Trakt access token")
         return False
 
     headers = trakt_auth.get_trakt_headers(access_token)
+
     trakt_api_url = 'https://api.trakt.tv'
     lists_url = f"{trakt_api_url}/users/me/lists"
 
-    response = requests.get(lists_url, headers=headers, params={"limit": 1000})
+    response = requests.get(
+        lists_url,
+        headers=headers,
+        params={"limit": 1000},
+    )
+
     if response.status_code != 200:
-        logger.error(f"Failed to get Trakt lists. Status: {response.status_code}")
+        logger.error(
+            f"Failed to get Trakt lists. "
+            f"Status: {response.status_code}"
+        )
         return False
 
     trakt_lists = response.json()
 
-    collections_data = {
-        'Fillers': [],
-        'Manga Canon': [],
-        'Anime Canon': [],
-        'Mixed Canon/Filler': []
-    }
-
-    found_lists = set()
+    anime_specs = []
 
     for trakt_list in trakt_lists:
         name = trakt_list.get('name', '')
-        if '_' in name:
-            parts = name.split('_', 1)
-            if len(parts) == 2:
-                anime_name, episode_type = parts
 
-                list_slug = trakt_list.get('ids', {}).get('slug', name)
-                list_url = f"https://trakt.tv/users/{trakt_username}/lists/{list_slug}"
+        if '_' not in name:
+            continue
 
-                if episode_type.lower() == 'filler':
-                    collections_data['Fillers'].append(list_url)
-                    found_lists.add(list_url)
-                elif episode_type.lower() == 'manga-canon':
-                    collections_data['Manga Canon'].append(list_url)
-                    found_lists.add(list_url)
-                elif episode_type.lower() == 'manga canon':
-                    collections_data['Manga Canon'].append(list_url)
-                    found_lists.add(list_url)
-                elif episode_type.lower() == 'anime-canon':
-                    collections_data['Anime Canon'].append(list_url)
-                    found_lists.add(list_url)
-                elif episode_type.lower() == 'anime canon':
-                    collections_data['Anime Canon'].append(list_url)
-                    found_lists.add(list_url)
-                elif episode_type.lower() == 'mixed-canon-filler':
-                    collections_data['Mixed Canon/Filler'].append(list_url)
-                    found_lists.add(list_url)
-                elif episode_type.lower() == 'mixed canon/filler':
-                    collections_data['Mixed Canon/Filler'].append(list_url)
-                    found_lists.add(list_url)
+        anime_name, episode_type = name.split('_', 1)
+        normalized_type = episode_type.lower().strip()
 
-    collections_file = os.path.join(collections_dir, 'anime_episode_type.yml')
-    existing_collections = None
-    changes_detected = force_update 
+        if normalized_type == 'filler':
+            mapped_type = 'filler'
 
-    if os.path.exists(collections_file):
-        try:
-            with open(collections_file, 'r') as file:
-                existing_collections = yaml.safe_load(file) or {'collections': {}}
-        except Exception as e:
-            logger.error(f"Error reading existing collections file: {str(e)}")
-            existing_collections = {'collections': {}}
-    else:
-        existing_collections = {'collections': {}}
+        elif normalized_type in (
+            'manga-canon',
+            'manga canon',
+        ):
+            mapped_type = 'manga'
 
-    if not force_update and existing_collections:
-        for collection_name, collection_data in existing_collections.get('collections', {}).items():
-            existing_lists = set(collection_data.get('trakt_list', []))
-            if collection_name in collections_data:
-                new_lists = set(collections_data[collection_name])
-                if existing_lists != new_lists:
-                    logger.info(f"Changes detected in {collection_name} collection")
-                    changes_detected = True
-                    break
+        elif normalized_type in (
+            'anime-canon',
+            'anime canon',
+        ):
+            mapped_type = 'anime'
 
-    if changes_detected:
-        new_collections = {'collections': {}}
+        elif normalized_type in (
+            'mixed-canon-filler',
+            'mixed canon/filler',
+        ):
+            mapped_type = 'mixed'
 
-        for collection_name, list_urls in collections_data.items():
-            collection_settings = {}
-            if existing_collections and 'collections' in existing_collections and collection_name in existing_collections['collections']:
-                collection_settings = existing_collections['collections'][collection_name].copy()
-                collection_settings['trakt_list'] = list_urls
-            else:
-                collection_settings = {
-                    'trakt_list': list_urls,
-                    'sync_mode': 'sync',
-                    'item_label': collection_name.replace(' Canon/Filler', '').replace(' Canon', 'Canon'),
-                    'builder_level': 'episode',
-                    'cache_builders': 6
-                }
+        else:
+            continue
 
-            new_collections['collections'][collection_name] = collection_settings
+        anime_specs.append({
+            'anime_name': anime_name,
+            'episode_type': mapped_type,
+        })
 
-        try:
-            with open(collections_file, 'w') as file:
-                yaml.dump(new_collections, file, default_flow_style=False, sort_keys=False)
-            
-            create_anime_overlay_files(config)
-            
-            return True
-        except Exception as e:
-            logger.error(f"Error writing collections file: {str(e)}")
+    if not anime_specs:
+        logger.error(
+            "No Dakosys anime episode lists found on Trakt"
+        )
+        return False
+
+    episode_lists_dir = os.path.join(
+        collections_dir,
+        'anime_episode_lists',
+    )
+
+    try:
+        from kometa_episode_mapper import (
+            generate_kometa_episode_files,
+        )
+
+        success, stats = generate_kometa_episode_files(
+            config,
+            anime_specs,
+            episode_lists_dir,
+        )
+
+        if not success:
+            logger.error(
+                "Failed generating Plex-aware Kometa episode files"
+            )
             return False
+
+    except Exception as e:
+        logger.error(
+            f"Error generating Kometa episode files: {str(e)}"
+        )
+        return False
+
+    logger.info(
+        "Plex-aware episode mapping complete: "
+        f"{stats['shows_processed']} shows, "
+        f"{stats['episodes_mapped']} episodes mapped, "
+        f"{stats['episodes_unmapped']} unmapped, "
+        f"{stats['title_warnings']} title warnings"
+    )
+
+    #
+    # Work out how Kometa should reference the generated directory.
+    #
+    # Typical Dakosys path:
+    #
+    #   /kometa/config/collections/anime_episode_lists
+    #
+    # Kometa should receive:
+    #
+    #   config/collections/anime_episode_lists/...
+    #
+    normalized_dir = collections_dir.replace('\\', '/')
+
+    config_marker = '/config/'
+
+    if config_marker in normalized_dir:
+        relative_collections_dir = normalized_dir.split(
+            config_marker,
+            1
+        )[1]
+
+        kometa_episode_dir = (
+            f"config/{relative_collections_dir}/"
+            f"anime_episode_lists"
+        )
     else:
-        logger.info("No changes detected in anime episode collections")
+        logger.warning(
+            f"Could not derive Kometa-relative path from "
+            f"{collections_dir}; using default config/collections"
+        )
+
+        kometa_episode_dir = (
+            "config/collections/anime_episode_lists"
+        )
+
+    collections_data = {
+        'collections': {
+            'Fillers': {
+                'text_file': (
+                    f"{kometa_episode_dir}/filler.txt"
+                ),
+                'sync_mode': 'sync',
+                'item_label': 'Fillers',
+                'builder_level': 'episode',
+                'cache_builders': 6,
+            },
+
+            'Manga Canon': {
+                'text_file': (
+                    f"{kometa_episode_dir}/manga_canon.txt"
+                ),
+                'sync_mode': 'sync',
+                'item_label': 'MangaCanon',
+                'builder_level': 'episode',
+                'cache_builders': 6,
+            },
+
+            'Anime Canon': {
+                'text_file': (
+                    f"{kometa_episode_dir}/anime_canon.txt"
+                ),
+                'sync_mode': 'sync',
+                'item_label': 'AnimeCanon',
+                'builder_level': 'episode',
+                'cache_builders': 6,
+            },
+
+            'Mixed Canon/Filler': {
+                'text_file': (
+                    f"{kometa_episode_dir}/mixed.txt"
+                ),
+                'sync_mode': 'sync',
+                'item_label': 'Mixed',
+                'builder_level': 'episode',
+                'cache_builders': 6,
+            },
+        }
+    }
+
+    collections_file = os.path.join(
+        collections_dir,
+        'anime_episode_type.yml',
+    )
+
+    try:
+        with open(
+            collections_file,
+            'w',
+            encoding='utf-8',
+        ) as file:
+            yaml.dump(
+                collections_data,
+                file,
+                default_flow_style=False,
+                sort_keys=False,
+            )
+
+        logger.info(
+            f"Wrote Plex-aware anime episode collections to "
+            f"{collections_file}"
+        )
+
+        create_anime_overlay_files(config)
+
         return True
+
+    except Exception as e:
+        logger.error(
+            f"Error writing collections file: {str(e)}"
+        )
+        return False
 
 def create_anime_overlay_files(config):
     """Create the overlay files for anime episode types."""
