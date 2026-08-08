@@ -2720,8 +2720,15 @@ def create(anime_name, episode_type, match_by, force_map):
             console.print(f"[red]Error synchronizing collections: {str(e)}[/red]")
             logger.error(f"Error synchronizing collections: {str(e)}")
 
-def smart_create_all(anime_name):
-    """Create lists for all episode types that exist for an anime."""
+def smart_create_all(anime_name, sync_collections=True):
+    """Create lists for all episode types that exist for an anime.
+
+    Args:
+        anime_name: Anime name or AnimeFillerList slug to process.
+        sync_collections: When True, regenerate Kometa episode collections
+                          after processing this anime. Batch update callers can
+                          set this to False and synchronize once after the batch.
+    """
     # Clear the error log at the start
     clear_error_log()
     # All possible episode types
@@ -3034,7 +3041,7 @@ def smart_create_all(anime_name):
         for episode_type in empty_types:
             console.print(f"[yellow]✗ {episode_type}: No episodes found[/yellow]")
 
-    if created_lists:
+    if created_lists and sync_collections:
         try:
             from asset_manager import sync_anime_episode_collections
             console.print("[blue]Synchronizing collections file with Trakt lists...[/blue]")
@@ -3686,13 +3693,29 @@ def run_update(service=None):
             for anime_name in scheduled_anime:
                 try:
                     console.print(f"[blue]Processing {anime_name}...[/blue]")
-                    # Use the smart_create_all function that we know works
-                    smart_create_all(anime_name)
+                    # Defer the expensive full-library Kometa synchronization
+                    # until all scheduled anime have been processed.
+                    smart_create_all(anime_name, sync_collections=False)
                     success_count += 1
                 except Exception as e:
                     console.print(f"[red]Error updating {anime_name}: {str(e)}[/red]")
                     import traceback
                     console.print(traceback.format_exc())
+
+            # A Plex-aware collection sync scans/maps the full anime library, so
+            # run it once per scheduled batch instead of once per anime.
+            try:
+                from asset_manager import sync_anime_episode_collections
+                console.print(
+                    "[blue]Synchronizing collections after scheduled anime updates...[/blue]"
+                )
+                if sync_anime_episode_collections(CONFIG, force_update=True):
+                    console.print("[green]Collections synchronized successfully![/green]")
+                else:
+                    console.print("[yellow]Failed to synchronize collections[/yellow]")
+            except Exception as e:
+                console.print(f"[red]Error synchronizing collections: {str(e)}[/red]")
+                logger.error(f"Error synchronizing collections: {str(e)}")
 
             console.print(f"[green]Successfully updated {success_count} of {len(scheduled_anime)} anime[/green]")
 
