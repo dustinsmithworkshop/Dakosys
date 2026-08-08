@@ -160,7 +160,7 @@ def _special_title_score(left, right):
     # Treat meaningful contained titles as strong evidence while rejecting
     # tiny/generic substrings.
     if (
-        len(shorter) >= 10
+        len(shorter) >= 7
         and len(shorter.split()) >= 2
         and shorter in longer
     ):
