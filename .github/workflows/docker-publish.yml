@@ -4,8 +4,17 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch:
+    paths-ignore:
+      - 'README.md'
 
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+
+  workflow_dispatch:
+    
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: dustinsmithworkshop/dakosys

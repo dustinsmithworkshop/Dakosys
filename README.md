@@ -178,10 +178,22 @@ mkdir -p dakosys/{config,data}
 cd dakosys
 ```
 
-Download `docker-compose.yml`:
+Download `docker-compose.yml` from this fork:
 
 ```bash
-curl -O https://raw.githubusercontent.com/sahara101/dakosys/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/dustinsmithworkshop/Dakosys/main/docker-compose.yml
+```
+
+This fork publishes Docker images to GitHub Container Registry:
+
+```text
+ghcr.io/dustinsmithworkshop/dakosys:latest
+```
+
+If you are adapting an existing DAKOSYS installation from upstream, make sure the `image:` entry in your Docker Compose or Unraid configuration points to:
+
+```yaml
+image: ghcr.io/dustinsmithworkshop/dakosys:latest
 ```
 
 Run the setup wizard:
@@ -197,6 +209,7 @@ docker compose up -d dakosys-updater
 ```
 
 The web dashboard will be available at `http://your-host:3000`.
+
 
 Add the generated YAML files to your Kometa config:
 
@@ -534,9 +547,9 @@ Trakt list 'bleach_mixed canon/filler' created successfully.
 Successfully added: 41 episodes
 
 Created lists:
-  MANGA: 162 episodes - https://trakt.tv/users/sahara/lists/bleach_manga-canon
-  FILLER: 163 episodes - https://trakt.tv/users/sahara/lists/bleach_filler
-  MIXED: 41 episodes - https://trakt.tv/users/sahara/lists/bleach_mixed-canon-filler
+  MANGA: 162 episodes - https://trakt.tv/users/YOUR_USERNAME/lists/bleach_manga-canon
+  FILLER: 163 episodes - https://trakt.tv/users/YOUR_USERNAME/lists/bleach_filler
+  MIXED: 41 episodes - https://trakt.tv/users/YOUR_USERNAME/lists/bleach_mixed-canon-filler
 
 Would you like to add 'Bleach' to the automatic update schedule? [Y/n]: n
 ```
