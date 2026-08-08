@@ -6,16 +6,126 @@ A built-in web dashboard lets you manage configuration, monitor services, browse
 
 ---
 
+## Enhancements in This Fork
+
+This fork includes substantial improvements to anime episode mapping and Kometa integration, with a focus on correctly mapping AnimeFillerList episode data to the episode structure used by Plex.
+
+### Plex-Aware Episode Mapping
+
+AnimeFillerList frequently represents a series as one continuous absolute episode sequence, while Plex may organize the same show across multiple seasons.
+
+DAKOSYS now builds a Plex-aware absolute episode map and converts AnimeFillerList episode numbers into the actual Plex/TVDb season and episode coordinates used by Kometa.
+
+For example, an absolute episode may be converted into a Kometa ID such as:
+
+```text
+tvdb_episode:74796_3_1
+```
+
+This allows episode-type overlays to work correctly across multi-season anime instead of assuming that every episode belongs to season 1.
+
+### Automatic Episode Ordering Detection
+
+DAKOSYS now analyzes the relationship between AnimeFillerList and Plex episode ordering before generating Kometa episode IDs.
+
+Three strategies are supported:
+
+1. **Direct aired-order mapping**
+
+   Used when AnimeFillerList and Plex follow the same episode sequence.
+
+2. **Title-based mapping**
+
+   Used when the same episodes exist in both sources but are intentionally arranged in a different order.
+
+3. **Fail-closed rejection**
+
+   Used when the two episode schemes differ too much to map safely.
+
+DAKOSYS favors skipping a questionable show over generating incorrect Kometa episode IDs.
+
+### Translation-Aware Matching
+
+Different metadata providers sometimes use substantially different English translations for the same episode title.
+
+Low title similarity alone is therefore no longer treated as proof that episode ordering differs.
+
+DAKOSYS checks whether mismatched titles strongly correspond to episodes at different Plex positions:
+
+* Few or no off-position matches usually indicate translation or naming differences, so direct episode numbering is retained.
+* A significant number of strong off-position matches indicates that the show is actually reordered, allowing title-based mapping to take over.
+
+This allows shows with alternate English titles to remain correctly mapped without requiring manual episode mappings.
+
+### Reordered Series Support
+
+Some series use substantially different broadcast, production, DVD, or metadata-provider episode orders.
+
+When DAKOSYS detects strong evidence that episodes exist at different positions, it can build a one-to-one title-based mapping between AnimeFillerList and Plex.
+
+Exact normalized-title matches are preferred before fuzzy matching.
+
+Multipart episode names are normalized so equivalent forms such as:
+
+```text
+Endless Eight II
+Endless Eight (2)
+```
+
+can be recognized as the same episode.
+
+### Conservative Sequence Realignment
+
+DAKOSYS can detect cases where an episode exists in AnimeFillerList but is absent from Plex's regular aired-order sequence, or vice versa.
+
+A sequence offset is only applied after multiple subsequent episodes confirm the realignment.
+
+This prevents a single title mismatch from shifting every remaining episode in a series.
+
+### AnimeFillerList Page Validation
+
+AnimeFillerList can occasionally return an unrelated show's page for a valid-looking URL.
+
+DAKOSYS now validates the identity of the returned AnimeFillerList page before accepting episode data.
+
+If the page does not sufficiently match the requested anime, the show is skipped rather than generating lists from incorrect episode data.
+
+### Mapping Diagnostics
+
+Episode generation now reports how each show was handled, including:
+
+* Direct Plex aired-order mapping
+* Title-based episode mapping
+* Ordering incompatibility
+* Confirmed sequence realignments
+* AnimeFillerList-only episodes
+* Unmapped episodes
+* Title mismatches
+* Mapping confidence
+
+These diagnostics make it easier to identify metadata-provider differences without silently producing incorrect overlays.
+
+---
+
 ## Features
 
 ### Anime Episode Type Tracker
 
 Trakt VIP required.
 
-Creates Trakt lists and Kometa overlays categorizing anime episodes by type: filler, manga canon, anime canon, and mixed. Supports automatic scheduling and custom title mappings for episodes that differ between AnimeFillerList and Trakt.
+Creates Trakt lists and Kometa overlays categorizing anime episodes by type: filler, manga canon, anime canon, and mixed.
 
-<img width="1406" height="326" alt="image" src="https://github.com/user-attachments/assets/5d90e452-173c-4665-b020-add2625ed261" />
-<img width="1406" height="326" alt="image" src="https://github.com/user-attachments/assets/5d90e452-173c-4665-b020-add2625ed261" />
+Supports:
+
+* Automatic scheduling
+* Custom anime title mappings
+* Custom episode title mappings
+* Plex-aware multi-season episode mapping
+* Automatic episode ordering detection
+* Title-based fallback for reordered series
+* Translation-aware title comparison
+* Conservative episode sequence realignment
+* AnimeFillerList page validation
 
 ### TV / Anime Status Tracker
 
@@ -23,32 +133,25 @@ No Trakt VIP required (uses one list).
 
 Creates overlays showing the airing status of TV shows and anime: currently airing, ended, cancelled, returning, season finale, mid-season finale, final episode, and season premiere. Displays upcoming air dates. Generates a Trakt list of shows with upcoming episodes.
 
-<img width="1391" height="876" alt="image" src="https://github.com/user-attachments/assets/ce2e31fe-aeee-467f-b498-6ea36ac0139b" />
-
 ### Size Overlay
 
 No Trakt required.
 
 Creates overlays showing file sizes for movies and TV shows. Tracks size changes over time and optionally displays episode counts.
 
-<img width="1381" height="371" alt="image" src="https://github.com/user-attachments/assets/829cd5b1-2d67-456b-b41a-4a930b7a2b9a" />
-<img width="1381" height="371" alt="image" src="https://github.com/user-attachments/assets/829cd5b1-2d67-456b-b41a-4a930b7a2b9a" />
-
-
 ### Web Dashboard
 
 A web UI accessible at `http://your-host:3000`.
 
 Features:
-- Dashboard with service status, next scheduled runs, and media stats
-- Configuration editor with built-in config reference documenting all options
-- Log viewer for all services
-- Anime management: add anime, view Trakt lists, resolve mapping errors
-- TV status browser and Next Airing list with posters
-- Library size browser
-- Setup wizard for first-time configuration
 
-<img width="1728" height="993" alt="image" src="https://github.com/user-attachments/assets/03af3c98-39f2-4121-99e2-74390d90f87b" />
+* Dashboard with service status, next scheduled runs, and media stats
+* Configuration editor with built-in config reference documenting all options
+* Log viewer for all services
+* Anime management: add anime, view Trakt lists, resolve mapping errors
+* TV status browser and Next Airing list with posters
+* Library size browser
+* Setup wizard for first-time configuration
 
 ### Notifications
 
@@ -58,11 +161,11 @@ Discord webhook integration.
 
 ## Requirements
 
-- Plex Media Server
-- Trakt.tv account and API application
-- TMDB API for UI posters
-- Docker
-- Kometa / Plex Meta Manager
+* Plex Media Server
+* Trakt.tv account and API application
+* TMDB API for UI posters
+* Docker
+* Kometa / Plex Meta Manager
 
 ---
 
@@ -70,26 +173,26 @@ Discord webhook integration.
 
 Create the directory structure:
 
-```
+```bash
 mkdir -p dakosys/{config,data}
 cd dakosys
 ```
 
-Download docker-compose.yml:
+Download `docker-compose.yml`:
 
-```
+```bash
 curl -O https://raw.githubusercontent.com/sahara101/dakosys/main/docker-compose.yml
 ```
 
 Run the setup wizard:
 
-```
+```bash
 docker compose run --rm dakosys setup
 ```
 
 Start the daemon:
 
-```
+```bash
 docker compose up -d dakosys-updater
 ```
 
@@ -123,94 +226,139 @@ Anime:
 
 ## Service Notes
 
-**Anime Episode Type Tracker** requires Trakt VIP because it creates multiple lists (one per episode type per anime). Episode ordering in Plex must match TMDB ordering — for some shows like One Piece this requires manual adjustment.
+### Anime Episode Type Tracker
 
-**TV / Anime Status Tracker** and **Size Overlay** are set-and-forget once configured.
+The Anime Episode Type Tracker requires Trakt VIP because it creates multiple lists — one per episode type per anime.
+
+AnimeFillerList uses absolute episode numbering, while Plex may divide the same series into multiple aired-order seasons. DAKOSYS automatically converts absolute episode numbers into Plex/TVDb season and episode coordinates before generating Kometa collections.
+
+DAKOSYS also checks whether the AnimeFillerList sequence corresponds to Plex's aired order.
+
+If episode titles differ because of translation or metadata-provider naming differences but there is no strong evidence of reordering, Plex numbering is retained.
+
+If strong evidence of a different episode order is found, DAKOSYS attempts a one-to-one title-based mapping.
+
+If a sufficiently reliable mapping cannot be constructed, the show is skipped rather than generating potentially incorrect Kometa episode IDs.
+
+Individual episodes that cannot be safely mapped are reported in the logs.
+
+### TV / Anime Status Tracker
+
+The TV / Anime Status Tracker uses a single Trakt list and does not require Trakt VIP.
+
+Once configured, scheduled updates can run automatically.
+
+### Size Overlay
+
+The Size Overlay does not require Trakt.
+
+Once configured, scheduled updates can run automatically.
 
 ---
 
 ## Manual Commands
 
-You can always run `docker compose run --rm dakosys --help` to list all commands, and `--help` on any command for usage details.
+You can always run:
+
+```bash
+docker compose run --rm dakosys --help
+```
+
+to list all commands, and `--help` on any command for usage details.
 
 ### Anime Episode Type
 
 Create all list types for an anime:
-```
+
+```bash
 docker compose run --rm dakosys create-all "One-Piece"
 ```
 
 Create a specific list type:
-```
+
+```bash
 docker compose run --rm dakosys create-list "Naruto-Shippuden" FILLER
 ```
 
 Fix mapping errors for episodes:
-```
+
+```bash
 docker compose run --rm dakosys fix-mappings
 ```
 
 List all available anime on AnimeFillerList:
-```
+
+```bash
 docker compose run --rm dakosys list-anime
 ```
 
 Show all episodes and their types:
-```
+
+```bash
 docker compose run --rm dakosys show-episodes "Demon Slayer Kimetsu No Yaiba"
 ```
 
 Delete a list:
-```
+
+```bash
 docker compose run --rm dakosys delete-list bleach FILLER
 ```
 
 Delete multiple lists at once:
-```
+
+```bash
 docker compose run --rm dakosys list-lists --format plain --anime "One Punch Man" | xargs -n2 docker compose run --rm --no-TTY dakosys delete-piped --force
 ```
 
 ### Scheduled Updates
 
 Add an anime to the automatic update schedule:
-```
+
+```bash
 docker compose run --rm dakosys schedule add "Jujutsu Kaisen"
 ```
 
 Remove an anime from the schedule:
-```
+
+```bash
 docker compose run --rm dakosys schedule remove "Dragon Ball"
 ```
 
 List all scheduled anime:
-```
+
+```bash
 docker compose run --rm dakosys schedule list
 ```
 
 Run an immediate update of all services:
-```
+
+```bash
 docker compose run --rm dakosys run-update all
 ```
 
 Run an immediate update of a specific service:
-```
+
+```bash
 docker compose run --rm dakosys run-update tv_status_tracker
 ```
 
 ### List Management
 
 List all Trakt lists created by DAKOSYS:
-```
+
+```bash
 docker compose run --rm dakosys list-lists
 ```
 
 List Trakt lists for a specific anime:
-```
+
+```bash
 docker compose run --rm dakosys list-lists --anime "Attack on Titan"
 ```
 
 Sync the Kometa collections file with current Trakt lists:
-```
+
+```bash
 docker compose run --rm dakosys sync-collections
 ```
 
@@ -238,14 +386,14 @@ scheduler:
 
 Schedule types:
 
-| Type | Fields |
-|------|--------|
-| `daily` | `times: ["HH:MM", ...]` |
-| `hourly` | `minute: N` |
-| `weekly` | `days: ["monday", ...]`, `time: "HH:MM"` |
-| `monthly` | `dates: [1, 15]`, `time: "HH:MM"` |
-| `cron` | `expression: "0 3 * * *"` |
-| `run` | Runs once at startup only |
+| Type      | Fields                                   |
+| --------- | ---------------------------------------- |
+| `daily`   | `times: ["HH:MM", ...]`                  |
+| `hourly`  | `minute: N`                              |
+| `weekly`  | `days: ["monday", ...]`, `time: "HH:MM"` |
+| `monthly` | `dates: [1, 15]`, `time: "HH:MM"`        |
+| `cron`    | `expression: "0 3 * * *"`                |
+| `run`     | Runs once at startup only                |
 
 ---
 
@@ -283,7 +431,8 @@ notifications:
 ```
 
 Test notifications:
-```
+
+```bash
 docker compose run --rm dakosys test-notification
 ```
 
@@ -293,35 +442,63 @@ docker compose run --rm dakosys test-notification
 
 Service logs are written to the `data/` directory:
 
-- `data/anime_trakt_manager.log`
-- `data/tv_status_tracker.log`
-- `data/size_overlay.log`
-- `data/notifications.log`
-- `data/auto_update.log`
-- `data/scheduler.log`
-- `data/failed_episodes.log`
+* `data/anime_trakt_manager.log`
+* `data/tv_status_tracker.log`
+* `data/size_overlay.log`
+* `data/notifications.log`
+* `data/auto_update.log`
+* `data/scheduler.log`
+* `data/failed_episodes.log`
 
 View container logs:
-```
+
+```bash
 docker compose logs -f dakosys-updater
 ```
+
+For Plex-aware episode mapping, the logs also report whether a show used direct aired-order mapping, title-based mapping, sequence realignment, or was rejected because a safe mapping could not be established.
 
 ---
 
 ## Troubleshooting
 
-**Missing episodes in lists** — use the mapping fix tool:
-```
+### Missing episodes in lists
+
+Use the mapping fix tool:
+
+```bash
 docker compose run --rm dakosys fix-mappings
 ```
 
-**Test scheduler configuration:**
-```
+### Anime exists in AnimeFillerList but not Plex
+
+DAKOSYS will skip an anime that is scheduled but cannot be found in the configured Plex anime libraries.
+
+Check your anime title mapping if the Plex title differs from the AnimeFillerList title.
+
+Do not map an AnimeFillerList entry to an unrelated Plex show simply to suppress the warning.
+
+### AnimeFillerList page rejected
+
+DAKOSYS validates that the AnimeFillerList page returned for a show actually belongs to the requested anime.
+
+If AnimeFillerList returns an unrelated page, DAKOSYS will reject it and log an identity mismatch rather than generating incorrect episode data.
+
+### Episode ordering rejected
+
+If DAKOSYS reports that episode ordering is incompatible with Plex aired order, it found evidence that the AnimeFillerList and Plex sequences differ and could not construct a sufficiently reliable title-based mapping.
+
+The show is skipped intentionally to prevent incorrect Kometa episode IDs.
+
+### Test scheduler configuration
+
+```bash
 docker compose run --rm dakosys test-scheduler
 ```
 
-**Run setup for a single service:**
-```
+### Run setup for a single service
+
+```bash
 docker compose run --rm dakosys setup anime_episode_type
 docker compose run --rm dakosys setup tv_status_tracker
 docker compose run --rm dakosys setup size_overlay
@@ -331,7 +508,7 @@ docker compose run --rm dakosys setup size_overlay
 
 ## Example: create-all output
 
-```
+```text
 docker compose run --rm dakosys create-all "Bleach"
 Connecting to Plex server...
 Connected to Plex server successfully!
