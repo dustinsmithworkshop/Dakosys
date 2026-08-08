@@ -89,6 +89,8 @@ def load_config():
                 CONFIG['trakt_mappings'] = all_mappings['trakt_mappings']
             if 'title_mappings' in all_mappings:
                 CONFIG['title_mappings'] = all_mappings['title_mappings']
+            if 'tvdb_mappings' in all_mappings:
+                CONFIG['tvdb_mappings'] = all_mappings['tvdb_mappings']
                 
         except Exception as e:
             logger.warning(f"Could not load mappings from mappings.yaml: {str(e)}")
@@ -116,6 +118,8 @@ def reload_config():
                 CONFIG['trakt_mappings'] = all_mappings['trakt_mappings']
             if 'title_mappings' in all_mappings:
                 CONFIG['title_mappings'] = all_mappings['title_mappings']
+            if 'tvdb_mappings' in all_mappings:
+                CONFIG['tvdb_mappings'] = all_mappings['tvdb_mappings']
                 
         except Exception as e:
             logger.warning(f"Could not load mappings from mappings.yaml: {str(e)}")
@@ -152,32 +156,35 @@ def get_anime_libraries(plex):
     return libraries
 
 def get_tmdb_id_from_plex(plex, anime_name):
-    """Get TMDB ID for a show from Plex."""
+    """Get TMDB ID for the Plex show resolved for an anime."""
     try:
-        mapped_anime_name = CONFIG.get('mappings', {}).get(anime_name.lower(), anime_name)
+        show = get_plex_anime_show(plex, anime_name)
+        if not show:
+            return None
 
-        console.print(f"[blue]Looking for '{mapped_anime_name}' in Plex libraries...[/blue]")
+        console.print(f"[blue]Looking for TMDB ID on Plex show '{show.title}'...[/blue]")
 
-        libraries = get_anime_libraries(plex)
-        for anime_library in libraries:
-            for show in anime_library.all():
-                if show.title.lower() == mapped_anime_name.lower():
-                    for guid in show.guids:
-                        if 'tmdb://' in guid.id:
-                            tmdb_id = guid.id.split('//')[1]
-                            console.print(f"[green]Found TMDB ID: {tmdb_id}[/green]")
-                            return tmdb_id
+        for guid in getattr(show, 'guids', []):
+            if guid.id.startswith('tmdb://'):
+                tmdb_id = guid.id.split('//', 1)[1]
+                console.print(f"[green]Found TMDB ID: {tmdb_id}[/green]")
+                return tmdb_id
 
-        console.print(f"[yellow]Could not find TMDB ID for '{mapped_anime_name}' in any Plex library.[/yellow]")
+        console.print(
+            f"[yellow]Could not find TMDB ID for resolved Plex show "
+            f"'{show.title}'.[/yellow]"
+        )
         return None
     except Exception as e:
         console.print(f"[bold red]Error getting TMDB ID: {str(e)}[/bold red]")
         return None
 
 def get_plex_anime_show(plex, anime_name):
-    """Find a Plex anime show using Dakosys mappings."""
+    """Find a Plex anime show using TVDb overrides or title mappings."""
     try:
+        anime_key = anime_name.lower()
         mapped_anime_name = None
+        tvdb_override = None
 
         # Production Dakosys stores mappings separately from config.yaml.
         try:
@@ -188,7 +195,12 @@ def get_plex_anime_show(plex, anime_name):
             mapped_anime_name = (
                 mappings_data
                 .get("mappings", {})
-                .get(anime_name.lower())
+                .get(anime_key)
+            )
+            tvdb_override = (
+                mappings_data
+                .get("tvdb_mappings", {})
+                .get(anime_key)
             )
 
         except Exception as e:
@@ -202,12 +214,41 @@ def get_plex_anime_show(plex, anime_name):
                 CONFIG
                 .get("mappings", {})
                 .get(
-                    anime_name.lower(),
+                    anime_key,
                     anime_name,
                 )
             )
 
+        if tvdb_override is None:
+            tvdb_override = (
+                CONFIG
+                .get("tvdb_mappings", {})
+                .get(anime_key)
+            )
+
         libraries = get_anime_libraries(plex)
+
+        # An explicit TVDb mapping is authoritative. This avoids choosing the
+        # wrong adaptation when Plex contains multiple shows with the same title.
+        if tvdb_override is not None:
+            expected_tvdb = str(tvdb_override).strip()
+
+            for anime_library in libraries:
+                for show in anime_library.all():
+                    for guid in getattr(show, 'guids', []):
+                        if guid.id == f"tvdb://{expected_tvdb}":
+                            logger.info(
+                                f"Resolved '{anime_name}' by TVDb override "
+                                f"{expected_tvdb} -> '{show.title}'"
+                            )
+                            return show
+
+            console.print(
+                f"[yellow]WARNING: TVDb override {expected_tvdb} for "
+                f"'{anime_name}' did not match any configured Plex anime "
+                f"library show; refusing title fallback[/yellow]"
+            )
+            return None
 
         for anime_library in libraries:
             for show in anime_library.all():
