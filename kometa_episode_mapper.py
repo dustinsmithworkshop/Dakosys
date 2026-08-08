@@ -558,6 +558,8 @@ def _build_episode_number_map(
                         "plex_special": plex_special,
                         "score": special_score,
                         "new_offset": offset,
+                        "sequence_shift_confirmed": False,
+                        "confirmation_scores": [],
                     }
                 )
                 continue
@@ -601,12 +603,32 @@ def _build_episode_number_map(
         if plex_special:
             lookup[clean_number] = plex_special
 
-            # A positive AFL number that collides with a regular Plex
-            # position consumed one slot in the AFL absolute sequence. Shift
-            # subsequent regular-episode lookup back by one. Episode 0
-            # specials never reach this branch because Plex absolute 0 is not
-            # part of the regular map.
-            offset -= 1
+            # A Season 0 match does not, by itself, prove that the special
+            # consumes a position in AFL's regular absolute sequence.
+            #
+            # Appended OVAs are common: AFL may continue numbering them after
+            # the TV run while Plex keeps the final regular episode at that
+            # same absolute number. Automatically changing the offset here
+            # would make the next AFL special collide with the last regular
+            # episode.
+            #
+            # Shift only when several following AFL episodes prove that,
+            # after skipping this special, regular numbering resumes one
+            # position earlier in Plex.
+            (
+                confirmed_special_shift,
+                confirmation_scores,
+            ) = _confirm_afl_extra_sequence(
+                sorted_afl,
+                index,
+                episode_map,
+                plex_absolute,
+                threshold=structural_threshold,
+                confirmations=realignment_confirmations,
+            )
+
+            if confirmed_special_shift:
+                offset -= 1
 
             warnings.append(
                 {
@@ -615,6 +637,10 @@ def _build_episode_number_map(
                     "plex_special": plex_special,
                     "score": special_score,
                     "new_offset": offset,
+                    "sequence_shift_confirmed": (
+                        confirmed_special_shift
+                    ),
+                    "confirmation_scores": confirmation_scores,
                 }
             )
             continue
@@ -1260,6 +1286,21 @@ def _log_mapping_warnings(
             afl_episode = warning["afl_episode"]
             plex_special = warning["plex_special"]
 
+            shift_confirmed = warning.get(
+                "sequence_shift_confirmed",
+                False,
+            )
+
+            scores = warning.get(
+                "confirmation_scores",
+                [],
+            )
+
+            score_text = ", ".join(
+                f"{score:.0%}"
+                for score in scores
+            )
+
             logger.warning(
                 f"{anime_name}: AFL episode "
                 f"{afl_episode.get('number')} "
@@ -1267,9 +1308,25 @@ def _log_mapping_warnings(
                 f"S00E{plex_special['episode']:02d} "
                 f"'{plex_special.get('title')}' "
                 f"({warning['score']:.0%}); using Season 0 mapping"
+                + (
+                    f"; {len(scores)} subsequent regular episode "
+                    f"matches confirmed sequence shift"
+                    + (
+                        f" ({score_text})"
+                        if score_text
+                        else ""
+                    )
+                    + f"; subsequent mapping offset is "
+                    f"{warning['new_offset']}"
+                    if shift_confirmed
+                    else ""
+                )
             )
 
             stats["special_episodes_mapped"] += 1
+
+            if shift_confirmed:
+                stats["sequence_realignments"] += 1
 
         elif warning_type == "title_mismatch":
             afl_episode = warning["afl_episode"]
