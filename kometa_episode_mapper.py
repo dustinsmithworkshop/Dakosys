@@ -118,6 +118,147 @@ def _title_similarity(left, right):
         right_normalized,
     ).ratio()
 
+
+def _normalize_special_match_title(value):
+    """Normalize titles for conservative Plex-special matching."""
+    normalized = _normalize_episode_match_title(value)
+
+    # The generic mapper normalization intentionally canonicalizes trailing
+    # numbers as "part N". If the source already contained the word
+    # "part", that can yield "part part N". Collapse that only for
+    # special-title matching so existing regular-episode behavior is unchanged.
+    while "part part " in normalized:
+        normalized = normalized.replace(
+            "part part ",
+            "part ",
+        )
+
+    return normalized
+
+
+def _special_title_score(left, right):
+    """Return a conservative similarity score for an AFL/Plex special pair."""
+    left_normalized = _normalize_special_match_title(left)
+    right_normalized = _normalize_special_match_title(right)
+
+    if not left_normalized or not right_normalized:
+        return 0.0
+
+    if left_normalized == right_normalized:
+        return 1.0
+
+    shorter, longer = sorted(
+        (left_normalized, right_normalized),
+        key=len,
+    )
+
+    # Plex special titles often prepend an OVA/movie label, for example:
+    #
+    #   AFL:  The Lost Cat
+    #   Plex: Trust & Betrayal: Act 2 - The Lost Cat
+    #
+    # Treat meaningful contained titles as strong evidence while rejecting
+    # tiny/generic substrings.
+    if (
+        len(shorter) >= 10
+        and len(shorter.split()) >= 2
+        and shorter in longer
+    ):
+        return 1.0
+
+    return difflib.SequenceMatcher(
+        None,
+        left_normalized,
+        right_normalized,
+    ).ratio()
+
+
+def _build_plex_special_episode_map(show):
+    """Return Plex Season 0 episodes keyed by their season episode number."""
+    special_map = {}
+
+    try:
+        special_season = None
+
+        for season in show.seasons():
+            if int(season.index) == 0:
+                special_season = season
+                break
+
+        if special_season is None:
+            return special_map
+
+        for episode in sorted(
+            special_season.episodes(),
+            key=lambda item: item.index,
+        ):
+            special_map[str(episode.index)] = {
+                "season": 0,
+                "episode": episode.index,
+                "title": episode.title,
+                "rating_key": episode.ratingKey,
+            }
+
+    except Exception as e:
+        logger.debug(
+            f"Could not inspect Plex specials for "
+            f"'{getattr(show, 'title', 'unknown')}': {e}"
+        )
+
+    return special_map
+
+
+def _find_matching_plex_special(
+    title,
+    special_episode_map,
+    threshold=0.80,
+    ambiguity_margin=0.05,
+):
+    """Find one confident Plex Season 0 match for an AFL episode title."""
+    if not special_episode_map:
+        return None, 0.0
+
+    candidates = []
+
+    for special_episode in special_episode_map.values():
+        score = _special_title_score(
+            title,
+            special_episode.get("title"),
+        )
+
+        candidates.append(
+            (score, special_episode)
+        )
+
+    candidates.sort(
+        key=lambda item: item[0],
+        reverse=True,
+    )
+
+    if not candidates:
+        return None, 0.0
+
+    best_score, best_episode = candidates[0]
+
+    if best_score < threshold:
+        return None, best_score
+
+    second_score = (
+        candidates[1][0]
+        if len(candidates) > 1
+        else 0.0
+    )
+
+    # If multiple specials are equally plausible, fail closed rather than
+    # assigning an overlay to an arbitrary Season 0 episode.
+    if (
+        second_score >= threshold
+        and best_score - second_score < ambiguity_margin
+    ):
+        return None, best_score
+
+    return best_episode, best_score
+
 def _afl_episode_number(episode):
     """Return an AFL episode number as int, or None."""
     clean_number = _clean_episode_number(
@@ -334,9 +475,11 @@ def _confirm_plex_extra_sequence(
 def _build_episode_number_map(
     all_afl_episodes,
     episode_map,
+    special_episode_map=None,
     title_match_threshold=0.65,
     realignment_match_threshold=0.80,
     realignment_confirmations=3,
+    special_match_threshold=0.80,
 ):
     """
     Build an AFL absolute-number -> Plex episode mapping.
@@ -355,6 +498,7 @@ def _build_episode_number_map(
     lookup = {}
     warnings = []
     offset = 0
+    special_episode_map = special_episode_map or {}
 
     # Structural sequence changes should require stronger evidence
     # than ordinary title-warning suppression.
@@ -395,6 +539,29 @@ def _build_episode_number_map(
         )
 
         if not plex_episode:
+            (
+                plex_special,
+                special_score,
+            ) = _find_matching_plex_special(
+                afl_episode.get("name"),
+                special_episode_map,
+                threshold=special_match_threshold,
+            )
+
+            if plex_special:
+                lookup[clean_number] = plex_special
+
+                warnings.append(
+                    {
+                        "type": "plex_special",
+                        "afl_episode": afl_episode,
+                        "plex_special": plex_special,
+                        "score": special_score,
+                        "new_offset": offset,
+                    }
+                )
+                continue
+
             lookup[clean_number] = None
 
             warnings.append(
@@ -413,6 +580,43 @@ def _build_episode_number_map(
 
         if similarity >= title_match_threshold:
             lookup[clean_number] = plex_episode
+            continue
+
+        #
+        # Before treating a weak regular-episode title match as translation
+        # variation or structural reordering, check whether AFL is actually
+        # describing a Plex Season 0 item. This prevents an appended OVA from
+        # being silently assigned to the last regular episode merely because
+        # their absolute numbers collide.
+        #
+        (
+            plex_special,
+            special_score,
+        ) = _find_matching_plex_special(
+            afl_episode.get("name"),
+            special_episode_map,
+            threshold=special_match_threshold,
+        )
+
+        if plex_special:
+            lookup[clean_number] = plex_special
+
+            # A positive AFL number that collides with a regular Plex
+            # position consumed one slot in the AFL absolute sequence. Shift
+            # subsequent regular-episode lookup back by one. Episode 0
+            # specials never reach this branch because Plex absolute 0 is not
+            # part of the regular map.
+            offset -= 1
+
+            warnings.append(
+                {
+                    "type": "plex_special",
+                    "afl_episode": afl_episode,
+                    "plex_special": plex_special,
+                    "score": special_score,
+                    "new_offset": offset,
+                }
+            )
             continue
 
         #
@@ -1052,6 +1256,21 @@ def _log_mapping_warnings(
 
             stats["sequence_realignments"] += 1
 
+        elif warning_type == "plex_special":
+            afl_episode = warning["afl_episode"]
+            plex_special = warning["plex_special"]
+
+            logger.warning(
+                f"{anime_name}: AFL episode "
+                f"{afl_episode.get('number')} "
+                f"'{afl_episode.get('name')}' matched Plex special "
+                f"S00E{plex_special['episode']:02d} "
+                f"'{plex_special.get('title')}' "
+                f"({warning['score']:.0%}); using Season 0 mapping"
+            )
+
+            stats["special_episodes_mapped"] += 1
+
         elif warning_type == "title_mismatch":
             afl_episode = warning["afl_episode"]
             plex_episode = warning["plex_episode"]
@@ -1150,6 +1369,7 @@ def generate_kometa_episode_files(
         "title_warnings": 0,
         "sequence_realignments": 0,
         "afl_only_episodes": 0,
+        "special_episodes_mapped": 0,
         "direct_order_shows": 0,
         "title_mapped_shows": 0,
         "ordering_rejected_shows": 0,
@@ -1241,6 +1461,16 @@ def generate_kometa_episode_files(
             f"regular Plex episodes"
         )
 
+        special_episode_map = (
+            _build_plex_special_episode_map(show)
+        )
+
+        if special_episode_map:
+            logger.debug(
+                f"{anime_name}: {len(special_episode_map)} Plex "
+                f"Season 0 episodes available for title matching"
+            )
+
         #
         # Build the most complete AFL chronological sequence available.
         #
@@ -1299,15 +1529,34 @@ def generate_kometa_episode_files(
             _build_episode_number_map(
                 all_afl_episodes,
                 episode_map,
+                special_episode_map=(
+                    special_episode_map
+                ),
                 title_match_threshold=(
                     title_warning_threshold
                 ),
             )
         )
 
+        special_afl_numbers = {
+            _clean_episode_number(
+                warning["afl_episode"].get("number")
+            )
+            for warning in mapping_warnings
+            if warning.get("type") == "plex_special"
+        }
+
+        regular_afl_episodes = [
+            episode
+            for episode in all_afl_episodes
+            if _clean_episode_number(
+                episode.get("number")
+            ) not in special_afl_numbers
+        ]
+
         ordering_confidence = (
             _assess_lookup_confidence(
-                all_afl_episodes,
+                regular_afl_episodes,
                 number_lookup,
                 threshold=title_warning_threshold,
             )
@@ -1341,7 +1590,7 @@ def generate_kometa_episode_files(
 
         else:
             reorder_evidence = _assess_off_position_evidence(
-                all_afl_episodes,
+                regular_afl_episodes,
                 episode_map,
                 strong_threshold=0.80,
             )
@@ -1393,11 +1642,21 @@ def generate_kometa_episode_files(
                     title_mapping_warnings,
                     title_mapping_stats,
                 ) = _build_title_based_episode_map(
-                    all_afl_episodes,
+                    regular_afl_episodes,
                     episode_map,
                     title_match_threshold=0.80,
                     ambiguity_margin=0.08,
                 )
+
+                for special_number in special_afl_numbers:
+                    special_episode = number_lookup.get(
+                        special_number
+                    )
+
+                    if special_episode:
+                        title_lookup[special_number] = (
+                            special_episode
+                        )
 
                 if (
                     title_mapping_stats["coverage"]
@@ -1416,6 +1675,16 @@ def generate_kometa_episode_files(
                     _log_title_mapping_warnings(
                         anime_name,
                         title_mapping_warnings,
+                    )
+
+                    _log_mapping_warnings(
+                        anime_name,
+                        [
+                            warning
+                            for warning in mapping_warnings
+                            if warning.get("type") == "plex_special"
+                        ],
+                        stats,
                     )
 
                     stats["title_mapped_shows"] += 1
