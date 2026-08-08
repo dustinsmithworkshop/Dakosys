@@ -37,13 +37,73 @@ def _clean_episode_number(value):
     return match.group(0) if match else None
 
 
-def _title_similarity(left, right):
-    """Compare AFL and Plex titles using Dakosys title normalization."""
-    left_normalized = anime_trakt_manager.normalize_episode_title(
-        left or ""
+_ROMAN_PARTS = {
+    "i": 1,
+    "ii": 2,
+    "iii": 3,
+    "iv": 4,
+    "v": 5,
+    "vi": 6,
+    "vii": 7,
+    "viii": 8,
+    "ix": 9,
+    "x": 10,
+}
+
+
+def _normalize_episode_match_title(value):
+    """
+    Normalize an episode title for mapper-local title comparison.
+
+    Dakosys already performs the general title cleanup. This additional
+    mapper-only layer canonicalizes a trailing Roman or Arabic part number:
+
+        Endless Eight II
+        Endless Eight (2)
+
+    both become:
+
+        endless 8 part 2
+
+    Keeping this logic local avoids changing title behavior elsewhere in
+    Dakosys.
+    """
+    normalized = anime_trakt_manager.normalize_episode_title(
+        value or ""
     )
-    right_normalized = anime_trakt_manager.normalize_episode_title(
-        right or ""
+
+    if not normalized:
+        return ""
+
+    parts = normalized.split()
+
+    if not parts:
+        return normalized
+
+    last = parts[-1]
+
+    if last in _ROMAN_PARTS:
+        parts[-1:] = [
+            "part",
+            str(_ROMAN_PARTS[last]),
+        ]
+
+    elif last.isdigit():
+        parts[-1:] = [
+            "part",
+            last,
+        ]
+
+    return " ".join(parts)
+
+
+def _title_similarity(left, right):
+    """Compare AFL and Plex titles using mapper-aware normalization."""
+    left_normalized = _normalize_episode_match_title(
+        left
+    )
+    right_normalized = _normalize_episode_match_title(
+        right
     )
 
     if not left_normalized or not right_normalized:
@@ -58,33 +118,250 @@ def _title_similarity(left, right):
         right_normalized,
     ).ratio()
 
+def _afl_episode_number(episode):
+    """Return an AFL episode number as int, or None."""
+    clean_number = _clean_episode_number(
+        episode.get("number")
+    )
+
+    if not clean_number:
+        return None
+
+    try:
+        return int(clean_number)
+    except (TypeError, ValueError):
+        return None
+
+
+def _title_exists_elsewhere_in_plex(
+    title,
+    episode_map,
+    excluded_absolute=None,
+    threshold=0.80,
+):
+    """
+    Return True if a title has a strong match somewhere else
+    in the Plex regular-episode sequence.
+
+    This prevents a reordered episode from being mistaken for
+    an AFL-only episode.
+    """
+    for absolute_string, plex_episode in episode_map.items():
+        try:
+            absolute_number = int(absolute_string)
+        except (TypeError, ValueError):
+            continue
+
+        if (
+            excluded_absolute is not None
+            and absolute_number == excluded_absolute
+        ):
+            continue
+
+        score = _title_similarity(
+            title,
+            plex_episode.get("title"),
+        )
+
+        if score >= threshold:
+            return True
+
+    return False
+
+
+def _title_exists_elsewhere_in_afl(
+    title,
+    sorted_afl,
+    excluded_index=None,
+    threshold=0.80,
+):
+    """
+    Return True if a Plex title has a strong match somewhere else
+    in the AFL sequence.
+
+    This prevents an AFL/Plex reorder from being mistaken for a
+    Plex-only regular episode.
+    """
+    for index, afl_episode in enumerate(sorted_afl):
+        if (
+            excluded_index is not None
+            and index == excluded_index
+        ):
+            continue
+
+        score = _title_similarity(
+            title,
+            afl_episode.get("name"),
+        )
+
+        if score >= threshold:
+            return True
+
+    return False
+
+
+def _confirm_afl_extra_sequence(
+    sorted_afl,
+    index,
+    episode_map,
+    plex_absolute,
+    threshold,
+    confirmations=3,
+):
+    """
+    Confirm that skipping the current AFL episode produces a stable
+    sequence alignment.
+
+    Example:
+
+        AFL 25 = possible AFL-only episode
+        AFL 26 ~= Plex 25
+        AFL 27 ~= Plex 26
+        AFL 28 ~= Plex 27
+
+    All confirmation matches must succeed.
+    """
+    current_number = _afl_episode_number(
+        sorted_afl[index]
+    )
+
+    if current_number is None:
+        return False, []
+
+    scores = []
+
+    for step in range(1, confirmations + 1):
+        afl_index = index + step
+
+        if afl_index >= len(sorted_afl):
+            return False, scores
+
+        candidate_afl = sorted_afl[afl_index]
+
+        candidate_number = _afl_episode_number(
+            candidate_afl
+        )
+
+        # Require an actually consecutive AFL sequence.
+        if candidate_number != current_number + step:
+            return False, scores
+
+        candidate_plex = episode_map.get(
+            str(plex_absolute + step - 1)
+        )
+
+        if not candidate_plex:
+            return False, scores
+
+        score = _title_similarity(
+            candidate_afl.get("name"),
+            candidate_plex.get("title"),
+        )
+
+        scores.append(score)
+
+        if score < threshold:
+            return False, scores
+
+    return True, scores
+
+
+def _confirm_plex_extra_sequence(
+    sorted_afl,
+    index,
+    episode_map,
+    plex_absolute,
+    threshold,
+    confirmations=3,
+):
+    """
+    Confirm that skipping the current Plex episode produces a stable
+    sequence alignment.
+
+    Example:
+
+        Plex 25 = possible Plex-only episode
+        AFL 25 ~= Plex 26
+        AFL 26 ~= Plex 27
+        AFL 27 ~= Plex 28
+
+    All confirmation matches must succeed.
+    """
+    current_number = _afl_episode_number(
+        sorted_afl[index]
+    )
+
+    if current_number is None:
+        return False, []
+
+    scores = []
+
+    for step in range(confirmations):
+        afl_index = index + step
+
+        if afl_index >= len(sorted_afl):
+            return False, scores
+
+        candidate_afl = sorted_afl[afl_index]
+
+        candidate_number = _afl_episode_number(
+            candidate_afl
+        )
+
+        if candidate_number != current_number + step:
+            return False, scores
+
+        candidate_plex = episode_map.get(
+            str(plex_absolute + step + 1)
+        )
+
+        if not candidate_plex:
+            return False, scores
+
+        score = _title_similarity(
+            candidate_afl.get("name"),
+            candidate_plex.get("title"),
+        )
+
+        scores.append(score)
+
+        if score < threshold:
+            return False, scores
+
+    return True, scores
+
 
 def _build_episode_number_map(
     all_afl_episodes,
     episode_map,
     title_match_threshold=0.65,
+    realignment_match_threshold=0.80,
+    realignment_confirmations=3,
 ):
     """
     Build an AFL absolute-number -> Plex episode mapping.
 
-    Normal behavior uses direct absolute numbering:
+    Direct absolute numbering is preferred:
 
         AFL 21 -> Plex absolute 21
 
-    If AFL contains an extra numbered episode that Plex does not include
-    among its regular aired-order episodes, detect that discrepancy and
-    adjust subsequent AFL episode numbers with an offset.
+    Sequence offsets are changed only when there is strong evidence
+    that one side contains an episode absent from the other.
 
-    Example:
-
-        AFL 24 -> Plex absolute 24
-        AFL 25 -> AFL-only OVA; skip
-        AFL 26 -> Plex absolute 25
-        AFL 27 -> Plex absolute 26
+    Realignment deliberately requires multiple consecutive title
+    matches. A single neighboring title match is not sufficient,
+    because some shows use substantially different episode orders.
     """
     lookup = {}
     warnings = []
     offset = 0
+
+    # Structural sequence changes should require stronger evidence
+    # than ordinary title-warning suppression.
+    structural_threshold = max(
+        title_match_threshold,
+        realignment_match_threshold,
+    )
 
     sorted_afl = sorted(
         all_afl_episodes,
@@ -111,8 +388,6 @@ def _build_episode_number_map(
 
         afl_number = int(clean_number)
 
-        # Normal mapping is direct AFL absolute number -> Plex absolute
-        # number, adjusted only by a previously detected sequence offset.
         plex_absolute = afl_number + offset
 
         plex_episode = episode_map.get(
@@ -141,78 +416,93 @@ def _build_episode_number_map(
             continue
 
         #
-        # AFL-only episode detection.
+        # Candidate AFL-only episode.
         #
-        # Suppose:
+        # Never decide this from one neighboring title.
         #
-        #   AFL 25 = Walking Alone
-        #   AFL 26 = Dazai, Chuuya, Fifteen Years Old
+        # We require:
         #
-        # while Plex absolute 25 is:
+        #   1. The current AFL title does NOT appear elsewhere in Plex.
+        #      If it does, this may simply be a reordered show.
         #
-        #   Dazai, Chuuya, Fifteen Years Old
+        #   2. Several consecutive following AFL episodes align with
+        #      consecutive Plex episodes after skipping the current AFL
+        #      episode.
         #
-        # If AFL N+1 matches the Plex episode currently expected for AFL N,
-        # AFL N is likely an OVA/special included in AFL numbering but not
-        # among Plex's regular aired-order episodes.
-        #
-        if index + 1 < len(sorted_afl):
-            next_afl = sorted_afl[index + 1]
-
-            next_number_string = _clean_episode_number(
-                next_afl.get("number")
+        current_afl_exists_elsewhere = (
+            _title_exists_elsewhere_in_plex(
+                afl_episode.get("name"),
+                episode_map,
+                excluded_absolute=plex_absolute,
+                threshold=structural_threshold,
             )
-
-            if next_number_string:
-                next_number = int(
-                    next_number_string
-                )
-
-                # Only use a truly consecutive AFL episode as evidence.
-                if next_number == afl_number + 1:
-                    next_score = _title_similarity(
-                        next_afl.get("name"),
-                        plex_episode.get("title"),
-                    )
-
-                    if next_score >= title_match_threshold:
-                        lookup[clean_number] = None
-
-                        # AFL now has one more numbered episode than Plex,
-                        # so all following Plex absolute positions move back.
-                        offset -= 1
-
-                        warnings.append(
-                            {
-                                "type": "afl_extra",
-                                "afl_episode": afl_episode,
-                                "plex_episode": plex_episode,
-                                "next_afl_episode": next_afl,
-                                "score": next_score,
-                                "new_offset": offset,
-                            }
-                        )
-
-                        continue
-
-        #
-        # Plex-only episode detection.
-        #
-        # This is the inverse case. If the current AFL title matches the
-        # NEXT Plex absolute episode, Plex may contain a regular episode
-        # that AFL omitted from its numbering.
-        #
-        next_plex_episode = episode_map.get(
-            str(plex_absolute + 1)
         )
 
-        if next_plex_episode:
-            next_plex_score = _title_similarity(
-                afl_episode.get("name"),
-                next_plex_episode.get("title"),
+        if not current_afl_exists_elsewhere:
+            (
+                confirmed_afl_extra,
+                confirmation_scores,
+            ) = _confirm_afl_extra_sequence(
+                sorted_afl,
+                index,
+                episode_map,
+                plex_absolute,
+                threshold=structural_threshold,
+                confirmations=realignment_confirmations,
             )
 
-            if next_plex_score >= title_match_threshold:
+            if confirmed_afl_extra:
+                lookup[clean_number] = None
+
+                offset -= 1
+
+                warnings.append(
+                    {
+                        "type": "afl_extra",
+                        "afl_episode": afl_episode,
+                        "plex_episode": plex_episode,
+                        "confirmation_scores": (
+                            confirmation_scores
+                        ),
+                        "new_offset": offset,
+                    }
+                )
+
+                continue
+
+        #
+        # Candidate Plex-only episode.
+        #
+        # Again, require sequence-level evidence rather than a single
+        # nearby title match.
+        #
+        # If the current Plex title appears elsewhere in AFL, the show
+        # may simply use a different episode order and should NOT cause
+        # a permanent offset.
+        #
+        current_plex_exists_elsewhere = (
+            _title_exists_elsewhere_in_afl(
+                plex_episode.get("title"),
+                sorted_afl,
+                excluded_index=index,
+                threshold=structural_threshold,
+            )
+        )
+
+        if not current_plex_exists_elsewhere:
+            (
+                confirmed_plex_extra,
+                confirmation_scores,
+            ) = _confirm_plex_extra_sequence(
+                sorted_afl,
+                index,
+                episode_map,
+                plex_absolute,
+                threshold=structural_threshold,
+                confirmations=realignment_confirmations,
+            )
+
+            if confirmed_plex_extra:
                 offset += 1
 
                 plex_absolute = (
@@ -223,23 +513,33 @@ def _build_episode_number_map(
                     str(plex_absolute)
                 )
 
-                lookup[clean_number] = plex_episode
+                if plex_episode:
+                    lookup[clean_number] = plex_episode
 
-                warnings.append(
-                    {
-                        "type": "plex_extra",
-                        "afl_episode": afl_episode,
-                        "plex_episode": plex_episode,
-                        "score": next_plex_score,
-                        "new_offset": offset,
-                    }
-                )
+                    warnings.append(
+                        {
+                            "type": "plex_extra",
+                            "afl_episode": afl_episode,
+                            "plex_episode": plex_episode,
+                            "confirmation_scores": (
+                                confirmation_scores
+                            ),
+                            "new_offset": offset,
+                        }
+                    )
 
-                continue
+                    continue
+
+                # Defensive fallback: if the newly calculated position
+                # unexpectedly does not exist, undo the tentative shift.
+                offset -= 1
 
         #
-        # Titles differ, but there is no strong evidence that numbering
-        # has shifted. Keep the absolute-number mapping and emit a warning.
+        # No sufficiently strong sequence evidence.
+        #
+        # Preserve direct absolute numbering. A title mismatch is much
+        # safer than changing every subsequent episode based on weak
+        # evidence.
         #
         lookup[clean_number] = plex_episode
 
@@ -256,6 +556,425 @@ def _build_episode_number_map(
     return lookup, warnings
 
 
+
+def _assess_lookup_confidence(
+    all_afl_episodes,
+    number_lookup,
+    threshold=0.65,
+):
+    """
+    Measure how well a proposed AFL -> Plex mapping agrees by title.
+
+    Only mapped AFL episodes are compared. An AFL episode that was
+    conservatively identified as absent from the Plex regular-episode
+    sequence does not reduce the score.
+    """
+    compared = 0
+    strong_matches = 0
+    total_score = 0.0
+
+    for afl_episode in all_afl_episodes:
+        clean_number = _clean_episode_number(
+            afl_episode.get("number")
+        )
+
+        if not clean_number:
+            continue
+
+        plex_episode = number_lookup.get(clean_number)
+
+        if not plex_episode:
+            continue
+
+        score = _title_similarity(
+            afl_episode.get("name"),
+            plex_episode.get("title"),
+        )
+
+        compared += 1
+        total_score += score
+
+        if score >= threshold:
+            strong_matches += 1
+
+    if compared == 0:
+        return {
+            "compared": 0,
+            "strong_matches": 0,
+            "strong_ratio": 0.0,
+            "average_score": 0.0,
+        }
+
+    return {
+        "compared": compared,
+        "strong_matches": strong_matches,
+        "strong_ratio": strong_matches / compared,
+        "average_score": total_score / compared,
+    }
+
+
+
+def _assess_off_position_evidence(
+    all_afl_episodes,
+    episode_map,
+    strong_threshold=0.80,
+):
+    """
+    Measure evidence that AFL and Plex use different episode ordering.
+
+    For each AFL episode that has a direct Plex absolute-number candidate:
+      - direct_strong: direct title similarity >= threshold
+      - off_position_strong: direct match is weak, but the AFL title has a
+        strong match at a different Plex absolute position
+      - neither: no strong title match at the direct or any other position
+
+    A high off-position ratio is evidence of structural reordering.
+    A low off-position ratio with many "neither" results is more consistent
+    with translation/title variation while numbering remains aligned.
+    """
+    direct_strong = 0
+    off_position_strong = 0
+    neither = 0
+
+    for afl_episode in all_afl_episodes:
+        clean_number = _clean_episode_number(
+            afl_episode.get("number")
+        )
+        if not clean_number:
+            continue
+
+        direct_episode = episode_map.get(clean_number)
+        if not direct_episode:
+            continue
+
+        direct_score = _title_similarity(
+            afl_episode.get("name"),
+            direct_episode.get("title"),
+        )
+        if direct_score >= strong_threshold:
+            direct_strong += 1
+            continue
+
+        found_elsewhere = False
+        for plex_number, plex_episode in episode_map.items():
+            if plex_number == clean_number:
+                continue
+            score = _title_similarity(
+                afl_episode.get("name"),
+                plex_episode.get("title"),
+            )
+            if score >= strong_threshold:
+                found_elsewhere = True
+                break
+
+        if found_elsewhere:
+            off_position_strong += 1
+        else:
+            neither += 1
+
+    total = direct_strong + off_position_strong + neither
+    if total == 0:
+        return {
+            "total": 0,
+            "direct_strong": 0,
+            "off_position_strong": 0,
+            "neither": 0,
+            "direct_ratio": 0.0,
+            "off_position_ratio": 0.0,
+            "neither_ratio": 0.0,
+        }
+
+    return {
+        "total": total,
+        "direct_strong": direct_strong,
+        "off_position_strong": off_position_strong,
+        "neither": neither,
+        "direct_ratio": direct_strong / total,
+        "off_position_ratio": off_position_strong / total,
+        "neither_ratio": neither / total,
+    }
+
+def _build_title_based_episode_map(
+    all_afl_episodes,
+    episode_map,
+    title_match_threshold=0.80,
+    ambiguity_margin=0.08,
+):
+    """
+    Build an AFL absolute-number -> Plex mapping using episode titles.
+
+    This is used only when direct aired-order numbering has poor title
+    agreement. Plex episodes are consumed one-to-one so two AFL episodes
+    cannot accidentally map to the same regular Plex episode.
+
+    Matching happens in two passes:
+
+      1. Unique exact normalized-title matches.
+      2. Conservative fuzzy matches for unresolved episodes.
+
+    A fuzzy match must clear title_match_threshold and be sufficiently
+    better than the second-best unused Plex candidate.
+    """
+    sorted_afl = sorted(
+        all_afl_episodes,
+        key=lambda episode: int(
+            _clean_episode_number(
+                episode.get("number")
+            ) or 999999999
+        ),
+    )
+
+    plex_items = []
+
+    for absolute_string, plex_episode in episode_map.items():
+        try:
+            absolute_number = int(absolute_string)
+        except (TypeError, ValueError):
+            continue
+
+        plex_items.append(
+            (absolute_number, plex_episode)
+        )
+
+    plex_items.sort(
+        key=lambda item: item[0]
+    )
+
+    lookup = {}
+    warnings = []
+    used_plex_absolutes = set()
+
+    normalized_plex = {}
+
+    for absolute_number, plex_episode in plex_items:
+        normalized = (
+            _normalize_episode_match_title(
+                plex_episode.get("title") or ""
+            )
+        )
+
+        if normalized:
+            normalized_plex.setdefault(
+                normalized,
+                [],
+            ).append(
+                (absolute_number, plex_episode)
+            )
+
+    unresolved = []
+
+    #
+    # Pass 1: unique exact normalized-title matches.
+    #
+    for afl_episode in sorted_afl:
+        clean_number = _clean_episode_number(
+            afl_episode.get("number")
+        )
+
+        if not clean_number:
+            warnings.append(
+                {
+                    "type": "invalid_afl_number",
+                    "afl_episode": afl_episode,
+                }
+            )
+            continue
+
+        normalized = (
+            _normalize_episode_match_title(
+                afl_episode.get("name") or ""
+            )
+        )
+
+        exact_candidates = [
+            candidate
+            for candidate in normalized_plex.get(
+                normalized,
+                [],
+            )
+            if candidate[0] not in used_plex_absolutes
+        ]
+
+        if len(exact_candidates) == 1:
+            absolute_number, plex_episode = (
+                exact_candidates[0]
+            )
+
+            lookup[clean_number] = plex_episode
+            used_plex_absolutes.add(
+                absolute_number
+            )
+            continue
+
+        unresolved.append(
+            (
+                clean_number,
+                afl_episode,
+            )
+        )
+
+    #
+    # Pass 2: conservative fuzzy title matching.
+    #
+    for clean_number, afl_episode in unresolved:
+        scored_candidates = []
+
+        for absolute_number, plex_episode in plex_items:
+            if absolute_number in used_plex_absolutes:
+                continue
+
+            score = _title_similarity(
+                afl_episode.get("name"),
+                plex_episode.get("title"),
+            )
+
+            scored_candidates.append(
+                (
+                    score,
+                    absolute_number,
+                    plex_episode,
+                )
+            )
+
+        scored_candidates.sort(
+            key=lambda item: item[0],
+            reverse=True,
+        )
+
+        if not scored_candidates:
+            lookup[clean_number] = None
+
+            warnings.append(
+                {
+                    "type": "title_unmapped",
+                    "afl_episode": afl_episode,
+                    "best_score": 0.0,
+                    "second_score": 0.0,
+                }
+            )
+            continue
+
+        (
+            best_score,
+            best_absolute,
+            best_episode,
+        ) = scored_candidates[0]
+
+        second_score = (
+            scored_candidates[1][0]
+            if len(scored_candidates) > 1
+            else 0.0
+        )
+
+        sufficiently_distinct = (
+            best_score - second_score
+            >= ambiguity_margin
+        )
+
+        if (
+            best_score >= title_match_threshold
+            and sufficiently_distinct
+        ):
+            lookup[clean_number] = best_episode
+            used_plex_absolutes.add(
+                best_absolute
+            )
+            continue
+
+        lookup[clean_number] = None
+
+        warnings.append(
+            {
+                "type": "title_unmapped",
+                "afl_episode": afl_episode,
+                "best_score": best_score,
+                "second_score": second_score,
+            }
+        )
+
+    valid_afl_count = sum(
+        1
+        for episode in sorted_afl
+        if _clean_episode_number(
+            episode.get("number")
+        )
+    )
+
+    mapped_count = sum(
+        1
+        for plex_episode in lookup.values()
+        if plex_episode
+    )
+
+    coverage = (
+        mapped_count / valid_afl_count
+        if valid_afl_count
+        else 0.0
+    )
+
+    return (
+        lookup,
+        warnings,
+        {
+            "total": valid_afl_count,
+            "mapped": mapped_count,
+            "unmapped": (
+                valid_afl_count - mapped_count
+            ),
+            "coverage": coverage,
+        },
+    )
+
+
+def _log_title_mapping_warnings(
+    anime_name,
+    warnings,
+):
+    """Log unresolved title-based mapping cases."""
+    unresolved = [
+        warning
+        for warning in warnings
+        if warning.get("type") == "title_unmapped"
+    ]
+
+    invalid = [
+        warning
+        for warning in warnings
+        if warning.get("type") == "invalid_afl_number"
+    ]
+
+    if unresolved:
+        logger.warning(
+            f"{anime_name}: title-based mapping left "
+            f"{len(unresolved)} AFL episodes unresolved"
+        )
+
+        for warning in unresolved[:10]:
+            afl_episode = warning["afl_episode"]
+
+            logger.warning(
+                f"{anime_name}: could not confidently title-map "
+                f"AFL episode {afl_episode.get('number')} "
+                f"'{afl_episode.get('name')}' "
+                f"(best {warning['best_score']:.0%}, "
+                f"second {warning['second_score']:.0%})"
+            )
+
+        if len(unresolved) > 10:
+            logger.warning(
+                f"{anime_name}: "
+                f"{len(unresolved) - 10} additional "
+                f"title-based mapping failures suppressed"
+            )
+
+    for warning in invalid:
+        afl_episode = warning["afl_episode"]
+
+        logger.warning(
+            f"{anime_name}: invalid AFL episode number "
+            f"'{afl_episode.get('number')}'"
+        )
+
 def _log_mapping_warnings(
     anime_name,
     warnings,
@@ -268,12 +987,29 @@ def _log_mapping_warnings(
         if warning_type == "afl_extra":
             afl_episode = warning["afl_episode"]
 
+            scores = warning.get(
+                "confirmation_scores",
+                [],
+            )
+
+            score_text = ", ".join(
+                f"{score:.0%}"
+                for score in scores
+            )
+
             logger.warning(
                 f"{anime_name}: AFL episode "
                 f"{afl_episode.get('number')} "
-                f"'{afl_episode.get('name')}' appears to be "
-                f"an AFL-only special/OVA; "
-                f"subsequent Plex mapping offset is "
+                f"'{afl_episode.get('name')}' appears absent "
+                f"from the Plex regular-episode sequence; "
+                f"{len(scores)} subsequent episode matches "
+                f"confirmed realignment"
+                + (
+                    f" ({score_text})"
+                    if score_text
+                    else ""
+                )
+                + f"; subsequent Plex mapping offset is "
                 f"{warning['new_offset']}"
             )
 
@@ -284,12 +1020,30 @@ def _log_mapping_warnings(
             afl_episode = warning["afl_episode"]
             plex_episode = warning["plex_episode"]
 
+            scores = warning.get(
+                "confirmation_scores",
+                [],
+            )
+
+            score_text = ", ".join(
+                f"{score:.0%}"
+                for score in scores
+            )
+
             logger.warning(
-                f"{anime_name}: Plex appears to contain an extra "
-                f"regular episode before AFL episode "
+                f"{anime_name}: Plex appears to contain "
+                f"a regular episode absent from the AFL sequence "
+                f"before AFL episode "
                 f"{afl_episode.get('number')} "
                 f"'{afl_episode.get('name')}'; "
-                f"realigned to Plex "
+                f"{len(scores)} subsequent episode matches "
+                f"confirmed realignment"
+                + (
+                    f" ({score_text})"
+                    if score_text
+                    else ""
+                )
+                + f"; realigned to Plex "
                 f"S{plex_episode['season']:02d}"
                 f"E{plex_episode['episode']:02d}; "
                 f"subsequent mapping offset is "
@@ -332,7 +1086,6 @@ def _log_mapping_warnings(
                 f"absolute position "
                 f"{warning['plex_absolute']}"
             )
-
 
 def generate_kometa_episode_files(
     config,
@@ -397,6 +1150,9 @@ def generate_kometa_episode_files(
         "title_warnings": 0,
         "sequence_realignments": 0,
         "afl_only_episodes": 0,
+        "direct_order_shows": 0,
+        "title_mapped_shows": 0,
+        "ordering_rejected_shows": 0,
         "shows_failed": 0,
     }
 
@@ -534,6 +1290,11 @@ def generate_kometa_episode_files(
             stats["shows_failed"] += 1
             continue
 
+        #
+        # First try direct absolute numbering plus conservative sequence
+        # reconciliation. Then verify that the resulting show-level map
+        # actually agrees with episode titles.
+        #
         number_lookup, mapping_warnings = (
             _build_episode_number_map(
                 all_afl_episodes,
@@ -544,11 +1305,139 @@ def generate_kometa_episode_files(
             )
         )
 
-        _log_mapping_warnings(
-            anime_name,
-            mapping_warnings,
-            stats,
+        ordering_confidence = (
+            _assess_lookup_confidence(
+                all_afl_episodes,
+                number_lookup,
+                threshold=title_warning_threshold,
+            )
         )
+
+        direct_order_min_ratio = 0.75
+        reorder_evidence_threshold = 0.20
+        title_mapping_min_coverage = 0.75
+
+        if (
+            ordering_confidence["strong_ratio"]
+            >= direct_order_min_ratio
+        ):
+            logger.info(
+                f"{anime_name}: using Plex aired-order mapping; "
+                f"title agreement "
+                f"{ordering_confidence['strong_matches']}/"
+                f"{ordering_confidence['compared']} "
+                f"({ordering_confidence['strong_ratio']:.0%}), "
+                f"average similarity "
+                f"{ordering_confidence['average_score']:.0%}"
+            )
+
+            _log_mapping_warnings(
+                anime_name,
+                mapping_warnings,
+                stats,
+            )
+
+            stats["direct_order_shows"] += 1
+
+        else:
+            reorder_evidence = _assess_off_position_evidence(
+                all_afl_episodes,
+                episode_map,
+                strong_threshold=0.80,
+            )
+
+            if (
+                reorder_evidence["off_position_ratio"]
+                < reorder_evidence_threshold
+            ):
+                logger.warning(
+                    f"{anime_name}: Plex aired-order mapping has low "
+                    f"title agreement "
+                    f"{ordering_confidence['strong_matches']}/"
+                    f"{ordering_confidence['compared']} "
+                    f"({ordering_confidence['strong_ratio']:.0%}), "
+                    f"but only "
+                    f"{reorder_evidence['off_position_strong']}/"
+                    f"{reorder_evidence['total']} episodes "
+                    f"({reorder_evidence['off_position_ratio']:.0%}) "
+                    f"have strong title matches at different Plex "
+                    f"positions; treating differences as title/"
+                    f"translation variation and retaining direct numbering"
+                )
+
+                _log_mapping_warnings(
+                    anime_name,
+                    mapping_warnings,
+                    stats,
+                )
+
+                stats["direct_order_shows"] += 1
+
+            else:
+                logger.warning(
+                    f"{anime_name}: Plex aired-order mapping has low "
+                    f"title agreement "
+                    f"{ordering_confidence['strong_matches']}/"
+                    f"{ordering_confidence['compared']} "
+                    f"({ordering_confidence['strong_ratio']:.0%}) "
+                    f"and "
+                    f"{reorder_evidence['off_position_strong']}/"
+                    f"{reorder_evidence['total']} episodes "
+                    f"({reorder_evidence['off_position_ratio']:.0%}) "
+                    f"have strong title matches at different Plex "
+                    f"positions; trying title-based episode mapping"
+                )
+
+                (
+                    title_lookup,
+                    title_mapping_warnings,
+                    title_mapping_stats,
+                ) = _build_title_based_episode_map(
+                    all_afl_episodes,
+                    episode_map,
+                    title_match_threshold=0.80,
+                    ambiguity_margin=0.08,
+                )
+
+                if (
+                    title_mapping_stats["coverage"]
+                    >= title_mapping_min_coverage
+                ):
+                    number_lookup = title_lookup
+
+                    logger.warning(
+                        f"{anime_name}: using title-based episode mapping; "
+                        f"{title_mapping_stats['mapped']}/"
+                        f"{title_mapping_stats['total']} AFL episodes "
+                        f"matched unambiguously "
+                        f"({title_mapping_stats['coverage']:.0%})"
+                    )
+
+                    _log_title_mapping_warnings(
+                        anime_name,
+                        title_mapping_warnings,
+                    )
+
+                    stats["title_mapped_shows"] += 1
+
+                else:
+                    logger.error(
+                        f"Skipping {anime_name}: episode ordering is "
+                        f"incompatible with Plex aired order and only "
+                        f"{title_mapping_stats['mapped']}/"
+                        f"{title_mapping_stats['total']} episodes "
+                        f"could be matched unambiguously by title "
+                        f"({title_mapping_stats['coverage']:.0%})"
+                    )
+
+                    _log_title_mapping_warnings(
+                        anime_name,
+                        title_mapping_warnings,
+                    )
+
+                    stats["ordering_rejected_shows"] += 1
+                    stats["shows_failed"] += 1
+                    continue
 
         stats["shows_processed"] += 1
 
