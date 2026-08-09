@@ -924,6 +924,142 @@ def _assess_off_position_evidence(
         "neither_ratio": neither / total,
     }
 
+def _fill_bounded_title_gaps(
+    sorted_afl,
+    plex_items,
+    lookup,
+    used_plex_absolutes,
+    max_gap=6,
+):
+    """
+    Fill short unresolved AFL runs only when two already-confident title
+    matches bracket an equal-length run of unused Plex episodes.
+
+    This preserves fail-closed behavior: both anchors must already be mapped,
+    Plex order must move forward, every AFL episode between the anchors must
+    still be unresolved, and the AFL/Plex gap sizes must match exactly.
+    """
+    plex_by_absolute = {
+        absolute_number: plex_episode
+        for absolute_number, plex_episode in plex_items
+    }
+
+    plex_absolute_by_key = {}
+
+    for absolute_number, plex_episode in plex_items:
+        key = (
+            str(plex_episode.get("season")),
+            str(plex_episode.get("episode")),
+        )
+        plex_absolute_by_key[key] = absolute_number
+
+    mapped_anchors = []
+
+    for index, afl_episode in enumerate(sorted_afl):
+        clean_number = _clean_episode_number(
+            afl_episode.get("number")
+        )
+
+        if not clean_number:
+            continue
+
+        plex_episode = lookup.get(clean_number)
+
+        if not plex_episode:
+            continue
+
+        key = (
+            str(plex_episode.get("season")),
+            str(plex_episode.get("episode")),
+        )
+        absolute_number = plex_absolute_by_key.get(key)
+
+        if absolute_number is None:
+            continue
+
+        mapped_anchors.append(
+            (index, clean_number, absolute_number)
+        )
+
+    filled_numbers = set()
+
+    for left, right in zip(
+        mapped_anchors,
+        mapped_anchors[1:],
+    ):
+        left_index, _, left_absolute = left
+        right_index, _, right_absolute = right
+
+        gap_episodes = sorted_afl[
+            left_index + 1:right_index
+        ]
+
+        if not gap_episodes:
+            continue
+
+        if len(gap_episodes) > max_gap:
+            continue
+
+        if right_absolute <= left_absolute:
+            continue
+
+        plex_gap = right_absolute - left_absolute - 1
+
+        if plex_gap != len(gap_episodes):
+            continue
+
+        gap_numbers = []
+        valid_gap = True
+
+        for afl_episode in gap_episodes:
+            clean_number = _clean_episode_number(
+                afl_episode.get("number")
+            )
+
+            if (
+                not clean_number
+                or lookup.get(clean_number) is not None
+            ):
+                valid_gap = False
+                break
+
+            gap_numbers.append(clean_number)
+
+        if not valid_gap:
+            continue
+
+        candidate_absolutes = list(
+            range(
+                left_absolute + 1,
+                right_absolute,
+            )
+        )
+
+        if any(
+            absolute_number in used_plex_absolutes
+            for absolute_number in candidate_absolutes
+        ):
+            continue
+
+        if any(
+            absolute_number not in plex_by_absolute
+            for absolute_number in candidate_absolutes
+        ):
+            continue
+
+        for clean_number, absolute_number in zip(
+            gap_numbers,
+            candidate_absolutes,
+        ):
+            lookup[clean_number] = plex_by_absolute[
+                absolute_number
+            ]
+            used_plex_absolutes.add(absolute_number)
+            filled_numbers.add(clean_number)
+
+    return filled_numbers
+
+
 def _build_title_based_episode_map(
     all_afl_episodes,
     episode_map,
@@ -937,13 +1073,16 @@ def _build_title_based_episode_map(
     agreement. Plex episodes are consumed one-to-one so two AFL episodes
     cannot accidentally map to the same regular Plex episode.
 
-    Matching happens in two passes:
+    Matching happens in three passes:
 
       1. Unique exact normalized-title matches.
       2. Conservative fuzzy matches for unresolved episodes.
+      3. Short bounded sequence fills between confident title anchors.
 
     A fuzzy match must clear title_match_threshold and be sufficiently
-    better than the second-best unused Plex candidate.
+    better than the second-best unused Plex candidate. Bounded sequence
+    fills require equal-sized AFL/Plex gaps and never cross or reuse a
+    confidently mapped Plex episode.
     """
     sorted_afl = sorted(
         all_afl_episodes,
@@ -1122,6 +1261,32 @@ def _build_title_based_episode_map(
             }
         )
 
+    #
+    # Pass 3: bounded sequence reconciliation. A short unresolved AFL run
+    # may be filled only when confident title matches exist on both sides
+    # and the number of unused Plex episodes between those anchors matches
+    # the AFL gap exactly.
+    #
+    bounded_fills = _fill_bounded_title_gaps(
+        sorted_afl,
+        plex_items,
+        lookup,
+        used_plex_absolutes,
+        max_gap=6,
+    )
+
+    if bounded_fills:
+        warnings = [
+            warning
+            for warning in warnings
+            if not (
+                warning.get("type") == "title_unmapped"
+                and _clean_episode_number(
+                    warning.get("afl_episode", {}).get("number")
+                ) in bounded_fills
+            )
+        ]
+
     valid_afl_count = sum(
         1
         for episode in sorted_afl
@@ -1152,6 +1317,7 @@ def _build_title_based_episode_map(
                 valid_afl_count - mapped_count
             ),
             "coverage": coverage,
+            "bounded_fills": len(bounded_fills),
         },
     )
 
@@ -1721,12 +1887,25 @@ def generate_kometa_episode_files(
                 ):
                     number_lookup = title_lookup
 
+                    bounded_fill_count = (
+                        title_mapping_stats.get(
+                            "bounded_fills",
+                            0,
+                        )
+                    )
+
                     logger.warning(
                         f"{anime_name}: using title-based episode mapping; "
                         f"{title_mapping_stats['mapped']}/"
                         f"{title_mapping_stats['total']} AFL episodes "
-                        f"matched unambiguously "
+                        f"mapped confidently "
                         f"({title_mapping_stats['coverage']:.0%})"
+                        + (
+                            f"; {bounded_fill_count} filled by bounded "
+                            f"sequence context"
+                            if bounded_fill_count
+                            else ""
+                        )
                     )
 
                     _log_title_mapping_warnings(
