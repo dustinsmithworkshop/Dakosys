@@ -30,6 +30,11 @@ CONFIG = {}
 DATA_DIR = "data"
 CONFIG_FILE = "config/config.yaml"
 
+# Cache AFL identity failures for the lifetime of this process.
+# generate_kometa_episode_files asks for ANIME/FILLER/MANGA/MIXED separately;
+# a known-bad AFL page should be fetched/logged once, not four times.
+_AFL_INVALID_IDENTITY_CACHE = {}
+
 if os.environ.get('RUNNING_IN_DOCKER') == 'true':
     data_dir = "/app/data"
 else:
@@ -362,12 +367,28 @@ def _validate_afl_page_identity(anime_name, soup, threshold=0.55):
     """
     Validate that an AnimeFillerList page appears to represent the requested show.
 
+    The AFL slug is not always the display title used by AnimeFillerList.  Treat
+    the configured Plex mapping as an additional valid identity so aliases such
+    as ``code-geass`` -> ``Code Geass: Lelouch of the Rebellion`` do not fail
+    validation.  The best similarity across all known identities is returned.
+
     Returns:
         (is_valid, page_title, similarity)
     """
-    requested_identity = _normalize_afl_show_identity(
+    requested_identities = []
+
+    slug_identity = _normalize_afl_show_identity(
         anime_name.replace("-", " ")
     )
+    if slug_identity:
+        requested_identities.append(slug_identity)
+
+    mapped_title = CONFIG.get("mappings", {}).get(
+        anime_name.lower()
+    )
+    mapped_identity = _normalize_afl_show_identity(mapped_title)
+    if mapped_identity and mapped_identity not in requested_identities:
+        requested_identities.append(mapped_identity)
 
     h1 = soup.find("h1")
     page_title = (
@@ -378,17 +399,19 @@ def _validate_afl_page_identity(anime_name, soup, threshold=0.55):
 
     page_identity = _normalize_afl_show_identity(page_title)
 
-    if not requested_identity or not page_identity:
+    if not requested_identities or not page_identity:
         return False, page_title, 0.0
 
-    if requested_identity == page_identity:
-        return True, page_title, 1.0
+    similarities = [
+        difflib.SequenceMatcher(
+            None,
+            requested_identity,
+            page_identity,
+        ).ratio()
+        for requested_identity in requested_identities
+    ]
 
-    similarity = difflib.SequenceMatcher(
-        None,
-        requested_identity,
-        page_identity,
-    ).ratio()
+    similarity = max(similarities, default=0.0)
 
     return (
         similarity >= threshold,
@@ -405,6 +428,11 @@ def get_anime_episodes(
     global CONFIG
 
     try:
+        cache_key = anime_name.lower()
+        cached_failure = _AFL_INVALID_IDENTITY_CACHE.get(cache_key)
+        if cached_failure is not None:
+            return []
+
         base_url = "https://www.animefillerlist.com/shows/"
         anime_url = f"{base_url}{anime_name}"
 
@@ -547,6 +575,10 @@ def get_anime_episodes(
         )
 
         if not valid_identity:
+            _AFL_INVALID_IDENTITY_CACHE[cache_key] = {
+                "page_title": page_title,
+                "similarity": similarity,
+            }
             logger.error(
                 f"AFL page identity mismatch for "
                 f"'{anime_name}': "
