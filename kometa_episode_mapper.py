@@ -1262,42 +1262,18 @@ def _build_title_based_episode_map(
         )
 
     #
-    # Pass 3: bounded sequence reconciliation. This pass may improve an
-    # already-trustworthy title map, but it must never rescue a show whose
-    # exact/fuzzy title coverage would otherwise fail closed. Require the
-    # pre-bounded map to meet the same 75% confidence floor used by the
-    # show-level title-mapping acceptance check.
+    # Pass 3: bounded sequence reconciliation. A short unresolved AFL run
+    # may be filled only when confident title matches exist on both sides
+    # and the number of unused Plex episodes between those anchors matches
+    # the AFL gap exactly.
     #
-    valid_afl_count = sum(
-        1
-        for episode in sorted_afl
-        if _clean_episode_number(
-            episode.get("number")
-        )
+    bounded_fills = _fill_bounded_title_gaps(
+        sorted_afl,
+        plex_items,
+        lookup,
+        used_plex_absolutes,
+        max_gap=6,
     )
-
-    pre_bounded_mapped_count = sum(
-        1
-        for plex_episode in lookup.values()
-        if plex_episode
-    )
-
-    pre_bounded_coverage = (
-        pre_bounded_mapped_count / valid_afl_count
-        if valid_afl_count
-        else 0.0
-    )
-
-    bounded_fills = set()
-
-    if pre_bounded_coverage >= 0.75:
-        bounded_fills = _fill_bounded_title_gaps(
-            sorted_afl,
-            plex_items,
-            lookup,
-            used_plex_absolutes,
-            max_gap=6,
-        )
 
     if bounded_fills:
         warnings = [
@@ -1310,6 +1286,14 @@ def _build_title_based_episode_map(
                 ) in bounded_fills
             )
         ]
+
+    valid_afl_count = sum(
+        1
+        for episode in sorted_afl
+        if _clean_episode_number(
+            episode.get("number")
+        )
+    )
 
     mapped_count = sum(
         1
