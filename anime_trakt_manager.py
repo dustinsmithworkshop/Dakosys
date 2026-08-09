@@ -384,6 +384,7 @@ def _validate_afl_page_identity(anime_name, soup, threshold=0.55):
         requested_identities.append(slug_identity)
 
     try:
+        import mappings_manager
         all_mappings = mappings_manager.load_mappings()
         configured_mappings = all_mappings.get("mappings", {})
     except Exception:
