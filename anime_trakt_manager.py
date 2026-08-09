@@ -383,9 +383,14 @@ def _validate_afl_page_identity(anime_name, soup, threshold=0.55):
     if slug_identity:
         requested_identities.append(slug_identity)
 
-    mapped_title = CONFIG.get("mappings", {}).get(
-        anime_name.lower()
-    )
+    try:
+        all_mappings = mappings_manager.load_mappings()
+        configured_mappings = all_mappings.get("mappings", {})
+    except Exception:
+        configured_mappings = CONFIG.get("mappings", {})
+
+    mapped_title = configured_mappings.get(anime_name.lower())
+    
     mapped_identity = _normalize_afl_show_identity(mapped_title)
     if mapped_identity and mapped_identity not in requested_identities:
         requested_identities.append(mapped_identity)
