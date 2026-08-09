@@ -51,12 +51,32 @@ _ROMAN_PARTS = {
 }
 
 
+_DURATION_SPECIAL_RE = re.compile(
+    r"\(\s*\d+(?:\.\d+)?\s*(?:hours?|hrs?)\s+special\s*\)",
+    re.IGNORECASE,
+)
+
+
+def _strip_duration_special_annotation(value):
+    """Remove cosmetic broadcast-duration annotations from a title."""
+    return _DURATION_SPECIAL_RE.sub(
+        " ",
+        value or "",
+    )
+
+
 def _normalize_episode_match_title(value):
     """
     Normalize an episode title for mapper-local title comparison.
 
     Dakosys already performs the general title cleanup. This additional
-    mapper-only layer canonicalizes a trailing Roman or Arabic part number:
+    mapper-only layer removes cosmetic broadcast-duration annotations and
+    canonicalizes a trailing Roman or Arabic part number:
+
+        Moonlight Sonata Murder Case (1 Hour Special)
+        Moonlight Sonata Murder Case
+
+    compare as the same title, while:
 
         Endless Eight II
         Endless Eight (2)
@@ -69,7 +89,7 @@ def _normalize_episode_match_title(value):
     Dakosys.
     """
     normalized = anime_trakt_manager.normalize_episode_title(
-        value or ""
+        _strip_duration_special_annotation(value)
     )
 
     if not normalized:
@@ -1076,11 +1096,15 @@ def _build_title_based_episode_map(
     Matching happens in three passes:
 
       1. Unique exact normalized-title matches.
-      2. Conservative fuzzy matches for unresolved episodes.
+      2. Conservative fuzzy matches for unresolved episodes, resolving the
+         strongest eligible match globally before recalculating candidates.
       3. Short bounded sequence fills between confident title anchors.
 
     A fuzzy match must clear title_match_threshold and be sufficiently
-    better than the second-best unused Plex candidate. Bounded sequence
+    better than the second-best unused Plex candidate. Strongest-first
+    allocation prevents a weaker earlier AFL title from consuming a Plex
+    episode that is a substantially better match for another AFL episode.
+    Bounded sequence
     fills require equal-sized AFL/Plex gaps and never cross or reuse a
     confidently mapped Plex episode.
     """
@@ -1185,7 +1209,20 @@ def _build_title_based_episode_map(
     #
     # Pass 2: conservative fuzzy title matching.
     #
-    for clean_number, afl_episode in unresolved:
+    # Resolve the strongest eligible match globally rather than greedily
+    # consuming Plex episodes in AFL-number order. Scores are precomputed
+    # once, then the best/second-best unused candidates are recalculated
+    # after every claim. This prevents a weaker earlier AFL title from
+    # stealing a Plex episode from a later, substantially stronger match.
+    #
+    pending = {
+        clean_number: afl_episode
+        for clean_number, afl_episode in unresolved
+    }
+
+    fuzzy_candidates = {}
+
+    for clean_number, afl_episode in pending.items():
         scored_candidates = []
 
         for absolute_number, plex_episode in plex_items:
@@ -1209,46 +1246,101 @@ def _build_title_based_episode_map(
             key=lambda item: item[0],
             reverse=True,
         )
+        fuzzy_candidates[clean_number] = scored_candidates
 
-        if not scored_candidates:
-            lookup[clean_number] = None
+    def _best_unused_candidates(clean_number, limit=2):
+        available = []
 
-            warnings.append(
-                {
-                    "type": "title_unmapped",
-                    "afl_episode": afl_episode,
-                    "best_score": 0.0,
-                    "second_score": 0.0,
-                }
+        for candidate in fuzzy_candidates.get(
+            clean_number,
+            [],
+        ):
+            if candidate[1] in used_plex_absolutes:
+                continue
+
+            available.append(candidate)
+
+            if len(available) >= limit:
+                break
+
+        return available
+
+    while pending:
+        eligible = []
+
+        for clean_number in pending:
+            scored_candidates = _best_unused_candidates(
+                clean_number,
             )
-            continue
+
+            if not scored_candidates:
+                continue
+
+            (
+                best_score,
+                best_absolute,
+                best_episode,
+            ) = scored_candidates[0]
+
+            second_score = (
+                scored_candidates[1][0]
+                if len(scored_candidates) > 1
+                else 0.0
+            )
+
+            margin = best_score - second_score
+
+            if (
+                best_score >= title_match_threshold
+                and margin >= ambiguity_margin
+            ):
+                eligible.append(
+                    (
+                        best_score,
+                        margin,
+                        -int(clean_number),
+                        clean_number,
+                        best_absolute,
+                        best_episode,
+                    )
+                )
+
+        if not eligible:
+            break
 
         (
-            best_score,
+            _,
+            _,
+            _,
+            clean_number,
             best_absolute,
             best_episode,
-        ) = scored_candidates[0]
+        ) = max(eligible)
 
+        lookup[clean_number] = best_episode
+        used_plex_absolutes.add(
+            best_absolute
+        )
+        del pending[clean_number]
+
+    # Anything still pending could not claim an unused Plex episode with
+    # sufficient score and separation after all stronger matches settled.
+    # Report the final best/second candidates after all claims are applied.
+    for clean_number, afl_episode in pending.items():
+        scored_candidates = _best_unused_candidates(
+            clean_number,
+        )
+
+        best_score = (
+            scored_candidates[0][0]
+            if scored_candidates
+            else 0.0
+        )
         second_score = (
             scored_candidates[1][0]
             if len(scored_candidates) > 1
             else 0.0
         )
-
-        sufficiently_distinct = (
-            best_score - second_score
-            >= ambiguity_margin
-        )
-
-        if (
-            best_score >= title_match_threshold
-            and sufficiently_distinct
-        ):
-            lookup[clean_number] = best_episode
-            used_plex_absolutes.add(
-                best_absolute
-            )
-            continue
 
         lookup[clean_number] = None
 
