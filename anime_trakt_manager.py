@@ -2816,8 +2816,7 @@ def smart_create_all(anime_name, sync_collections=True):
     # Connect to Plex
     plex = connect_to_plex()
     if not plex:
-        return
-
+        return False
     # First check: Is this an AFL name with an existing mapping?
     afl_name = format_anime_name(anime_name)
     plex_name = CONFIG.get('mappings', {}).get(afl_name)
@@ -2842,8 +2841,7 @@ def smart_create_all(anime_name, sync_collections=True):
                 break
     except Exception as e:
         console.print(f"[bold red]Error accessing Plex library: {str(e)}[/bold red]")
-        return
-
+        return False
     # If we have neither an AFL mapping nor a direct Plex match, try fuzzy search in Plex
     if not plex_name and not plex_direct_match:
         console.print("[yellow]No exact mapping found. Searching for matches in Plex...[/yellow]")
@@ -2890,11 +2888,10 @@ def smart_create_all(anime_name, sync_collections=True):
                 plex_direct_match = potential_matches[choice-1][0]
             else:
                 console.print("[yellow]No show selected. Exiting.[/yellow]")
-                return
+                return False
         else:
             console.print("[bold red]No matches found in your Plex library.[/bold red]")
-            return
-
+            return False
     # If we found a direct match in Plex but no mapping, create one
     if plex_direct_match and not plex_name:
         console.print(f"[green]Found direct match in Plex: {plex_direct_match}[/green]")
@@ -2971,39 +2968,34 @@ def smart_create_all(anime_name, sync_collections=True):
                     add_mapping(afl_name, plex_direct_match)
         else:
             console.print("[bold red]Failed to fetch data from AnimeFillerList.[/bold red]")
-            return
-
+            return False
     # By this point, we should have both afl_name and either plex_name or plex_direct_match
     if not afl_name:
         console.print("[bold red]Failed to determine AnimeFillerList name.[/bold red]")
-        return
-
+        return False
     plex_show_name = plex_name or plex_direct_match
     if not plex_show_name:
         console.print("[bold red]Failed to determine Plex show name.[/bold red]")
-        return
-
+        return False
     console.print(f"[bold green]Using mapping: {afl_name} → {plex_show_name}[/bold green]")
 
     # Get auth token
     access_token = trakt_auth.ensure_trakt_auth()
     if not access_token:
-        return
-
+        return False
     # Get TMDB ID from Plex
     tmdb_id = get_tmdb_id_from_plex(plex, afl_name)
     if not tmdb_id:
-        return
-
+        return False
     # Get Trakt show ID
     trakt_show_id = get_trakt_show_id(access_token, tmdb_id)
     if not trakt_show_id:
-        return
-
+        return False
     # Iterate through each episode type and create lists for types that have episodes
     created_lists = []
     empty_types = []
     all_failures = []
+    processing_failed = False
 
     for episode_type in episode_types:
         episode_type_filter = {
@@ -3034,6 +3026,7 @@ def smart_create_all(anime_name, sync_collections=True):
         trakt_list_name = get_list_name_format(afl_name, episode_type)
         list_id, list_exists = create_or_get_trakt_list(trakt_list_name, access_token)
         if not list_id:
+            processing_failed = True
             continue
 
         # Add episodes to Trakt list
@@ -3047,9 +3040,14 @@ def smart_create_all(anime_name, sync_collections=True):
             episode_type.lower()
         )
 
-        # Store failure info if there were failures
-        if has_failures and failure_info:
-            all_failures.append(failure_info)
+        # Track list-level and episode-level failures for batch status reporting.
+        if not success:
+            processing_failed = True
+
+        if has_failures:
+            processing_failed = True
+            if failure_info:
+                all_failures.append(failure_info)
 
         # Format URL correctly
         trakt_url = format_trakt_url(CONFIG['trakt']['username'], trakt_list_name)
@@ -3142,6 +3140,10 @@ def smart_create_all(anime_name, sync_collections=True):
         console.print(f"[blue]Failures logged to {all_failures[0]['log_file']}[/blue]")
         console.print("[yellow]To fix these mapping issues, run this command:[/yellow]")
         console.print("[green]docker compose run --rm dakosys fix-mappings[/green]")
+
+    # A scheduled update counts as successful only if at least one episode list
+    # was processed and no list/episode operation reported a failure.
+    return bool(created_lists) and not processing_failed
 
 @cli.command(name="create-all")
 @click.argument('anime_name')
@@ -3769,14 +3771,23 @@ def run_update(service=None):
             scheduled_anime = config.get('scheduler', {}).get('scheduled_anime', [])
             console.print(f"[bold]Updating {len(scheduled_anime)} scheduled anime using ALL command:[/bold]")
 
+            skipped_or_failed = []
+
             for anime_name in scheduled_anime:
                 try:
                     console.print(f"[blue]Processing {anime_name}...[/blue]")
                     # Defer the expensive full-library Kometa synchronization
                     # until all scheduled anime have been processed.
-                    smart_create_all(anime_name, sync_collections=False)
-                    success_count += 1
+                    if smart_create_all(anime_name, sync_collections=False):
+                        success_count += 1
+                    else:
+                        skipped_or_failed.append(anime_name)
+                        console.print(
+                            f"[yellow]Skipped/failed {anime_name}: "
+                            "no successful episode-list update was completed[/yellow]"
+                        )
                 except Exception as e:
+                    skipped_or_failed.append(anime_name)
                     console.print(f"[red]Error updating {anime_name}: {str(e)}[/red]")
                     import traceback
                     console.print(traceback.format_exc())
@@ -3796,7 +3807,15 @@ def run_update(service=None):
                 console.print(f"[red]Error synchronizing collections: {str(e)}[/red]")
                 logger.error(f"Error synchronizing collections: {str(e)}")
 
-            console.print(f"[green]Successfully updated {success_count} of {len(scheduled_anime)} anime[/green]")
+            console.print(f"[green]Successfully processed: {success_count}[/green]")
+            console.print(f"[yellow]Skipped/failed: {len(skipped_or_failed)}[/yellow]")
+            console.print(f"[blue]Scheduled total: {len(scheduled_anime)}[/blue]")
+            if skipped_or_failed:
+                console.print(
+                    "[yellow]Skipped/failed anime: "
+                    + ", ".join(skipped_or_failed)
+                    + "[/yellow]"
+                )
 
         # Run TV status tracker updates using the original logic
         if (not service or service == 'all' or service == 'tv_status_tracker') and tv_enabled:
