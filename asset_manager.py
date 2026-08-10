@@ -262,10 +262,21 @@ def sync_anime_episode_collections(config, force_update=False):
     normalized_dir = collections_dir.replace('\\', '/')
 
     config_marker = '/config/'
+    kometa_marker = '/kometa/'
 
     if config_marker in normalized_dir:
         relative_collections_dir = normalized_dir.split(
             config_marker,
+            1
+        )[1]
+
+        kometa_episode_dir = (
+            f"config/{relative_collections_dir}/"
+            f"anime_episode_lists"
+        )
+    elif normalized_dir.startswith(kometa_marker):
+        relative_collections_dir = normalized_dir.split(
+            kometa_marker,
             1
         )[1]
 
