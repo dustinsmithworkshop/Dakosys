@@ -7,6 +7,7 @@ Handles copying default assets (images, fonts) to the correct locations
 import os
 import shutil
 import logging
+import re
 import yaml
 import requests
 from rich.console import Console
@@ -371,6 +372,36 @@ def sync_anime_episode_collections(config, force_update=False):
         )
         return False
 
+def _migrate_legacy_filler_overlay_label(overlay_file, logger):
+    """Update the v1.0 filler label typo without overwriting user styling."""
+    try:
+        with open(overlay_file, 'r', encoding='utf-8') as file:
+            content = file.read()
+
+        updated_content, replacements = re.subn(
+            r"^(\s*episode_label:\s*)(['\"]?)Filler\2(\s*(?:#.*)?)$",
+            r"\1\2Fillers\2\3",
+            content,
+            flags=re.MULTILINE,
+        )
+
+        if replacements:
+            with open(overlay_file, 'w', encoding='utf-8') as file:
+                file.write(updated_content)
+            logger.info(
+                f"Updated legacy filler overlay label in {overlay_file}: "
+                "Filler -> Fillers"
+            )
+
+        return True
+    except Exception as e:
+        logger.error(
+            f"Error updating legacy filler overlay label in "
+            f"{overlay_file}: {str(e)}"
+        )
+        return False
+
+
 def create_anime_overlay_files(config):
     """Create the overlay files for anime episode types."""
     yaml_output_dir, _ = get_kometa_paths(config)
@@ -386,7 +417,7 @@ def create_anime_overlay_files(config):
         'fillers.yml': {
             'overlay_name': 'filler_overlay',
             'name': 'Filler',
-            'label': 'Filler'
+            'label': 'Fillers'
         },
         'manga_canon.yml': {
             'overlay_name': 'manga_overlay',
@@ -410,6 +441,12 @@ def create_anime_overlay_files(config):
         overlay_file = os.path.join(yaml_output_dir, filename)
         
         if os.path.exists(overlay_file):
+            if filename == 'fillers.yml':
+                if not _migrate_legacy_filler_overlay_label(
+                    overlay_file,
+                    logger,
+                ):
+                    success = False
             continue
             
         overlay_content = {
