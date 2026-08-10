@@ -63,7 +63,9 @@ Some series use substantially different broadcast, production, DVD, or metadata-
 
 When DAKOSYS detects strong evidence that episodes exist at different positions, it can build a one-to-one title-based mapping between AnimeFillerList and Plex.
 
-Exact normalized-title matches are preferred before fuzzy matching.
+Exact normalized-title matches are preferred before fuzzy matching. Fuzzy candidates are resolved by confidence rather than AFL episode-number order so a weaker title cannot claim a Plex episode before a stronger match. Cosmetic broadcast annotations such as `(1 Hour Special)` are ignored for title identity.
+
+When trusted title anchors surround a short unresolved gap, DAKOSYS can fill that gap only when the unresolved AnimeFillerList and unused Plex episode counts match exactly and Plex order remains forward. This bounded reconciliation is intentionally conservative and otherwise leaves the episodes unmapped.
 
 Multipart episode names are normalized so equivalent forms such as:
 
@@ -169,6 +171,21 @@ Discord webhook integration.
 
 ---
 
+## Docker Images and Versioning
+
+Stable releases use semantic versioning. For v1 releases, the following tags are published to GitHub Container Registry:
+
+```text
+ghcr.io/dustinsmithworkshop/dakosys:1.0.0   # exact release
+ghcr.io/dustinsmithworkshop/dakosys:1.0     # latest 1.0.x
+ghcr.io/dustinsmithworkshop/dakosys:1       # latest 1.x
+ghcr.io/dustinsmithworkshop/dakosys:latest  # latest stable/main build
+```
+
+For the most reproducible deployment, pin the exact release tag. Use `:1` if you want compatible v1 updates automatically.
+
+---
+
 ## Quick Start
 
 Create the directory structure:
@@ -184,17 +201,33 @@ Download `docker-compose.yml` from this fork:
 curl -O https://raw.githubusercontent.com/dustinsmithworkshop/Dakosys/main/docker-compose.yml
 ```
 
-This fork publishes Docker images to GitHub Container Registry:
-
-```text
-ghcr.io/dustinsmithworkshop/dakosys:latest
-```
-
-If you are adapting an existing DAKOSYS installation from upstream, make sure the `image:` entry in your Docker Compose or Unraid configuration points to:
+This fork publishes Docker images to GitHub Container Registry. For a stable v1 installation, use:
 
 ```yaml
-image: ghcr.io/dustinsmithworkshop/dakosys:latest
+image: ghcr.io/dustinsmithworkshop/dakosys:1
 ```
+
+Pin `:1.0.0` instead if you do not want automatic v1 updates. If you are adapting an installation from upstream, make sure both Docker Compose and Unraid point to `ghcr.io/dustinsmithworkshop/dakosys`, not the upstream image.
+
+### Kometa volume mount
+
+DAKOSYS must be able to write into the same Kometa configuration directory that Kometa uses. Mount the **host directory containing Kometa's `config.yml`, `collections/`, `overlays/`, `assets/`, and `fonts/`** at `/kometa` in the DAKOSYS container.
+
+Example for Unraid:
+
+```text
+Host:      /mnt/user/appdata/kometa
+Container: /kometa
+```
+
+With that layout, use these paths during DAKOSYS setup:
+
+```text
+Overlay YAML path: /kometa/overlays
+Collections path:  /kometa/collections
+```
+
+Kometa itself may see the same host directory as `/config`; that is expected. A file written by DAKOSYS to `/kometa/collections/anime_episode_type.yml` can therefore be referenced by Kometa as `config/collections/anime_episode_type.yml`.
 
 Run the setup wizard:
 
@@ -353,7 +386,10 @@ Run an immediate update of a specific service:
 
 ```bash
 docker compose run --rm dakosys run-update tv_status_tracker
+docker compose run --rm dakosys run-update anime_episode_type
 ```
+
+For scheduled anime batches, the final summary reports successful and skipped/failed shows separately. A show rejected by AnimeFillerList identity validation is not counted as successfully processed.
 
 ### List Management
 
@@ -373,6 +409,39 @@ Sync the Kometa collections file with current Trakt lists:
 
 ```bash
 docker compose run --rm dakosys sync-collections
+```
+
+---
+
+
+## Anime Mappings
+
+Anime mappings are stored separately from the main configuration in `config/mappings.yaml`. This file is installation-specific and should not be copied from another Plex library blindly.
+
+Basic title mapping:
+
+```yaml
+mappings:
+  magister-negi-magi: Negima!
+  nisekoi-false-love: Nisekoi
+```
+
+The key is the AnimeFillerList slug and the value is the **exact Plex show title**. Do not map a slug to a different remake, reboot, sequel, or adaptation just to make the warning disappear. AnimeFillerList page validation intentionally rejects suspicious mappings.
+
+When multiple Plex shows have ambiguous titles, an explicit TVDb override can identify the intended series:
+
+```yaml
+tvdb_mappings:
+  rurouni-kenshin: 70863
+  urusei-yatsura: 75113
+```
+
+`tvdb_mappings` is authoritative: if that TVDb ID is not present in the configured Plex anime libraries, DAKOSYS refuses to fall back to a title match.
+
+Optional episode-title adjustments remain under `title_mappings`. `ignored_mappings` can be left empty unless you have a specific legacy workflow that requires it:
+
+```yaml
+ignored_mappings: []
 ```
 
 ---
@@ -516,6 +585,12 @@ docker compose run --rm dakosys setup anime_episode_type
 docker compose run --rm dakosys setup tv_status_tracker
 docker compose run --rm dakosys setup size_overlay
 ```
+
+---
+
+## Release Notes
+
+See [`CHANGELOG.md`](CHANGELOG.md) for release history.
 
 ---
 

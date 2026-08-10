@@ -10,7 +10,6 @@ build/
 dist/
 *.egg-info/
 
-CHANGELOG.md
 
 .venv/
 bleach_manga_canon.txt

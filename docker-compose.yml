@@ -1,23 +1,25 @@
 services:
   dakosys:
-    image: ghcr.io/sahara101/dakosys:latest
+    image: ghcr.io/dustinsmithworkshop/dakosys:1
     container_name: dakosys-cli
     profiles:
       - cli
     volumes:
       - ./config:/app/config
       - ./data:/app/data
+      # Replace /kometa with the host directory that contains Kometa's config.yml.
       - /kometa:/kometa
     command: --help
     stdin_open: true
     tty: true
 
   dakosys-updater:
-    image: ghcr.io/sahara101/dakosys:latest
+    image: ghcr.io/dustinsmithworkshop/dakosys:1
     container_name: dakosys-web
     volumes:
       - ./config:/app/config
       - ./data:/app/data
+      # Replace /kometa with the host directory that contains Kometa's config.yml.
       - /kometa:/kometa
     ports:
       - "3000:8000"
