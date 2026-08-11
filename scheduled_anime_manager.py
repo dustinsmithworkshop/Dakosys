@@ -424,6 +424,7 @@ def _write_generated(
     scheduled: list[str],
     active: list[dict[str, Any]],
     reviews: list[dict[str, Any]],
+    ignored: list[dict[str, Any]],
     stats: dict[str, int],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -452,6 +453,16 @@ def _write_generated(
                 "carried_forward": bool(item.get("carried_forward", False)),
             }
             for item in sorted(reviews, key=lambda row: row["slug"])
+        },
+        "ignored": {
+            item["slug"]: {
+                "plex_title": item.get("plex_title", ""),
+                "reason": item.get(
+                    "reason",
+                    "Explicitly ignored for AnimeFillerList",
+                ),
+            }
+            for item in sorted(ignored, key=lambda row: row["slug"])
         },
         "stats": stats,
     }
@@ -525,6 +536,21 @@ def refresh_scheduled_anime(
     }
 
     try:
+        import mappings_manager
+        all_mappings = mappings_manager.load_mappings()
+        afl_ignored = {
+            str(item).strip().lower()
+            for item in (all_mappings.get("afl_ignored", []) or [])
+            if str(item).strip()
+        }
+    except Exception:
+        afl_ignored = {
+            str(item).strip().lower()
+            for item in (config.get("afl_ignored", []) or [])
+            if str(item).strip()
+        }
+
+    try:
         plex = _quiet_call(atm.connect_to_plex)
         if plex is None:
             raise RuntimeError("Could not connect to Plex")
@@ -565,10 +591,12 @@ def refresh_scheduled_anime(
     resolved_plex_slugs: set[str] = set()
     active_rows: list[dict[str, Any]] = []
     review_rows: list[dict[str, Any]] = []
+    ignored_rows: list[dict[str, Any]] = []
 
     stats = {
         "afl_catalog": len(slugs),
         "plex_afl_matches": 0,
+        "afl_ignored": 0,
         "afl_valid": 0,
         "active_or_returning": 0,
         "inactive": 0,
@@ -586,10 +614,23 @@ def refresh_scheduled_anime(
         resolved_plex_slugs.add(slug)
         stats["plex_afl_matches"] += 1
 
-        if slug in always_exclude:
+        plex_title = str(getattr(show, "title", "") or slug)
+
+        if slug.lower() in afl_ignored:
+            stats["afl_ignored"] += 1
+            ignored_rows.append(
+                {
+                    "slug": slug,
+                    "plex_title": plex_title,
+                    "reason": (
+                        "Explicitly ignored via mappings.yaml afl_ignored"
+                    ),
+                }
+            )
             continue
 
-        plex_title = str(getattr(show, "title", "") or slug)
+        if slug in always_exclude:
+            continue
 
         episodes = _quiet_call(
             atm.get_anime_episodes,
@@ -745,6 +786,7 @@ def refresh_scheduled_anime(
         scheduled=scheduled,
         active=active_rows,
         reviews=review_rows,
+        ignored=ignored_rows,
         stats=stats,
     )
 

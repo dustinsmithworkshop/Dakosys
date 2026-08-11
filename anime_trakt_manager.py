@@ -470,8 +470,24 @@ def get_anime_episodes(
             import mappings_manager
             all_mappings = mappings_manager.load_mappings()
             afl_mappings = all_mappings.get("afl_mappings", {}) or {}
+            afl_ignored = all_mappings.get("afl_ignored", []) or []
         except Exception:
             afl_mappings = CONFIG.get("afl_mappings", {}) or {}
+            afl_ignored = CONFIG.get("afl_ignored", []) or []
+
+        ignored_slugs = {
+            str(item).strip().lower()
+            for item in afl_ignored
+            if str(item).strip()
+        }
+
+        if anime_name.lower() in ignored_slugs:
+            if not silent:
+                logger.info(
+                    f"Skipping '{anime_name}': explicitly ignored "
+                    "for AnimeFillerList"
+                )
+            return []
 
         afl_slug = afl_mappings.get(
             anime_name.lower(),
