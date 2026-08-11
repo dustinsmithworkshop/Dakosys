@@ -434,13 +434,39 @@ def get_anime_episodes(
     global CONFIG
 
     try:
-        cache_key = anime_name.lower()
+        # Allow the Dakosys/Plex key to use a different AnimeFillerList slug.
+        #
+        # Example:
+        #   shaman-king -> shaman-king-2021
+        #
+        # This affects only the AFL source page. The original anime_name
+        # continues to be used for Plex mappings, Trakt lists, title mappings,
+        # scheduling, and Kometa output.
+        try:
+            import mappings_manager
+            all_mappings = mappings_manager.load_mappings()
+            afl_mappings = all_mappings.get("afl_mappings", {}) or {}
+        except Exception:
+            afl_mappings = CONFIG.get("afl_mappings", {}) or {}
+
+        afl_slug = afl_mappings.get(
+            anime_name.lower(),
+            anime_name,
+        )
+
+        if afl_slug != anime_name:
+            logger.info(
+                f"Using AnimeFillerList override: "
+                f"{anime_name} → {afl_slug}"
+            )
+
+        cache_key = f"{anime_name.lower()}->{afl_slug.lower()}"
         cached_failure = _AFL_INVALID_IDENTITY_CACHE.get(cache_key)
         if cached_failure is not None:
             return []
 
         base_url = "https://www.animefillerlist.com/shows/"
-        anime_url = f"{base_url}{anime_name}"
+        anime_url = f"{base_url}{afl_slug}"
 
         if not silent:
             logger.info(
@@ -457,11 +483,11 @@ def get_anime_episodes(
         # from search will still be identity-validated below.
         if response.status_code == 404:
             logger.warning(
-                f"AFL slug '{anime_name}' not found (404), "
+                f"AFL slug '{afl_slug}' not found (404), "
                 f"trying AFL search..."
             )
 
-            search_query = anime_name.replace("-", " ")
+            search_query = afl_slug.replace("-", " ")
 
             search_resp = requests.get(
                 (
@@ -525,7 +551,7 @@ def get_anime_episodes(
                         page_title,
                         similarity,
                     ) = _validate_afl_page_identity(
-                        anime_name,
+                        afl_slug,
                         retry_soup,
                     )
 
@@ -576,7 +602,7 @@ def get_anime_episodes(
             page_title,
             similarity,
         ) = _validate_afl_page_identity(
-            anime_name,
+            afl_slug,
             soup,
         )
 
