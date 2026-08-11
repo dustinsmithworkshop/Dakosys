@@ -3741,6 +3741,49 @@ def create_title_mapping(anime_name, manual_mappings=None):
         logger.error(traceback.format_exc())
         return False
 
+@cli.command(name="refresh-schedule")
+@click.option("--force/--no-force", default=True, help="Ignore refresh_hours cache.")
+@click.option("--notify/--no-notify", default=True, help="Send Discord notification if membership changes.")
+def refresh_schedule(force, notify):
+    """Refresh the generated scheduled-anime.yaml without updating episode lists."""
+    try:
+        from scheduled_anime_manager import refresh_scheduled_anime
+
+        result = refresh_scheduled_anime(
+            CONFIG,
+            force=force,
+            notify=notify,
+        )
+
+        scheduled = result.get("scheduled_anime", [])
+        if not result.get("success"):
+            console.print(
+                f"[bold yellow]Schedule refresh failed; previous schedule retained: "
+                f"{result.get('error', 'unknown error')}[/bold yellow]"
+            )
+            return
+
+        console.print(
+            f"[bold green]Scheduled anime refreshed: "
+            f"{len(scheduled)} shows[/bold green]"
+        )
+        console.print(f"[blue]File: {result.get('path')}[/blue]")
+
+        if result.get("changed"):
+            added = result.get("added", [])
+            removed = result.get("removed", [])
+            if added:
+                console.print("[green]Added: " + ", ".join(added) + "[/green]")
+            if removed:
+                console.print("[yellow]Removed: " + ", ".join(removed) + "[/yellow]")
+        else:
+            console.print("[blue]No scheduled-anime membership changes.[/blue]")
+    except Exception as e:
+        console.print(f"[bold red]Error refreshing scheduled anime: {str(e)}[/bold red]")
+        import traceback
+        console.print(traceback.format_exc())
+
+
 @cli.command()
 @click.argument('service', required=False, type=click.Choice(['anime_episode_type', 'tv_status_tracker', 'size_overlay', 'all']))
 def run_update(service=None):
@@ -3794,7 +3837,46 @@ def run_update(service=None):
 
         # Run anime episode type updates using the ALL command logic
         if (not service or service == 'all' or service == 'anime_episode_type') and anime_enabled:
-            scheduled_anime = config.get('scheduler', {}).get('scheduled_anime', [])
+            # Refresh the generated automatic schedule before processing.
+            auto_schedule = config.get('scheduler', {}).get('auto_schedule', {}) or {}
+            if auto_schedule.get('enabled', False):
+                from scheduled_anime_manager import refresh_scheduled_anime
+                schedule_result = refresh_scheduled_anime(
+                    config,
+                    force=False,
+                    notify=True,
+                )
+                scheduled_anime = schedule_result['scheduled_anime']
+                if schedule_result.get('skipped'):
+                    console.print(
+                        f"[blue]Using cached automatic anime schedule "
+                        f"({len(scheduled_anime)} shows)[/blue]"
+                    )
+                elif schedule_result.get('success'):
+                    console.print(
+                        f"[green]Automatic anime schedule refreshed: "
+                        f"{len(scheduled_anime)} shows[/green]"
+                    )
+                    if schedule_result.get('added'):
+                        console.print(
+                            "[green]Added: "
+                            + ", ".join(schedule_result['added'])
+                            + "[/green]"
+                        )
+                    if schedule_result.get('removed'):
+                        console.print(
+                            "[yellow]Removed: "
+                            + ", ".join(schedule_result['removed'])
+                            + "[/yellow]"
+                        )
+                else:
+                    console.print(
+                        "[yellow]Automatic schedule refresh failed; "
+                        "using previous schedule: "
+                        f"{schedule_result.get('error', 'unknown error')}[/yellow]"
+                    )
+            else:
+                scheduled_anime = config.get('scheduler', {}).get('scheduled_anime', [])
             console.print(f"[bold]Updating {len(scheduled_anime)} scheduled anime using ALL command:[/bold]")
 
             skipped_or_failed = []
