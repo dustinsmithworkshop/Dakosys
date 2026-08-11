@@ -387,14 +387,38 @@ def _validate_afl_page_identity(anime_name, soup, threshold=0.55):
         import mappings_manager
         all_mappings = mappings_manager.load_mappings()
         configured_mappings = all_mappings.get("mappings", {})
+        afl_identity_aliases = all_mappings.get(
+            "afl_identity_aliases",
+            {},
+        ) or {}
     except Exception:
         configured_mappings = CONFIG.get("mappings", {})
+        afl_identity_aliases = CONFIG.get(
+            "afl_identity_aliases",
+            {},
+        ) or {}
 
     mapped_title = configured_mappings.get(anime_name.lower())
-    
+
     mapped_identity = _normalize_afl_show_identity(mapped_title)
     if mapped_identity and mapped_identity not in requested_identities:
         requested_identities.append(mapped_identity)
+
+    identity_aliases = afl_identity_aliases.get(
+        anime_name.lower(),
+        [],
+    )
+
+    if isinstance(identity_aliases, str):
+        identity_aliases = [identity_aliases]
+
+    for alias in identity_aliases:
+        alias_identity = _normalize_afl_show_identity(alias)
+        if (
+            alias_identity
+            and alias_identity not in requested_identities
+        ):
+            requested_identities.append(alias_identity)
 
     h1 = soup.find("h1")
     page_title = (
