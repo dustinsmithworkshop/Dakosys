@@ -408,7 +408,7 @@ def refresh_scheduled_anime(
 
     try:
         plex = _quiet_call(atm.connect_to_plex)
-        if not plex:
+        if plex is None:
             raise RuntimeError("Could not connect to Plex")
 
         access_token = trakt_auth.ensure_trakt_auth(quiet=True)
