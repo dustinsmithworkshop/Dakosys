@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -108,20 +109,144 @@ def _get_tmdb_id(show) -> Optional[str]:
     return None
 
 
+class TraktLookupError(RuntimeError):
+    """Fatal Trakt lookup failure that should abort a schedule refresh."""
+
+
+class TraktLookupClient:
+    """Rate-limit-aware Trakt client for automatic schedule discovery."""
+
+    def __init__(
+        self,
+        headers: dict[str, str],
+        *,
+        request_delay_seconds: float = 0.5,
+        max_retries: int = 5,
+    ) -> None:
+        self.session = requests.Session()
+        self.session.headers.update(headers)
+        self.request_delay_seconds = max(0.0, request_delay_seconds)
+        self.max_retries = max(1, max_retries)
+        self._last_request_at = 0.0
+        self.requests_made = 0
+        self.rate_limit_retries = 0
+
+    def _pace(self) -> None:
+        if self.request_delay_seconds <= 0 or self._last_request_at <= 0:
+            return
+        remaining = (
+            self.request_delay_seconds
+            - (time.monotonic() - self._last_request_at)
+        )
+        if remaining > 0:
+            time.sleep(remaining)
+
+    @staticmethod
+    def _retry_after_seconds(response, attempt: int) -> float:
+        raw = str(response.headers.get("Retry-After") or "").strip()
+        if raw:
+            try:
+                return max(1.0, float(raw))
+            except ValueError:
+                pass
+        return float(min(60, 2 ** attempt))
+
+    def get_json(
+        self,
+        url: str,
+        *,
+        params: Optional[dict[str, Any]] = None,
+    ) -> tuple[Optional[Any], str]:
+        for attempt in range(1, self.max_retries + 1):
+            self._pace()
+            try:
+                response = self.session.get(
+                    url,
+                    params=params,
+                    timeout=30,
+                )
+                self._last_request_at = time.monotonic()
+                self.requests_made += 1
+            except requests.RequestException as exc:
+                self._last_request_at = time.monotonic()
+                if attempt >= self.max_retries:
+                    return None, f"Trakt request failed: {exc}"
+                delay = float(min(30, 2 ** attempt))
+                logger.warning(
+                    "Trakt request failed (%s); retrying in %.0fs "
+                    "(attempt %d/%d)",
+                    exc,
+                    delay,
+                    attempt,
+                    self.max_retries,
+                )
+                time.sleep(delay)
+                continue
+
+            if response.status_code == 200:
+                try:
+                    return response.json(), ""
+                except ValueError:
+                    return None, "Trakt returned invalid JSON"
+
+            if response.status_code == 429:
+                self.rate_limit_retries += 1
+                if attempt >= self.max_retries:
+                    raise TraktLookupError(
+                        "Trakt rate limit persisted after "
+                        f"{self.max_retries} attempts"
+                    )
+                delay = self._retry_after_seconds(response, attempt)
+                logger.warning(
+                    "Trakt rate limit hit; retrying in %.0fs "
+                    "(attempt %d/%d)",
+                    delay,
+                    attempt,
+                    self.max_retries,
+                )
+                time.sleep(delay)
+                continue
+
+            if response.status_code in {401, 403}:
+                raise TraktLookupError(
+                    f"Trakt authentication/authorization failed: "
+                    f"HTTP {response.status_code}"
+                )
+
+            if response.status_code in {500, 502, 503, 504}:
+                if attempt >= self.max_retries:
+                    raise TraktLookupError(
+                        f"Trakt server error persisted: "
+                        f"HTTP {response.status_code}"
+                    )
+                delay = float(min(30, 2 ** attempt))
+                logger.warning(
+                    "Trakt returned HTTP %d; retrying in %.0fs "
+                    "(attempt %d/%d)",
+                    response.status_code,
+                    delay,
+                    attempt,
+                    self.max_retries,
+                )
+                time.sleep(delay)
+                continue
+
+            return None, f"Trakt HTTP {response.status_code}"
+
+        raise TraktLookupError("Trakt lookup retries exhausted")
+
+
 def _trakt_show_by_tmdb(
     tmdb_id: str,
-    headers: dict[str, str],
+    client: TraktLookupClient,
 ) -> tuple[Optional[dict[str, Any]], str]:
-    search = requests.get(
+    items, error = client.get_json(
         f"{TRAKT_API}/search/tmdb/{tmdb_id}",
-        headers=headers,
-        params={"type": "show"},
-        timeout=30,
+        params={"type": "show", "extended": "full"},
     )
-    if search.status_code != 200:
-        return None, f"Trakt TMDB search HTTP {search.status_code}"
+    if items is None:
+        return None, error or "Trakt TMDB lookup failed"
 
-    items = search.json()
     show_obj = next(
         (
             item.get("show")
@@ -133,20 +258,7 @@ def _trakt_show_by_tmdb(
     if not show_obj:
         return None, "No Trakt show found for TMDB ID"
 
-    trakt_id = (show_obj.get("ids") or {}).get("trakt")
-    if not trakt_id:
-        return None, "Trakt show has no Trakt ID"
-
-    summary = requests.get(
-        f"{TRAKT_API}/shows/{trakt_id}",
-        headers=headers,
-        params={"extended": "full"},
-        timeout=30,
-    )
-    if summary.status_code != 200:
-        return None, f"Trakt show summary HTTP {summary.status_code}"
-
-    return summary.json(), ""
+    return show_obj, ""
 
 
 def _normalize_statuses(values: Any, defaults: set[str]) -> set[str]:
@@ -363,6 +475,12 @@ def refresh_scheduled_anime(
 ) -> dict[str, Any]:
     import anime_trakt_manager as atm
 
+    # When anime_trakt_manager.py is executed directly, Python loads it as
+    # __main__. Importing anime_trakt_manager here creates a second module
+    # instance with its own CONFIG, so explicitly reuse the already-loaded
+    # configuration passed in by the caller.
+    atm.CONFIG = config
+
     auto = config.get("scheduler", {}).get("auto_schedule", {}) or {}
     path = _resolve_schedule_path(config)
     previous_data = _load_generated(path)
@@ -419,6 +537,16 @@ def refresh_scheduled_anime(
         if not headers:
             raise RuntimeError("Could not build Trakt request headers")
 
+        trakt_client = TraktLookupClient(
+            headers,
+            request_delay_seconds=float(
+                auto.get("trakt_request_delay_seconds", 0.5) or 0.5
+            ),
+            max_retries=int(
+                auto.get("trakt_max_retries", 5) or 5
+            ),
+        )
+
         slugs = _get_afl_catalog()
     except Exception as exc:
         logger.error("Automatic scheduled-anime refresh failed: %s", exc)
@@ -446,6 +574,8 @@ def refresh_scheduled_anime(
         "inactive": 0,
         "review": 0,
         "carried_forward": 0,
+        "trakt_requests": 0,
+        "trakt_rate_limit_retries": 0,
     }
 
     for slug in slugs:
@@ -510,10 +640,23 @@ def refresh_scheduled_anime(
         try:
             trakt_show, error = _trakt_show_by_tmdb(
                 str(tmdb_id),
-                headers,
+                trakt_client,
             )
-        except requests.RequestException as exc:
-            trakt_show, error = None, f"Trakt request failed: {exc}"
+        except TraktLookupError as exc:
+            logger.error(
+                "Automatic scheduled-anime refresh aborted: %s",
+                exc,
+            )
+            return {
+                "success": False,
+                "changed": False,
+                "scheduled_anime": sorted(previous),
+                "added": [],
+                "removed": [],
+                "path": str(path),
+                "skipped": False,
+                "error": str(exc),
+            }
 
         if not trakt_show:
             carried = slug in previous
@@ -589,6 +732,9 @@ def refresh_scheduled_anime(
     recommended -= always_exclude
     scheduled = sorted(recommended)
     current = set(scheduled)
+
+    stats["trakt_requests"] = trakt_client.requests_made
+    stats["trakt_rate_limit_retries"] = trakt_client.rate_limit_retries
 
     added = sorted(current - previous)
     removed = sorted(previous - current)
