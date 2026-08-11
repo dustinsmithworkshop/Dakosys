@@ -1,0 +1,42 @@
+# Dakosys v1.1 mappings starter
+# Copy this file to: config/mappings.yaml
+#
+# This file is installation-specific. Plex titles, TVDb IDs, and exceptions
+# can differ between libraries. Do not blindly copy another user's mappings.
+
+mappings:
+  code-geass: "Code Geass: Lelouch of the Rebellion"
+  dr-stone: "Dr. STONE"
+  haikyuu: "Haikyu!!"
+  sage-tanya-evil: "Saga of Tanya the Evil"
+
+# Use a different AnimeFillerList URL slug while keeping the original
+# Dakosys/Plex key everywhere else.
+afl_mappings:
+  blue-lock: blue-lock-0
+  shaman-king: shaman-king-2021
+  your-eternity-0: your-eternity
+
+# Additional legitimate AFL display titles used only by the AFL identity
+# validator. This does not lower or bypass the identity threshold.
+afl_identity_aliases:
+  fighting-spirit:
+    - "Hajime no Ippo: The Fighting!"
+
+# Known AFL entries that should not be fetched or validated.
+# Ignored shows are omitted from automatic scheduling and are written under
+# `ignored:` in generated scheduled-anime.yaml instead of flooding error logs.
+afl_ignored:
+  - city-hunter
+  - mobile-suit-gundam-zz
+  - mobile-suit-zeta-gundam
+
+# Explicit TVDb IDs for ambiguous Plex title matching.
+tvdb_mappings:
+  rurouni-kenshin: 70863
+  urusei-yatsura: 75113
+
+# Optional/advanced mapping sections.
+trakt_mappings: {}
+title_mappings: {}
+ignored_mappings: []

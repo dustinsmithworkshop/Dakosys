@@ -1,0 +1,73 @@
+# Dakosys v1.1 starter configuration
+# Copy this file to: config/config.yaml
+#
+# IMPORTANT:
+# - Replace all example values before use.
+# - Do not commit your real Plex token, Trakt credentials, or Discord webhook.
+# - Dakosys v1.1 automatic anime scheduling generates config/scheduled-anime.yaml.
+#   A hard-coded scheduler.scheduled_anime list is not required when
+#   scheduler.auto_schedule.enabled is true.
+
+plex:
+  url: http://192.168.1.100:32400
+  token: REPLACE_WITH_PLEX_TOKEN
+  libraries:
+    anime:
+      - Anime
+    movie:
+      - Movies
+    tv:
+      - TV
+
+trakt:
+  username: REPLACE_WITH_TRAKT_USERNAME
+
+lists:
+  default_privacy: public
+
+asset_directory: /kometa/assets
+collections_dir: /kometa/collections
+yaml_output_dir: /kometa/overlays
+
+services:
+  anime_episode_type:
+    enabled: true
+
+  tv_status_tracker:
+    enabled: true
+    collections_dir: /kometa/collections
+
+  size_overlay:
+    enabled: false
+
+scheduler:
+  anime_episode_type:
+    times:
+      - "03:00"
+    type: daily
+
+  auto_schedule:
+    enabled: true
+    file: config/scheduled-anime.yaml
+    refresh_hours: 24
+    notify_on_change: true
+    always_include: []
+    always_exclude: []
+
+    # Optional tuning:
+    # trakt_request_delay_seconds: 0.5
+    # trakt_max_retries: 5
+
+  tv_status_tracker:
+    times:
+      - "02:00"
+    type: daily
+
+notifications:
+  enabled: true
+
+  # Recommended: provide the Discord webhook through the container environment:
+  #
+  #   DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+  #
+  # The automatic scheduler sends a notification only when membership changes.
