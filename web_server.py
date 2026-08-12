@@ -1584,9 +1584,11 @@ class SetupPayload(BaseModel):
     libraries: dict  # {"anime": [...], "tv": [...], "movie": [...]}
     services: dict   # see structure below
     kometa: dict     # yaml_output_dir, collections_dir, font_directory, asset_directory
-    trakt: dict      # client_id, client_secret, username, redirect_uri
+    trakt: Optional[dict] = None
+    auto_schedule: Optional[dict] = None
+    legacy_episode_publishing: bool = False
     notifications: dict  # enabled, discord_webhook
-    list_privacy: str  # "private" or "public"
+    list_privacy: str = "private"
     tmdb_api_key: str = ""
 
 @app.post("/api/setup")
@@ -1615,6 +1617,63 @@ def run_setup_api(payload: SetupPayload):
         tst = svc.get("tv_status_tracker", {})
         so = svc.get("size_overlay", {})
 
+        aet_enabled = bool(aet.get("enabled", False))
+        tv_status_enabled = bool(tst.get("enabled", False))
+
+        auto_schedule_cfg = payload.auto_schedule or {}
+        auto_schedule_enabled = bool(
+            auto_schedule_cfg.get("enabled", False)
+        )
+        legacy_episode_publishing = bool(
+            payload.legacy_episode_publishing
+        )
+
+        if (
+            auto_schedule_enabled
+            or legacy_episode_publishing
+        ) and not aet_enabled:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Automatic anime scheduling and legacy Trakt "
+                    "episode-list publishing require Anime Episode Type"
+                ),
+            )
+
+        trakt_required = (
+            tv_status_enabled
+            or auto_schedule_enabled
+            or legacy_episode_publishing
+        )
+
+        list_settings_required = (
+            tv_status_enabled
+            or legacy_episode_publishing
+        )
+
+        trakt_cfg = payload.trakt or {}
+
+        if trakt_required:
+            missing_trakt = [
+                field
+                for field in (
+                    "client_id",
+                    "client_secret",
+                    "username",
+                )
+                if not str(trakt_cfg.get(field, "") or "").strip()
+            ]
+
+            if missing_trakt:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Trakt is required by the selected features. "
+                        "Missing: "
+                        + ", ".join(missing_trakt)
+                    ),
+                )
+
         config = {
             "timezone": payload.timezone,
             "date_format": payload.date_format.upper(),
@@ -1629,12 +1688,10 @@ def run_setup_api(payload: SetupPayload):
                 },
             },
             "trakt": {
-                "client_id": payload.trakt.get("client_id", ""),
-                "client_secret": payload.trakt.get("client_secret", ""),
-                "username": payload.trakt.get("username", ""),
-                "redirect_uri": payload.trakt.get("redirect_uri", "urn:ietf:wg:oauth:2.0:oob"),
+                "episode_list_publishing": {
+                    "enabled": legacy_episode_publishing,
+                },
             },
-            "lists": {"default_privacy": payload.list_privacy},
             "kometa_config": {
                 "yaml_output_dir": payload.kometa.get("yaml_output_dir", "/kometa/config/overlays"),
                 "collections_dir": payload.kometa.get("collections_dir", "/kometa/config/collections"),
@@ -1643,6 +1700,14 @@ def run_setup_api(payload: SetupPayload):
             },
             "scheduler": {
                 "anime_episode_type": _sched(aet),
+                "auto_schedule": {
+                    "enabled": auto_schedule_enabled,
+                    "file": "config/scheduled-anime.yaml",
+                    "refresh_hours": 24,
+                    "notify_on_change": True,
+                    "always_include": [],
+                    "always_exclude": [],
+                },
                 "tv_status_tracker": _sched(tst),
                 "size_overlay": _sched(so),
             },
@@ -1705,6 +1770,32 @@ def run_setup_api(payload: SetupPayload):
             },
         }
 
+        if trakt_required:
+            config["trakt"].update(
+                {
+                    "client_id": str(
+                        trakt_cfg.get("client_id", "")
+                    ).strip(),
+                    "client_secret": str(
+                        trakt_cfg.get("client_secret", "")
+                    ).strip(),
+                    "username": str(
+                        trakt_cfg.get("username", "")
+                    ).strip(),
+                    "redirect_uri": str(
+                        trakt_cfg.get(
+                            "redirect_uri",
+                            "urn:ietf:wg:oauth:2.0:oob",
+                        )
+                    ).strip(),
+                }
+            )
+
+        if list_settings_required:
+            config["lists"] = {
+                "default_privacy": payload.list_privacy,
+            }
+
         if payload.notifications.get("enabled") and payload.notifications.get("discord_webhook"):
             config["notifications"]["discord"] = {"webhook_url": payload.notifications["discord_webhook"]}
 
@@ -1715,6 +1806,8 @@ def run_setup_api(payload: SetupPayload):
         os.replace(tmp_path, CONFIG_FILE)
 
         return {"success": True}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
