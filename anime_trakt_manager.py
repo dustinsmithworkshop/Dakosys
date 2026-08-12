@@ -3875,94 +3875,44 @@ def run_update(service=None):
         # Keep track of successful updates
         success_count = 0
 
-        # Run anime episode type updates using the ALL command logic
-        if (not service or service == 'all' or service == 'anime_episode_type') and anime_enabled:
-            # Refresh the generated automatic schedule before processing.
-            auto_schedule = config.get('scheduler', {}).get('auto_schedule', {}) or {}
-            if auto_schedule.get('enabled', False):
-                from scheduled_anime_manager import refresh_scheduled_anime
-                schedule_result = refresh_scheduled_anime(
-                    config,
-                    force=False,
-                    notify=True,
-                )
-                scheduled_anime = schedule_result['scheduled_anime']
-                if schedule_result.get('skipped'):
-                    console.print(
-                        f"[blue]Using cached automatic anime schedule "
-                        f"({len(scheduled_anime)} shows)[/blue]"
-                    )
-                elif schedule_result.get('success'):
-                    console.print(
-                        f"[green]Automatic anime schedule refreshed: "
-                        f"{len(scheduled_anime)} shows[/green]"
-                    )
-                    if schedule_result.get('added'):
-                        console.print(
-                            "[green]Added: "
-                            + ", ".join(schedule_result['added'])
-                            + "[/green]"
-                        )
-                    if schedule_result.get('removed'):
-                        console.print(
-                            "[yellow]Removed: "
-                            + ", ".join(schedule_result['removed'])
-                            + "[/yellow]"
-                        )
-                else:
-                    console.print(
-                        "[yellow]Automatic schedule refresh failed; "
-                        "using previous schedule: "
-                        f"{schedule_result.get('error', 'unknown error')}[/yellow]"
-                    )
-            else:
-                scheduled_anime = config.get('scheduler', {}).get('scheduled_anime', [])
-            console.print(f"[bold]Updating {len(scheduled_anime)} scheduled anime using ALL command:[/bold]")
-
-            skipped_or_failed = []
-
-            for anime_name in scheduled_anime:
-                try:
-                    console.print(f"[blue]Processing {anime_name}...[/blue]")
-                    # Defer the expensive full-library Kometa synchronization
-                    # until all scheduled anime have been processed.
-                    if smart_create_all(anime_name, sync_collections=False):
-                        success_count += 1
-                    else:
-                        skipped_or_failed.append(anime_name)
-                        console.print(
-                            f"[yellow]Skipped/failed {anime_name}: "
-                            "no successful episode-list update was completed[/yellow]"
-                        )
-                except Exception as e:
-                    skipped_or_failed.append(anime_name)
-                    console.print(f"[red]Error updating {anime_name}: {str(e)}[/red]")
-                    import traceback
-                    console.print(traceback.format_exc())
-
-            # A Plex-aware collection sync scans/maps the full anime library, so
-            # run it once per scheduled batch instead of once per anime.
+        # Anime Episode Type is generated locally from Plex +
+        # AnimeFillerList. It does not require the scheduled-anime list,
+        # Trakt authentication, or Trakt personal-list publishing.
+        if (
+            (not service or service == 'all' or service == 'anime_episode_type')
+            and anime_enabled
+        ):
             try:
                 from asset_manager import sync_anime_episode_collections
-                console.print(
-                    "[blue]Synchronizing collections after scheduled anime updates...[/blue]"
-                )
-                if sync_anime_episode_collections(CONFIG, force_update=True):
-                    console.print("[green]Collections synchronized successfully![/green]")
-                else:
-                    console.print("[yellow]Failed to synchronize collections[/yellow]")
-            except Exception as e:
-                console.print(f"[red]Error synchronizing collections: {str(e)}[/red]")
-                logger.error(f"Error synchronizing collections: {str(e)}")
 
-            console.print(f"[green]Successfully processed: {success_count}[/green]")
-            console.print(f"[yellow]Skipped/failed: {len(skipped_or_failed)}[/yellow]")
-            console.print(f"[blue]Scheduled total: {len(scheduled_anime)}[/blue]")
-            if skipped_or_failed:
                 console.print(
-                    "[yellow]Skipped/failed anime: "
-                    + ", ".join(skipped_or_failed)
-                    + "[/yellow]"
+                    "[bold blue]Generating Anime Episode Type collections "
+                    "from Plex + AnimeFillerList...[/bold blue]"
+                )
+
+                if sync_anime_episode_collections(
+                    CONFIG,
+                    force_update=True,
+                ):
+                    console.print(
+                        "[green]Anime Episode Type collections "
+                        "updated successfully[/green]"
+                    )
+                    success_count += 1
+                else:
+                    console.print(
+                        "[red]Anime Episode Type collection "
+                        "generation failed[/red]"
+                    )
+
+            except Exception as e:
+                console.print(
+                    f"[red]Error generating Anime Episode Type "
+                    f"collections: {str(e)}[/red]"
+                )
+                logger.error(
+                    f"Error generating Anime Episode Type "
+                    f"collections: {str(e)}"
                 )
 
         # Run TV status tracker updates using the original logic
