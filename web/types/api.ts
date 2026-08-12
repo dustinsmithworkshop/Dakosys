@@ -224,10 +224,46 @@ export interface PlexLibrariesSetupResponse {
 
 export interface TraktAuthStatus {
   connected: boolean;
+  configured: boolean;
   username: string;
   client_id: string;
-  client_secret: string;
+  client_secret_configured: boolean;
   token_expiry: number | null;
+}
+
+export interface TraktOverviewResponse {
+  configured: boolean;
+  required: boolean;
+  requirements: {
+    auto_schedule: boolean;
+    tv_status_tracker: boolean;
+    legacy_episode_publishing: boolean;
+  };
+  legacy_episode_publishing: boolean;
+  list_privacy: string | null;
+  usage: {
+    username: string | null;
+    vip: boolean | null;
+    vip_ep: boolean | null;
+    limits_known: boolean;
+    lists: {
+      current: number;
+      maximum: number | null;
+      remaining: number | null;
+    };
+    items_per_list: {
+      maximum: number | null;
+    };
+    tracked_list: {
+      name: string;
+      exists: boolean;
+      id: number | null;
+      slug: string | null;
+      current_items: number | null;
+      remaining_item_slots: number | null;
+    };
+  } | null;
+  error: string | null;
 }
 
 export interface TraktDeviceCodeResponse {

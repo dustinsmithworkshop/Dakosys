@@ -19,6 +19,7 @@ import type {
   TitleMappingsResponse,
   NextAiringResponse,
   TraktAuthStatus,
+  TraktOverviewResponse,
   TraktDeviceCodeResponse,
   TraktDevicePollResponse,
   SetupResponse,
@@ -72,6 +73,9 @@ export const api = {
   getAnimeSchedule: () => apiFetch<AnimeScheduleResponse>("/api/anime-schedule"),
 
   getTraktAuthStatus: () => apiFetch<TraktAuthStatus>("/api/trakt/status"),
+
+  getTraktOverview: () =>
+    apiFetch<TraktOverviewResponse>("/api/trakt/overview"),
 
   updateTraktCredentials: (clientId: string, clientSecret: string, username: string) =>
     apiFetch<{ success: boolean }>("/api/trakt/credentials", {

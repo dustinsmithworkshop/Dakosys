@@ -1814,15 +1814,29 @@ def run_setup_api(payload: SetupPayload):
 
 @app.get("/api/trakt/status")
 def get_trakt_status():
-    """Return current Trakt authentication status and credentials metadata."""
+    """Return non-secret Trakt authentication/configuration status."""
     import time as _time
-    config = load_config()
-    trakt_cfg = (config or {}).get("trakt", {})
-    username = trakt_cfg.get("username", "")
-    client_id = trakt_cfg.get("client_id", "")
-    client_secret = trakt_cfg.get("client_secret", "")
 
-    token_file = os.path.join(DATA_DIR, "trakt_token.json")
+    config = load_config() or {}
+    trakt_cfg = config.get("trakt", {}) or {}
+
+    username = str(trakt_cfg.get("username", "") or "").strip()
+    client_id = str(trakt_cfg.get("client_id", "") or "").strip()
+    client_secret = str(
+        trakt_cfg.get("client_secret", "") or ""
+    ).strip()
+
+    configured = bool(
+        username
+        and client_id
+        and client_secret
+    )
+
+    token_file = os.path.join(
+        DATA_DIR,
+        "trakt_token.json",
+    )
+
     connected = False
     token_expiry: Optional[int] = None
 
@@ -1830,23 +1844,222 @@ def get_trakt_status():
         try:
             with open(token_file, "r") as f:
                 token_data = json.load(f)
+
             access_token = token_data.get("access_token")
-            created_at = token_data.get("created_at", 0)
-            expires_in = token_data.get("expires_in", 0)
+            created_at = int(
+                token_data.get("created_at", 0) or 0
+            )
+            expires_in = int(
+                token_data.get("expires_in", 0) or 0
+            )
+
             if access_token and expires_in:
                 expiry_ts = created_at + expires_in
-                connected = int(_time.time()) < expiry_ts
+                connected = (
+                    int(_time.time()) < expiry_ts
+                )
                 token_expiry = expiry_ts
         except Exception:
             pass
 
     return {
         "connected": connected,
+        "configured": configured,
         "username": username,
         "client_id": client_id,
-        "client_secret": client_secret,
+        "client_secret_configured": bool(
+            client_secret
+        ),
         "token_expiry": token_expiry,
     }
+
+
+@app.get("/api/trakt/overview")
+def get_trakt_overview():
+    """
+    Return read-only Trakt capability and personal-list usage.
+
+    Never starts interactive device authentication. Live API calls are
+    attempted only when stored user authorization can be used or
+    refreshed non-interactively.
+    """
+    config = load_config()
+
+    if not config:
+        return {
+            "configured": False,
+            "required": False,
+            "requirements": {
+                "auto_schedule": False,
+                "tv_status_tracker": False,
+                "legacy_episode_publishing": False,
+            },
+            "legacy_episode_publishing": False,
+            "list_privacy": None,
+            "usage": None,
+            "error": "Config file not found",
+        }
+
+    trakt_cfg = config.get("trakt", {}) or {}
+    scheduler_cfg = config.get(
+        "scheduler",
+        {},
+    ) or {}
+    services_cfg = config.get(
+        "services",
+        {},
+    ) or {}
+
+    auto_schedule = bool(
+        (
+            scheduler_cfg.get(
+                "auto_schedule",
+                {},
+            )
+            or {}
+        ).get(
+            "enabled",
+            False,
+        )
+    )
+
+    tv_status_tracker = bool(
+        (
+            services_cfg.get(
+                "tv_status_tracker",
+                {},
+            )
+            or {}
+        ).get(
+            "enabled",
+            False,
+        )
+    )
+
+    legacy_episode_publishing = bool(
+        (
+            trakt_cfg.get(
+                "episode_list_publishing",
+                {},
+            )
+            or {}
+        ).get(
+            "enabled",
+            False,
+        )
+    )
+
+    required = bool(
+        auto_schedule
+        or tv_status_tracker
+        or legacy_episode_publishing
+    )
+
+    username = str(
+        trakt_cfg.get("username", "") or ""
+    ).strip()
+    client_id = str(
+        trakt_cfg.get("client_id", "") or ""
+    ).strip()
+    client_secret = str(
+        trakt_cfg.get("client_secret", "") or ""
+    ).strip()
+
+    configured = bool(
+        username
+        and client_id
+        and client_secret
+    )
+
+    result = {
+        "configured": configured,
+        "required": required,
+        "requirements": {
+            "auto_schedule": auto_schedule,
+            "tv_status_tracker": tv_status_tracker,
+            "legacy_episode_publishing":
+                legacy_episode_publishing,
+        },
+        "legacy_episode_publishing":
+            legacy_episode_publishing,
+        "list_privacy": (
+            config.get("lists", {}) or {}
+        ).get("default_privacy"),
+        "usage": None,
+        "error": None,
+    }
+
+    if not configured:
+        if required:
+            result["error"] = (
+                "Trakt credentials are required by one or more "
+                "enabled features"
+            )
+        return result
+
+    try:
+        import time as _time
+        import trakt_auth as _ta
+
+        (
+            access_token,
+            refresh_token,
+            created_at,
+            expires_in,
+        ) = _ta.get_stored_trakt_tokens()
+
+        now = int(_time.time())
+
+        token_live = bool(
+            access_token
+            and refresh_token
+            and created_at
+            and expires_in
+            and (
+                int(created_at)
+                + int(expires_in)
+                - 3600
+                > now
+            )
+        )
+
+        if not token_live:
+            if refresh_token:
+                refreshed = _ta.refresh_trakt_token(
+                    refresh_token,
+                    config,
+                )
+
+                if not refreshed:
+                    result["error"] = (
+                        "Stored Trakt authorization could not "
+                        "be refreshed. Reconnect to Trakt."
+                    )
+                    return result
+            else:
+                result["error"] = (
+                    "Trakt user authorization is required. "
+                    "Reconnect to Trakt."
+                )
+                return result
+
+        usage = _ta.get_trakt_list_usage(
+            tracked_list_name="Next Airing",
+        )
+
+        if usage is None:
+            result["error"] = (
+                "Could not retrieve live Trakt account "
+                "capabilities and list usage"
+            )
+            return result
+
+        result["usage"] = usage
+        return result
+
+    except Exception as exc:
+        result["error"] = str(exc)
+        return result
 
 
 class TraktCredentialsPayload(BaseModel):
