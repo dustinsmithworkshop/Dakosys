@@ -187,6 +187,76 @@ def compute_next_run(schedule_config: dict) -> Optional[str]:
 
     return None
 
+def _get_local_trakt_summary(config: Optional[dict]) -> dict:
+    """
+    Return Trakt dependency state using local configuration only.
+
+    This helper never authenticates with Trakt and never performs a
+    network request. The dashboard must remain usable for installations
+    where Trakt is not required.
+    """
+    config = config or {}
+
+    scheduler_cfg = config.get("scheduler", {}) or {}
+    services_cfg = config.get("services", {}) or {}
+    trakt_cfg = config.get("trakt", {}) or {}
+
+    auto_schedule = bool(
+        (
+            scheduler_cfg.get(
+                "auto_schedule",
+                {},
+            )
+            or {}
+        ).get("enabled", False)
+    )
+
+    tv_status_tracker = bool(
+        (
+            services_cfg.get(
+                "tv_status_tracker",
+                {},
+            )
+            or {}
+        ).get("enabled", False)
+    )
+
+    legacy_episode_publishing = bool(
+        (
+            trakt_cfg.get(
+                "episode_list_publishing",
+                {},
+            )
+            or {}
+        ).get("enabled", False)
+    )
+
+    required = bool(
+        auto_schedule
+        or tv_status_tracker
+        or legacy_episode_publishing
+    )
+
+    configured = bool(
+        str(trakt_cfg.get("client_id", "") or "").strip()
+        and str(
+            trakt_cfg.get("client_secret", "") or ""
+        ).strip()
+        and str(trakt_cfg.get("username", "") or "").strip()
+    )
+
+    return {
+        "required": required,
+        "configured": configured,
+        "features": {
+            "auto_schedule": auto_schedule,
+            "tv_status_tracker": tv_status_tracker,
+            "legacy_episode_publishing":
+                legacy_episode_publishing,
+        },
+    }
+
+
 @app.get("/api/status")
 def get_status():
     """Service health, next scheduled runs, and summary stats."""
@@ -238,6 +308,7 @@ def get_status():
             "total_libraries": total_libraries,
             "total_size_gb": round(total_size_gb, 2),
         },
+        "trakt": _get_local_trakt_summary(config),
         "config_missing": not os.path.exists(CONFIG_FILE),
     }
 

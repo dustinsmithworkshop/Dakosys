@@ -19,6 +19,15 @@ export interface StatusResponse {
     size_overlay: ServiceStatus;
   };
   stats: StatusStats;
+  trakt: {
+    required: boolean;
+    configured: boolean;
+    features: {
+      auto_schedule: boolean;
+      tv_status_tracker: boolean;
+      legacy_episode_publishing: boolean;
+    };
+  };
   config_missing?: boolean;
 }
 
