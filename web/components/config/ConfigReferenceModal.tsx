@@ -48,20 +48,56 @@ const SECTIONS: Section[] = [
   {
     title: "Trakt",
     yamlPath: "trakt:",
+    description:
+      "Trakt is optional unless an enabled feature requires it. Core Anime Episode Type generation uses Plex + AnimeFillerList and does not require Trakt.",
     fields: [
-      { key: "client_id", type: "string", description: "Trakt API application client ID." },
-      { key: "client_secret", type: "string", description: "Trakt API application client secret." },
-      { key: "username", type: "string", description: "Your Trakt username." },
-      { key: "redirect_uri", type: "string", default: "urn:ietf:wg:oauth:2.0:oob", description: "OAuth redirect URI. Use the default unless you have a custom app." },
-      { key: "access_token", type: "string", description: "OAuth access token — set automatically after authentication." },
-      { key: "refresh_token", type: "string", description: "OAuth refresh token — set automatically after authentication." },
+      {
+        key: "client_id",
+        type: "string",
+        description:
+          "Trakt API application client ID. Required for Automatic Active/Future Schedule, TV Status Tracker, or legacy episode-list publishing.",
+      },
+      {
+        key: "client_secret",
+        type: "string",
+        description:
+          "Trakt API application client secret. Required only when a Trakt-backed feature is enabled.",
+      },
+      {
+        key: "username",
+        type: "string",
+        description:
+          "Authenticated Trakt username. Required only when a Trakt-backed feature is enabled.",
+      },
+      {
+        key: "redirect_uri",
+        type: "string",
+        default: "urn:ietf:wg:oauth:2.0:oob",
+        description:
+          "OAuth redirect URI for the Trakt application.",
+      },
+      {
+        key: "episode_list_publishing.enabled",
+        type: "boolean",
+        default: "false",
+        description:
+          "Explicit opt-in for the legacy compatibility mode that publishes filler/canon classifications as Trakt personal lists. Account limits reported by Trakt are enforced at runtime.",
+      },
     ],
   },
   {
     title: "Lists",
     yamlPath: "lists:",
+    description:
+      "Personal-list settings are only relevant to features that create Trakt personal lists, such as TV Status Tracker's Next Airing list or legacy episode-list publishing.",
     fields: [
-      { key: "default_privacy", type: "private | public", default: "private", description: "Default visibility for newly created Trakt lists." },
+      {
+        key: "default_privacy",
+        type: "private | public",
+        default: "private",
+        description:
+          "Default visibility for Dakosys-created Trakt personal lists. Not needed for core local Anime Episode Type generation or metadata-only automatic scheduling.",
+      },
     ],
   },
   {
@@ -77,22 +113,114 @@ const SECTIONS: Section[] = [
   {
     title: "Scheduler",
     yamlPath: "scheduler:",
-    description: "Configure when each service runs. Each service key (anime_episode_type, tv_status_tracker, size_overlay) accepts the same schedule fields.",
+    description:
+      "Configure when scheduled services run. anime_episode_type, tv_status_tracker, and size_overlay use the standard schedule fields below.",
     fields: [
-      { key: "type", type: "daily | hourly | weekly | monthly | cron | run", description: "Schedule type. \"run\" means run once at startup only." },
-      { key: "times", type: "list[HH:MM]", default: '["03:00"]', description: "Used with type: daily. One or more times to run each day." },
-      { key: "minute", type: "integer", default: "0", description: "Used with type: hourly. Which minute of the hour to run." },
-      { key: "days", type: "list[string]", default: '["monday"]', description: 'Used with type: weekly. Day names e.g. ["monday", "friday"].' },
-      { key: "time", type: "HH:MM", default: "03:00", description: "Used with type: weekly and monthly. Time of day to run." },
-      { key: "dates", type: "list[integer]", default: "[1]", description: "Used with type: monthly. Day numbers of the month e.g. [1, 15]." },
-      { key: "expression", type: "cron string", default: "0 3 * * *", description: 'Used with type: cron. Standard 5-part cron expression e.g. "0 3 * * *".' },
-      { key: "scheduled_anime", type: "list[string]", description: "AFL slugs of anime to auto-update on each Anime Episode Type run." },
+      {
+        key: "type",
+        type: "daily | hourly | weekly | monthly | cron | run",
+        description:
+          'Schedule type. "run" means run once at startup only.',
+      },
+      {
+        key: "times",
+        type: "list[HH:MM]",
+        default: '["03:00"]',
+        description:
+          "Used with type: daily. One or more times to run each day.",
+      },
+      {
+        key: "minute",
+        type: "integer",
+        default: "0",
+        description:
+          "Used with type: hourly. Which minute of the hour to run.",
+      },
+      {
+        key: "days",
+        type: "list[string]",
+        default: '["monday"]',
+        description:
+          'Used with type: weekly. Day names such as ["monday", "friday"].',
+      },
+      {
+        key: "time",
+        type: "HH:MM",
+        default: "03:00",
+        description:
+          "Used with type: weekly and monthly. Time of day to run.",
+      },
+      {
+        key: "dates",
+        type: "list[integer]",
+        default: "[1]",
+        description:
+          "Used with type: monthly. Day numbers of the month such as [1, 15].",
+      },
+      {
+        key: "expression",
+        type: "cron string",
+        default: "0 3 * * *",
+        description:
+          'Used with type: cron. Standard 5-part cron expression such as "0 3 * * *".',
+      },
+    ],
+  },
+  {
+    title: "Automatic Anime Schedule",
+    yamlPath: "scheduler:\n  auto_schedule:",
+    description:
+      "Optional generated active/future anime schedule. It uses Plex + AnimeFillerList for identity validation and Trakt show metadata for active/future status. It does not control which valid anime are included in the core local Anime Episode Type files.",
+    fields: [
+      {
+        key: "enabled",
+        type: "boolean",
+        default: "false",
+        description:
+          "Enable automatic active/future anime schedule discovery. Enabling this requires Trakt.",
+      },
+      {
+        key: "file",
+        type: "string",
+        default: "config/scheduled-anime.yaml",
+        description:
+          "Generated runtime schedule file. This replaces the old manually maintained anime schedule list.",
+      },
+      {
+        key: "refresh_hours",
+        type: "number",
+        default: "24",
+        description:
+          "Minimum age before automatic discovery is refreshed again.",
+      },
+      {
+        key: "notify_on_change",
+        type: "boolean",
+        default: "true",
+        description:
+          "Send configured notifications when automatic schedule membership changes.",
+      },
+      {
+        key: "always_include",
+        type: "list[string]",
+        default: "[]",
+        description:
+          "Force validated Plex/AFL anime into the generated active/future schedule.",
+      },
+      {
+        key: "always_exclude",
+        type: "list[string]",
+        default: "[]",
+        description:
+          "Exclude anime from the generated active/future schedule.",
+      },
     ],
   },
   {
     title: "Service — Anime Episode Type",
     yamlPath: "services:\n  anime_episode_type:",
-    description: "Manages Trakt lists of anime episodes categorised by type (filler, manga canon, anime canon, mixed). Requires Trakt VIP.",
+    description:
+      "Generates local filler, manga canon, anime canon, and mixed canon/filler episode data from Plex + AnimeFillerList for Kometa. Core generation does not require Trakt.",
     fields: [
       { key: "enabled", type: "boolean", default: "false", description: "Enable or disable this service." },
       { key: "libraries", type: "list[string]", description: "Plex library names this service operates on." },
@@ -109,7 +237,8 @@ const SECTIONS: Section[] = [
   {
     title: "Service — TV Status Tracker",
     yamlPath: "services:\n  tv_status_tracker:",
-    description: "Creates Kometa overlays showing a show's airing status (AIRING, ENDED, RETURNING, etc.) and upcoming air dates.",
+    description:
+      "Creates Kometa overlays showing airing status and upcoming air dates using Trakt metadata, and maintains one Trakt personal list named Next Airing.",
     fields: [
       { key: "enabled", type: "boolean", default: "false", description: "Enable or disable this service." },
       { key: "libraries", type: "list[string]", description: "Plex library names this service operates on." },
