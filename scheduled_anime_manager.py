@@ -16,6 +16,7 @@ from typing import Any, Optional
 import requests
 import yaml
 import trakt_auth
+from anime_discovery import build_discovery_candidates
 
 logger = logging.getLogger("scheduled_anime_manager")
 
@@ -87,7 +88,7 @@ def _get_afl_catalog() -> list[str]:
         )
 
     pattern = re.compile(
-        r"^\s*\d+\.\s+(.+?)(?:\s+\(Mapped to: .+\))?\s*$"
+        r"^\s*\d+\.\s+(\S+)(?:\s+\(Mapped to: .+\))?\s*$"
     )
     slugs: list[str] = []
     for line in combined.splitlines():
@@ -573,7 +574,8 @@ def refresh_scheduled_anime(
             ),
         )
 
-        slugs = _get_afl_catalog()
+        afl_catalog = _get_afl_catalog()
+        slugs = build_discovery_candidates(afl_catalog)
     except Exception as exc:
         logger.error("Automatic scheduled-anime refresh failed: %s", exc)
         return {
@@ -594,7 +596,8 @@ def refresh_scheduled_anime(
     ignored_rows: list[dict[str, Any]] = []
 
     stats = {
-        "afl_catalog": len(slugs),
+        "afl_catalog": len(afl_catalog),
+        "discovery_candidates": len(slugs),
         "plex_afl_matches": 0,
         "afl_ignored": 0,
         "afl_valid": 0,
