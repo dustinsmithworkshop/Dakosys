@@ -799,6 +799,68 @@ def get_trakt_list_usage(
     }
 
 
+def assess_trakt_list_creation(
+    current_list_count,
+    *,
+    capabilities=None,
+):
+    """
+    Determine whether the authenticated account can create another
+    personal list.
+
+    This function is read-only. Unknown or malformed limits fail closed.
+    """
+    current = _optional_nonnegative_int(current_list_count)
+
+    if current is None:
+        return {
+            "allowed": False,
+            "reason": "current_list_count_unknown",
+            "current": None,
+            "maximum": None,
+            "remaining": None,
+        }
+
+    if capabilities is None:
+        capabilities = get_trakt_list_capabilities()
+
+    if not isinstance(capabilities, dict):
+        return {
+            "allowed": False,
+            "reason": "capabilities_unavailable",
+            "current": current,
+            "maximum": None,
+            "remaining": None,
+        }
+
+    maximum = _optional_nonnegative_int(
+        capabilities.get("max_lists")
+    )
+
+    if maximum is None:
+        return {
+            "allowed": False,
+            "reason": "list_limit_unknown",
+            "current": current,
+            "maximum": None,
+            "remaining": None,
+        }
+
+    remaining = max(maximum - current, 0)
+
+    return {
+        "allowed": current < maximum,
+        "reason": (
+            "capacity_available"
+            if current < maximum
+            else "list_limit_reached"
+        ),
+        "current": current,
+        "maximum": maximum,
+        "remaining": remaining,
+    }
+
+
 if __name__ == "__main__":
     # Setup logging
     logging.basicConfig(

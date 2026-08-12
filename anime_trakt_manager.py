@@ -1067,9 +1067,45 @@ def create_or_get_trakt_list(list_name, access_token):
 
             if existing_list:
                 list_id = existing_list['ids']['trakt']
-                console.print(f"[blue]Trakt list '{list_name}' already exists with ID {list_id}.[/blue]")
+                console.print(
+                    f"[blue]Trakt list '{list_name}' already exists "
+                    f"with ID {list_id}.[/blue]"
+                )
                 return list_id, True
             else:
+                capacity = trakt_auth.assess_trakt_list_creation(
+                    len(existing_lists)
+                )
+
+                if not capacity.get("allowed"):
+                    reason = capacity.get("reason")
+                    current = capacity.get("current")
+                    maximum = capacity.get("maximum")
+
+                    if reason == "list_limit_reached":
+                        console.print(
+                            "[bold red]Cannot create Trakt list "
+                            f"'{list_name}': personal-list capacity "
+                            f"is full ({current}/{maximum}).[/bold red]"
+                        )
+                    else:
+                        console.print(
+                            "[bold red]Cannot safely determine whether "
+                            f"Trakt list '{list_name}' can be created "
+                            f"({reason}).[/bold red]"
+                        )
+
+                    logger.error(
+                        "Blocked Trakt list creation for %s: %s "
+                        "(current=%s, maximum=%s)",
+                        list_name,
+                        reason,
+                        current,
+                        maximum,
+                    )
+
+                    return None, False
+
                 create_list_payload = {
                     'name': list_name,
                     'description': f'List for {list_name}',
