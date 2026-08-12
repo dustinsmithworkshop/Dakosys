@@ -1,12 +1,38 @@
 # DAKOSYS — Docker App Kometa Overlay System
 
-DAKOSYS is a Docker-based companion for **Plex**, **Trakt**, and **Kometa**. It can classify anime episodes, create and maintain Trakt lists, generate Kometa collections and overlays, track TV/anime airing status, show media file sizes, and provide a web dashboard for management and troubleshooting.
+DAKOSYS is a Docker-based companion for **Plex**, **AnimeFillerList**, and **Kometa**, with optional **Trakt** integration for features that require current show metadata or personal Trakt lists.
+
+DAKOSYS 2.0 separates core Anime Episode Type generation from Trakt personal-list publishing.
+
+```text
+Anime Episode Type
+Plex + AnimeFillerList
+        ↓
+Plex-aware local mapper
+        ↓
+Kometa collections / overlays
+
+Automatic Active/Future Schedule
+Plex + AnimeFillerList + Trakt show metadata
+        ↓
+config/scheduled-anime.yaml
+
+TV / Anime Status Tracker
+Plex + Trakt metadata
+        ↓
+Status overlays + one Next Airing list
+
+Legacy Episode-List Publishing
+Anime classifications + Trakt personal lists
+        ↓
+Explicit opt-in compatibility mode
+```
 
 > **About this fork**
 >
-> This repository is a maintained fork of [sahara101/Dakosys](https://github.com/sahara101/Dakosys). The upstream project provides the original DAKOSYS architecture, web dashboard, Anime Episode Type Tracker, TV/Anime Status Tracker, Size Overlay, scheduler, notifications, and management tools.
+> This repository is a maintained fork of [sahara101/Dakosys](https://github.com/sahara101/Dakosys). The upstream project provides the original DAKOSYS architecture, dashboard, Anime Episode Type Tracker, TV/Anime Status Tracker, Size Overlay, scheduler, notifications, and management tools.
 >
-> This fork extends that foundation with Plex-aware anime episode mapping, conservative AnimeFillerList validation, TVDb/AFL override controls, automatic Trakt-based anime scheduling, safer batch processing, and release/versioning improvements.
+> This fork extends that foundation with Plex-aware episode mapping, conservative AnimeFillerList validation, automatic active/future scheduling, local Anime Episode Type generation, Trakt capability-aware behavior, safer batch processing, and additional management and diagnostic tools.
 
 ![DAKOSYS dashboard](https://github.com/user-attachments/assets/03af3c98-39f2-4121-99e2-74390d90f87b)
 
@@ -14,14 +40,17 @@ DAKOSYS is a Docker-based companion for **Plex**, **Trakt**, and **Kometa**. It 
 
 ## What DAKOSYS Does
 
-| Feature | Trakt required | Trakt VIP required | Main output |
+| Feature | Trakt required | Personal Trakt lists | Main output |
 |---|---:|---:|---|
-| Anime Episode Type Tracker | Yes | **Yes** | Trakt lists + Kometa episode collections/overlays |
-| Automatic Anime Scheduling | Yes | Uses Anime Episode Type workflow | Generated `scheduled-anime.yaml` |
-| TV / Anime Status Tracker | Yes | No | Status overlays + Next Airing list |
+| Anime Episode Type Tracker | **No** | No | Local Kometa episode collections/overlays |
+| Automatic Active/Future Schedule | Yes | No | Generated `scheduled-anime.yaml` |
+| TV / Anime Status Tracker | Yes | One `Next Airing` list | Status overlays + Next Airing |
+| Legacy Episode-List Publishing | Yes | Yes | Filler/canon Trakt lists |
 | Size Overlay | No | No | Kometa size overlays |
-| Web Dashboard | Depends on enabled services | No | Browser-based management UI |
+| Web Dashboard | Depends on enabled features | No by itself | Browser-based management UI |
 | Discord Notifications | No | No | Service/update notifications |
+
+Trakt account limits are discovered from the authenticated Trakt API response at runtime. DAKOSYS does not assume personal-list capacity from account labels such as VIP or non-VIP.
 
 ---
 
@@ -29,16 +58,30 @@ DAKOSYS is a Docker-based companion for **Plex**, **Trakt**, and **Kometa**. It 
 
 ## Anime Episode Type Tracker
 
-> **Trakt VIP is required** because this feature creates multiple Trakt lists.
+> **Trakt is not required for core Anime Episode Type generation.**
 
-DAKOSYS reads episode classifications from [AnimeFillerList](https://www.animefillerlist.com/) and creates Trakt lists for:
+DAKOSYS reads episode classifications from [AnimeFillerList](https://www.animefillerlist.com/), resolves the corresponding series in Plex, and generates local Kometa data for:
 
 - Filler
 - Manga Canon
 - Anime Canon
 - Mixed Canon/Filler
 
-Those lists are then used to generate Kometa collections and episode overlays.
+The core 2.0 path is:
+
+```text
+Plex library
+    ∩
+AnimeFillerList catalog / configured mappings
+    ∩
+validated AnimeFillerList identity
+        ↓
+Plex-aware local episode mapper
+        ↓
+Kometa episode collections and overlays
+```
+
+No Trakt OAuth session, personal Trakt list, or Trakt account is required for this workflow.
 
 ![Anime episode type example](https://github.com/user-attachments/assets/5d90e452-173c-4665-b020-add2625ed261)
 
@@ -46,13 +89,13 @@ Those lists are then used to generate Kometa collections and episode overlays.
 
 AnimeFillerList generally describes anime as one **absolute episode sequence**, while Plex/TVDb may split the same show into seasons, specials, or a different aired-order layout.
 
-This fork does not assume that:
+DAKOSYS does not assume:
 
 ```text
 AFL episode 123 == Plex S01E123
 ```
 
-Instead, DAKOSYS resolves the Plex series and builds a Plex-aware mapping so generated Kometa collections can target real Plex coordinates such as:
+Instead, DAKOSYS resolves the intended Plex series and builds a Plex-aware mapping so generated Kometa collections can target real Plex coordinates such as:
 
 ```text
 tvdb_episode: <tvdb_id>_<season>_<episode>
@@ -64,18 +107,18 @@ The mapper follows a conservative sequence:
 2. Validate that the AnimeFillerList page actually belongs to the requested show.
 3. Compare AnimeFillerList episode order with Plex aired order.
 4. Keep direct positional mapping when the evidence supports it, even when translated episode titles differ.
-5. Use one-to-one title-based mapping only when there is strong evidence that the episode order differs.
+5. Use one-to-one title-based mapping only when there is strong evidence that episode order differs.
 6. Reconcile short internal gaps only when trusted surrounding matches make the result structurally safe.
 7. Handle compatible Season 0 / special-episode cases conservatively.
 8. Leave episodes unmapped when a safe result cannot be established.
 
-The goal is **fail closed rather than guess**. A missing overlay is preferable to applying the wrong episode classification to Plex.
+The goal is **fail closed rather than guess**. A missing overlay is preferable to assigning the wrong classification to a Plex episode.
 
 ### AnimeFillerList page validation
 
-AnimeFillerList can sometimes return HTTP 200 for a slug that resolves to an unrelated show's page. DAKOSYS validates the returned page identity before trusting the episode data.
+AnimeFillerList can sometimes return HTTP 200 for a slug that resolves to an unrelated show's page. DAKOSYS validates page identity before trusting the returned episode data.
 
-A suspicious page is rejected instead of being used to generate Trakt or Kometa data.
+A suspicious page is rejected instead of being used by the local mapper.
 
 Legitimate naming differences can be handled explicitly through `mappings.yaml`; see [Anime Mapping and AFL Controls](#anime-mapping-and-afl-controls).
 
@@ -83,9 +126,11 @@ Legitimate naming differences can be handled explicitly through `mappings.yaml`;
 
 ## Automatic Anime Scheduling
 
-DAKOSYS can automatically determine which anime should remain in the scheduled Anime Episode Type update batch.
+Automatic scheduling is an **optional Trakt-backed feature** that tracks which owned anime may still produce future episodes.
 
-The schedule is based on:
+It is separate from core Anime Episode Type generation.
+
+The generated schedule is based on:
 
 ```text
 Plex ownership
@@ -94,25 +139,18 @@ AnimeFillerList support
     ∩
 validated AnimeFillerList identity
     ∩
-active/future Trakt status
+active/future Trakt show status
 ```
 
-In practical terms:
-
-- the show must exist in one of the configured Plex anime libraries;
-- DAKOSYS must have a trustworthy AnimeFillerList source for it;
-- the AFL page must pass identity validation;
-- Trakt must indicate that the series can still produce future episodes.
-
-Shows explicitly reported as ended or canceled are removed from the generated schedule. Ambiguous or temporarily unavailable source data is handled conservatively rather than causing a mass deletion.
-
-The generated schedule is stored at:
+The schedule is written to:
 
 ```text
 config/scheduled-anime.yaml
 ```
 
-A hard-coded `scheduler.scheduled_anime` list is **not required** when automatic scheduling is enabled.
+In DAKOSYS 2.0 this generated file is the authoritative automatic schedule source.
+
+The old manually maintained `scheduler.scheduled_anime` configuration has been retired.
 
 Example:
 
@@ -137,19 +175,31 @@ scheduler:
       - "02:00"
 ```
 
+### Important scope distinction
+
+The automatic schedule does **not** filter the core local Anime Episode Type files.
+
+Core Anime Episode Type generation processes the complete valid Plex + AnimeFillerList universe.
+
+The generated active/future schedule is used for active/future state, UI visibility, scheduling metadata, and workflows such as optional legacy publishing that intentionally operate on the active/future set.
+
+A Trakt scheduling failure therefore cannot prevent the local Anime Episode Type generator from running.
+
 ### Generated schedule state
 
 `scheduled-anime.yaml` is runtime state and should not be edited manually or committed to Git.
 
 It records:
 
-- the generated scheduled anime list;
+- scheduled anime;
 - Plex and Trakt titles;
-- Trakt status and scheduling decision;
+- Trakt status and scheduling decisions;
 - unresolved entries under `review:`;
 - explicitly acknowledged AFL exceptions under `ignored:`;
 - discovery statistics;
 - Trakt request and retry statistics.
+
+If discovery fails fatally, DAKOSYS preserves the previous generated schedule instead of replacing it with an empty result.
 
 ### Manual refresh
 
@@ -177,23 +227,15 @@ Inspect the result:
 cat config/scheduled-anime.yaml
 ```
 
-Normal:
-
-```bash
-docker compose run --rm dakosys run-update anime_episode_type
-```
-
-refreshes the automatic schedule first, subject to `refresh_hours`, and then processes the resulting anime batch.
-
-`always_include` and `always_exclude` are intended as explicit scheduling overrides. They do not turn an untrusted AFL page into trusted episode data.
+`always_include` and `always_exclude` are explicit scheduling overrides. They do not bypass Plex ownership or AnimeFillerList identity validation.
 
 ---
 
 ## TV / Anime Status Tracker
 
-> **Trakt VIP is not required** for this feature.
+The TV / Anime Status Tracker requires Trakt metadata.
 
-Creates Kometa overlays showing TV and anime status, including:
+It creates Kometa overlays showing TV and anime state, including:
 
 - Currently airing
 - Ended
@@ -205,7 +247,11 @@ Creates Kometa overlays showing TV and anime status, including:
 - Final episode
 - Upcoming air dates
 
-It also maintains a Trakt list of shows with upcoming episodes.
+It also maintains **one** personal Trakt list named `Next Airing` for shows with upcoming episodes.
+
+That single Next Airing list is separate from legacy Anime Episode Type episode-list publishing.
+
+DAKOSYS uses Trakt's reported account capabilities and limits at runtime instead of assuming that a particular account tier is required.
 
 ![TV status example](https://github.com/user-attachments/assets/ce2e31fe-aeee-467f-b498-6ea36ac0139b)
 
@@ -229,18 +275,24 @@ The DAKOSYS web UI is normally available at:
 http://your-host:3000
 ```
 
-The upstream dashboard provides:
+The 2.0 dashboard provides:
 
 - service status and next scheduled runs;
+- local Anime Episode Type management;
+- automatic active/future schedule visibility and overrides;
 - media statistics;
 - configuration management;
 - built-in configuration reference;
 - service log viewing;
-- anime management and mapping tools;
-- Trakt-list browsing;
+- anime identity and episode-title mapping tools;
 - TV status and Next Airing views;
+- Trakt connection, feature, capability, and list-usage status;
 - library-size browsing;
 - first-run setup.
+
+The dashboard does not require a live Trakt request simply to render the main status page.
+
+The Trakt page is capability-focused rather than a bulk personal-list manager.
 
 ---
 
@@ -248,7 +300,7 @@ The upstream dashboard provides:
 
 DAKOSYS supports Discord webhook notifications.
 
-Automatic anime scheduling can also send a notification when generated schedule membership changes:
+Automatic anime scheduling can send a notification when generated schedule membership changes:
 
 - shows added;
 - shows removed;
@@ -260,16 +312,47 @@ No schedule-change notification is sent when membership is unchanged.
 
 # Requirements
 
-Core requirements depend on which services you enable:
+Core requirements depend on which features you enable.
+
+### Core Anime Episode Type
 
 - Plex Media Server
 - Docker with Docker Compose
 - Kometa
-- Trakt.tv account
-- Trakt API application
-- AnimeFillerList access for Anime Episode Type features
-- Trakt VIP for Anime Episode Type list generation
-- TMDB API configuration for dashboard features that use TMDB artwork/metadata
+- AnimeFillerList access
+
+Trakt is **not** required.
+
+### Automatic Active/Future Schedule
+
+Additionally requires:
+
+- Trakt account
+- Trakt API application / authentication
+
+This feature reads show metadata and does not require Anime Episode Type personal-list publishing.
+
+### TV / Anime Status Tracker
+
+Additionally requires:
+
+- Trakt account
+- Trakt API application / authentication
+- capacity for the single `Next Airing` personal list
+
+### Legacy Episode-List Publishing
+
+Additionally requires:
+
+- explicit `trakt.episode_list_publishing.enabled: true`;
+- Trakt authentication;
+- sufficient runtime-reported personal-list and per-list capacity.
+
+Legacy publishing is disabled by default.
+
+### Other
+
+- TMDB API configuration is used by dashboard features that display TMDB artwork/metadata.
 
 ---
 
@@ -306,11 +389,13 @@ cp mappings.example.yaml config/mappings.yaml
 
 The examples are intended as safe starter/reference files. Replace placeholders and customize them for your Plex libraries and deployment.
 
-The interactive setup wizard remains the recommended way to complete service configuration and Trakt authentication:
+The interactive setup wizard is the recommended way to complete service configuration:
 
 ```bash
 docker compose run --rm dakosys setup
 ```
+
+Trakt authentication is requested only when an enabled feature requires it.
 
 Start the updater/web service:
 
@@ -334,18 +419,20 @@ This fork publishes images to GitHub Container Registry:
 ghcr.io/dustinsmithworkshop/dakosys
 ```
 
-Recommended release tags:
+For a 2.0 release, semantic tags use:
 
 ```text
-ghcr.io/dustinsmithworkshop/dakosys:1.1.0   # exact release
-ghcr.io/dustinsmithworkshop/dakosys:1.1     # latest 1.1.x
-ghcr.io/dustinsmithworkshop/dakosys:1       # latest 1.x
-ghcr.io/dustinsmithworkshop/dakosys:latest  # default-branch/latest build
+ghcr.io/dustinsmithworkshop/dakosys:2.0.0   # exact release
+ghcr.io/dustinsmithworkshop/dakosys:2.0     # latest 2.0.x
+ghcr.io/dustinsmithworkshop/dakosys:2       # latest compatible 2.x
+ghcr.io/dustinsmithworkshop/dakosys:latest  # default latest release/build
 ```
 
 For the most reproducible installation, pin the exact version.
 
-Use `:1` if you want compatible v1 updates without manually changing the image tag for each v1 release.
+Use `:2` only if you want compatible 2.x updates without manually changing the image tag for each release.
+
+> DAKOSYS 2.0 remains unreleased until the candidate Docker image passes the release validation gate documented below.
 
 ---
 
@@ -393,6 +480,118 @@ config/collections/anime_episode_type.yml
 
 ---
 
+# Upgrading from 1.x to 2.0
+
+DAKOSYS 2.0 intentionally changes the Anime Episode Type and scheduling architecture.
+
+Before upgrading, back up:
+
+```text
+config/config.yaml
+config/mappings.yaml
+data/
+```
+
+## 1. Anime Episode Type no longer requires Trakt lists
+
+In 1.x, Anime Episode Type classifications were commonly published to many personal Trakt lists and Kometa consumed that workflow.
+
+In 2.0, the normal path is local:
+
+```text
+Plex + AnimeFillerList
+        ↓
+local Plex-aware mapper
+        ↓
+Kometa
+```
+
+Existing Plex, AFL, TVDb, and episode-title mappings remain useful.
+
+## 2. Remove the old hard-coded anime schedule
+
+The old configuration:
+
+```yaml
+scheduler:
+  scheduled_anime:
+    - some-show
+```
+
+is no longer used.
+
+If automatic active/future scheduling is desired, configure:
+
+```yaml
+scheduler:
+  auto_schedule:
+    enabled: true
+    file: config/scheduled-anime.yaml
+    refresh_hours: 24
+    notify_on_change: true
+    always_include: []
+    always_exclude: []
+```
+
+`config/scheduled-anime.yaml` is generated runtime state and should not be committed.
+
+## 3. Legacy episode-list publishing is opt-in
+
+The compatibility publisher is disabled by default:
+
+```yaml
+trakt:
+  episode_list_publishing:
+    enabled: false
+```
+
+Leave it disabled for normal 2.0 Anime Episode Type operation.
+
+Enable it only if you intentionally want DAKOSYS to continue creating/updating personal Trakt filler/canon lists.
+
+## 4. Trakt configuration is feature-dependent
+
+You may omit Trakt credentials when using only features that do not require Trakt, such as core Anime Episode Type and Size Overlay.
+
+Trakt is still required for:
+
+- Automatic Active/Future Schedule;
+- TV / Anime Status Tracker;
+- Next Airing;
+- legacy episode-list publishing.
+
+## 5. Next Airing is separate from legacy publishing
+
+TV Status maintains one `Next Airing` list.
+
+Disabling legacy Anime Episode Type list publishing does not disable Next Airing.
+
+## 6. Remove old episode-type lists if desired
+
+Preview legacy DAKOSYS episode lists:
+
+```bash
+docker compose run --rm dakosys prune-legacy-lists
+```
+
+Apply the cleanup:
+
+```bash
+docker compose run --rm dakosys prune-legacy-lists --apply
+```
+
+The cleanup classifier protects `Next Airing` and unrelated personal lists.
+
+Always review the dry run before using `--apply`.
+
+## 7. Re-run setup when changing enabled features
+
+The setup wizard is feature-aware in 2.0.
+
+For example, Anime Episode Type by itself will not request Trakt credentials, while enabling Automatic Schedule or TV Status will.
+
+---
+
 # Kometa Integration
 
 Add the files generated by DAKOSYS to the appropriate Kometa libraries.
@@ -433,7 +632,7 @@ Contains service and deployment configuration such as:
 
 - Plex URL and token
 - Plex library names
-- Trakt configuration
+- optional Trakt configuration for Trakt-backed features
 - Kometa output paths
 - enabled services
 - scheduler configuration
@@ -480,7 +679,7 @@ DAKOSYS provides several different mapping mechanisms. They solve different prob
 | `afl_identity_aliases` | Trust an additional legitimate AFL display title |
 | `afl_ignored` | Explicitly skip a known unusable AFL entry |
 | `tvdb_mappings` | Resolve an ambiguous Plex show by TVDb series ID |
-| `title_mappings` | Advanced episode-title adjustments |
+| `title_mappings` | Advanced episode-title overrides used by local and legacy matching |
 | `ignored_mappings` | Legacy/advanced mapping workflow; normally leave empty |
 
 ## Plex title mappings
@@ -567,6 +766,20 @@ TVDb overrides are authoritative. If the requested TVDb series cannot be found i
 
 ---
 
+## Episode-title overrides
+
+`title_mappings.special_matches` is retained as a compatibility schema name, but the mapped values are used by the local Anime Episode Type loader as well as the optional legacy Trakt matching path.
+
+Conceptually, treat these entries as:
+
+```text
+source episode title → mapped episode title
+```
+
+rather than as a Trakt-only mapping.
+
+---
+
 # Scheduler Configuration
 
 Each service has its own schedule block under `scheduler:`.
@@ -591,6 +804,14 @@ scheduler:
     times:
       - "03:00"
 
+  auto_schedule:
+    enabled: true
+    file: config/scheduled-anime.yaml
+    refresh_hours: 24
+    notify_on_change: true
+    always_include: []
+    always_exclude: []
+
   tv_status_tracker:
     type: hourly
     minute: 30
@@ -601,6 +822,8 @@ scheduler:
       - sunday
     time: "04:00"
 ```
+
+Automatic Schedule refresh is independent of core Anime Episode Type generation.
 
 ---
 
@@ -630,7 +853,7 @@ Air-date-capable labels retain the TV Status Tracker's normal date behavior.
 
 # Discord Notifications
 
-The upstream notification configuration uses:
+The notification configuration uses:
 
 ```yaml
 notifications:
@@ -645,7 +868,7 @@ Test it with:
 docker compose run --rm dakosys test-notification
 ```
 
-For automatic schedule membership notifications, the scheduler also supports resolving the webhook from environment configuration such as:
+For automatic schedule membership notifications, the scheduler can also resolve the webhook from environment configuration such as:
 
 ```text
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
@@ -657,7 +880,7 @@ Keeping secrets outside committed configuration is recommended.
 
 # Manual Commands
 
-List all available commands:
+List available commands from the exact image/version you are running:
 
 ```bash
 docker compose run --rm dakosys --help
@@ -665,49 +888,18 @@ docker compose run --rm dakosys --help
 
 You can also append `--help` to individual commands.
 
-Current CLI commands include:
+## Core Anime Episode Type
 
-| Command | Purpose |
-|---|---|
-| `create` | Create a Trakt list for one anime/episode type |
-| `create-all` | Create all available episode-type lists for one anime |
-| `delete-list` | Delete a Trakt list |
-| `delete-piped` | Delete a list from piped input |
-| `fix-mappings` | Interactively resolve mapping errors from previous runs |
-| `ignore-mapping` | Ignore a specific mapping-error entry |
-| `unignore-mapping` | Remove a mapping-error ignore |
-| `list-anime` | List AnimeFillerList shows known to DAKOSYS |
-| `list-lists` | List Trakt lists |
-| `refresh-schedule` | Refresh generated `scheduled-anime.yaml` |
-| `run-update` | Run one or all enabled services immediately |
-| `schedule` | Manage the legacy hard-coded `scheduler.scheduled_anime` list |
-| `setup` | Run full or service-specific interactive setup |
-| `show-episodes` | Show AFL episodes and classifications for one anime |
-| `sync-collections` | Synchronize the Kometa anime episode collection file |
-| `test-logging` | Test logging |
-| `test-notification` | Test Discord notifications |
-| `test-scheduler` | Validate scheduler configuration |
-| `test-trakt` | Diagnose Trakt authentication and list access |
-
-> **Legacy scheduling command**
->
-> `schedule` remains available for installations that still use a manually maintained
-> `scheduler.scheduled_anime` list. When `scheduler.auto_schedule.enabled: true`,
-> the generated automatic schedule is the recommended workflow, so `schedule add/remove`
-> should normally not be used to manage that generated membership.
-
-## Anime Episode Type
-
-Create all available episode-type lists for one anime:
+Regenerate local Anime Episode Type data and Kometa collections:
 
 ```bash
-docker compose run --rm dakosys create-all "one-piece"
+docker compose run --rm dakosys sync-collections
 ```
 
-Create one specific list:
+Run the enabled Anime Episode Type service:
 
 ```bash
-docker compose run --rm dakosys create "naruto-shippuden" FILLER
+docker compose run --rm dakosys run-update anime_episode_type
 ```
 
 List AnimeFillerList entries:
@@ -716,22 +908,10 @@ List AnimeFillerList entries:
 docker compose run --rm dakosys list-anime
 ```
 
-Show episode classifications:
+Show AFL episode classifications:
 
 ```bash
 docker compose run --rm dakosys show-episodes "demon-slayer-kimetsu-no-yaiba"
-```
-
-Fix episode/title mapping errors:
-
-```bash
-docker compose run --rm dakosys fix-mappings
-```
-
-Delete a list:
-
-```bash
-docker compose run --rm dakosys delete-list bleach FILLER
 ```
 
 ## Automatic Schedule
@@ -742,13 +922,9 @@ Refresh automatic scheduling:
 docker compose run --rm dakosys refresh-schedule --force --no-notify
 ```
 
-Run the Anime Episode Type batch:
+The generated `config/scheduled-anime.yaml` file is the only automatic schedule source in 2.0.
 
-```bash
-docker compose run --rm dakosys run-update anime_episode_type
-```
-
-When `scheduler.auto_schedule.enabled` is true, the generated schedule is the normal source of truth for that batch. The older `schedule` command still manages the legacy hard-coded `scheduler.scheduled_anime` list and is retained for compatibility/manual workflows.
+There is no manually maintained `scheduler.scheduled_anime` workflow.
 
 ## Service Updates
 
@@ -770,25 +946,80 @@ Run size overlays:
 docker compose run --rm dakosys run-update size_overlay
 ```
 
-## Trakt List Management
+## Trakt Account Diagnostics
 
-List DAKOSYS-created lists:
+Display normalized Trakt account capabilities:
+
+```bash
+docker compose run --rm dakosys trakt-capabilities
+```
+
+JSON output:
+
+```bash
+docker compose run --rm dakosys trakt-capabilities --json
+```
+
+Inspect list-capacity information:
+
+```bash
+docker compose run --rm dakosys trakt-list-capacity --json
+```
+
+Inspect current list usage and the `Next Airing` list:
+
+```bash
+docker compose run --rm dakosys trakt-list-usage --json
+```
+
+General Trakt diagnostics:
+
+```bash
+docker compose run --rm dakosys test-trakt
+```
+
+## Legacy Episode-List Publishing
+
+These commands belong to the optional compatibility publisher and require:
+
+```yaml
+trakt:
+  episode_list_publishing:
+    enabled: true
+```
+
+Create one personal Trakt episode-type list:
+
+```bash
+docker compose run --rm dakosys create "naruto-shippuden" FILLER
+```
+
+Create all available episode-type lists for one anime:
+
+```bash
+docker compose run --rm dakosys create-all "one-piece"
+```
+
+Interactively repair mapping errors from the legacy Trakt publishing workflow:
+
+```bash
+docker compose run --rm dakosys fix-mappings
+```
+
+List personal Trakt lists:
 
 ```bash
 docker compose run --rm dakosys list-lists
 ```
 
-Filter lists to one anime:
+Delete legacy lists with the dedicated cleanup workflow:
 
 ```bash
-docker compose run --rm dakosys list-lists --anime "Attack on Titan"
+docker compose run --rm dakosys prune-legacy-lists
+docker compose run --rm dakosys prune-legacy-lists --apply
 ```
 
-Synchronize the generated Kometa collection file:
-
-```bash
-docker compose run --rm dakosys sync-collections
-```
+DAKOSYS checks Trakt's runtime-reported list and per-list limits before creating or growing legacy personal lists.
 
 ---
 
@@ -820,15 +1051,24 @@ docker compose logs -f dakosys-updater
 
 ## Trakt authentication
 
+Trakt authentication is only required when at least one Trakt-backed feature is enabled.
+
 Run:
 
 ```bash
 docker compose run --rm dakosys test-trakt
 ```
 
-This checks the configured Trakt user/client configuration, stored token state, token refresh, authenticated account, and Trakt list access.
+For account/list capability information:
+
+```bash
+docker compose run --rm dakosys trakt-capabilities --json
+docker compose run --rm dakosys trakt-list-usage --json
+```
 
 If no valid token is available, run setup again or reconnect through the web UI.
+
+If you use only core Anime Episode Type and other non-Trakt services, missing Trakt credentials should not prevent those services from running.
 
 ---
 
@@ -844,7 +1084,7 @@ docker compose run --rm dakosys test-scheduler
 
 If DAKOSYS reports that an AFL page belongs to a different show, do **not** disable the safety check globally.
 
-First determine which case applies:
+Determine which case applies:
 
 - wrong AFL URL slug → use `afl_mappings`;
 - correct page with a different legitimate display title → use `afl_identity_aliases`;
@@ -871,19 +1111,30 @@ stats:
 
 - `review:` contains unresolved candidates worth investigating.
 - `ignored:` contains explicitly acknowledged AFL exceptions.
-- `stats:` makes it easier to verify that the complete Plex/AFL candidate set was accounted for.
+- `stats:` helps verify that the complete Plex/AFL candidate set was accounted for.
+
+A scheduling failure should not stop core local Anime Episode Type generation.
 
 ---
 
-## Missing or incorrectly mapped episodes
-
-Run:
-
-```bash
-docker compose run --rm dakosys fix-mappings
-```
+## Missing or incorrectly mapped local episodes
 
 The Plex-aware mapper intentionally leaves unsafe matches unresolved rather than guessing.
+
+Check:
+
+- the Anime Episode Type / mapping logs;
+- `config/mappings.yaml`;
+- the web Mappings page;
+- `mappings`;
+- `tvdb_mappings`;
+- `afl_mappings`;
+- `afl_identity_aliases`;
+- `title_mappings`.
+
+`title_mappings.special_matches` is retained as a compatibility schema name but is used as a generic episode-title override by the local mapper as well as by legacy Trakt matching.
+
+The CLI `fix-mappings` command is specifically for the optional legacy Trakt episode-list publishing workflow.
 
 ---
 
@@ -899,17 +1150,54 @@ docker compose run --rm dakosys setup size_overlay
 
 # Development Validation
 
-For source changes to the Anime Episode Type / scheduler path:
+For source changes to the Anime Episode Type, scheduler, or web path:
 
 ```bash
 python3 -m py_compile \
   anime_trakt_manager.py \
-  scheduled_anime_manager.py
+  asset_manager.py \
+  auto_update.py \
+  mappings_manager.py \
+  scheduled_anime_manager.py \
+  scheduler.py \
+  setup.py \
+  shared_utils.py \
+  web_server.py
 
 git diff --check
 ```
 
-The release changelog contains release-specific validation notes and regression summaries.
+Frontend validation:
+
+```bash
+cd web
+npx tsc --noEmit --pretty false
+npm run build
+cd ..
+```
+
+## Release Validation
+
+A release should also be tested using the exact Docker image intended for publication.
+
+The DAKOSYS 2.0 release gate includes:
+
+- container startup;
+- Anime Episode Type with no Trakt configuration;
+- real Plex + AnimeFillerList local generation;
+- Kometa output generation;
+- automatic schedule refresh and failure preservation;
+- `always_include` / `always_exclude`;
+- TV Status and its single Next Airing list;
+- legacy publishing disabled before OAuth;
+- explicit legacy publishing opt-in and account-capacity checks;
+- scheduler execution inside Docker;
+- web setup/dashboard/anime/Trakt/mappings/config-reference pages;
+- a fresh non-VIP/free-tier Trakt account before final release.
+
+Do not infer Docker correctness solely from local Python/TypeScript tests.
+
+**Do not tag `v2.0.0` until the Docker and fresh free-tier Trakt validation gates pass.**
 
 ---
 
@@ -921,7 +1209,7 @@ Upstream repository:
 
 [https://github.com/sahara101/Dakosys](https://github.com/sahara101/Dakosys)
 
-This fork intentionally preserves the upstream project's core services and dashboard while extending the anime/Plex mapping and scheduling paths.
+This fork preserves the upstream project's major service concepts while substantially reworking the anime/Plex mapping, scheduling, Trakt integration, and dashboard paths.
 
 ---
 
