@@ -260,19 +260,21 @@ def _load_generated(path: Path) -> dict[str, Any]:
 
 def load_scheduled_anime(
     config: dict[str, Any],
-    *,
-    fallback_to_config: bool = True,
 ) -> list[str]:
-    generated = _load_generated(_resolve_schedule_path(config))
+    """Return the generated automatic active/future anime schedule."""
+    generated = _load_generated(
+        _resolve_schedule_path(config)
+    )
     scheduled = generated.get("scheduled_anime")
-    if isinstance(scheduled, list):
-        return [str(item) for item in scheduled if str(item).strip()]
 
-    if fallback_to_config:
-        legacy = config.get("scheduler", {}).get("scheduled_anime", []) or []
-        return [str(item) for item in legacy if str(item).strip()]
+    if not isinstance(scheduled, list):
+        return []
 
-    return []
+    return [
+        str(item)
+        for item in scheduled
+        if str(item).strip()
+    ]
 
 
 def _parse_generated_at(data: dict[str, Any]) -> Optional[datetime]:
@@ -470,7 +472,7 @@ def refresh_scheduled_anime(
     auto = config.get("scheduler", {}).get("auto_schedule", {}) or {}
     path = _resolve_schedule_path(config)
     previous_data = _load_generated(path)
-    previous = set(load_scheduled_anime(config, fallback_to_config=True))
+    previous = set(load_scheduled_anime(config))
 
     refresh_hours = float(auto.get("refresh_hours", 24) or 24)
     generated_at = _parse_generated_at(previous_data)

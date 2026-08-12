@@ -61,7 +61,7 @@ def load_generated_scheduled_anime(config=None):
     """
     Return the generated automatic active/future anime schedule.
 
-    The legacy scheduler.scheduled_anime config field is intentionally
+    The retired hard-coded schedule config field is intentionally
     not used. scheduled-anime.yaml is the runtime source of truth.
     """
     cfg = config or CONFIG or {}
@@ -71,7 +71,6 @@ def load_generated_scheduled_anime(config=None):
 
         return load_scheduled_anime(
             cfg,
-            fallback_to_config=False,
         )
     except Exception as exc:
         logger.error(

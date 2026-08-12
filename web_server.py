@@ -541,7 +541,7 @@ def get_anime_schedule():
     Return generated automatic-schedule state.
 
     scheduled-anime.yaml is the runtime source of truth. The legacy
-    scheduler.scheduled_anime field in config.yaml is intentionally ignored.
+    The retired hard-coded schedule field in config.yaml is intentionally ignored.
     """
     config = load_config()
     if not config:
@@ -573,7 +573,6 @@ def get_anime_schedule():
 
         scheduled = _sam.load_scheduled_anime(
             config,
-            fallback_to_config=False,
         )
     except Exception as exc:
         return {
