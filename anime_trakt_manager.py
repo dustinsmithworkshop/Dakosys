@@ -1162,7 +1162,7 @@ def get_existing_episodes_in_trakt_list(list_id, access_token):
         console.print(f"[bold red]Error getting list episodes: {str(e)}[/bold red]")
         return []
 
-def add_episodes_to_trakt_list(list_id, episodes, access_token, trakt_show_id, match_by="hybrid", anime_name=None, episode_type=None, existing_trakt_ids=None, update_mode=False):
+def add_episodes_to_trakt_list(list_id, episodes, access_token, trakt_show_id, match_by="hybrid", anime_name=None, episode_type=None, existing_trakt_ids=None, update_mode=False, existing_item_count=None):
     """Add episodes to a Trakt list with optimized API usage.
 
     This implementation minimizes API calls by:
@@ -1235,6 +1235,7 @@ def add_episodes_to_trakt_list(list_id, episodes, access_token, trakt_show_id, m
                 return False, False, None
 
             existing_episodes = response.json()
+            existing_item_count = len(existing_episodes)
 
             existing_trakt_ids = set()
             for item in existing_episodes:
@@ -1244,6 +1245,39 @@ def add_episodes_to_trakt_list(list_id, episodes, access_token, trakt_show_id, m
                         existing_trakt_ids.add(trakt_id)
 
             logger.info(f"Found {len(existing_trakt_ids)} existing episodes in list")
+
+        elif existing_item_count is None:
+            logger.info(
+                f"Getting total item count for list {list_id} "
+                "for capacity validation"
+            )
+
+            list_items_url = (
+                f"{trakt_api_url}/users/me/lists/{list_id}/items"
+            )
+            response = requests.get(
+                list_items_url,
+                headers=headers,
+                params={"limit": 1000},
+            )
+
+            if response.status_code != 200:
+                console.print(
+                    "[bold red]Failed to get list item count. "
+                    f"Status: {response.status_code}[/bold red]"
+                )
+                return False, True, None
+
+            existing_items = response.json()
+
+            if not isinstance(existing_items, list):
+                console.print(
+                    "[bold red]Unexpected response while checking "
+                    "Trakt list capacity.[/bold red]"
+                )
+                return False, True, None
+
+            existing_item_count = len(existing_items)
 
         # Step 2: Get all seasons data for this show (one API call)
         logger.info(f"Getting all seasons data for show {trakt_show_id}")
@@ -1463,6 +1497,44 @@ def add_episodes_to_trakt_list(list_id, episodes, access_token, trakt_show_id, m
                         failure_details.append(f"Failed to find match for {episode_title}")
 
                 progress.update(task, advance=1)
+
+        capacity = trakt_auth.assess_trakt_list_item_addition(
+            existing_item_count,
+            len(episodes_to_add),
+        )
+
+        if not capacity.get("allowed"):
+            reason = capacity.get("reason")
+            current = capacity.get("current")
+            additions = capacity.get("additional")
+            projected = capacity.get("projected")
+            maximum = capacity.get("maximum")
+
+            if reason == "item_limit_exceeded":
+                console.print(
+                    "[bold red]Cannot add episodes to Trakt list: "
+                    f"{current} existing + {additions} new = "
+                    f"{projected}, exceeding the account limit of "
+                    f"{maximum} items per list.[/bold red]"
+                )
+            else:
+                console.print(
+                    "[bold red]Cannot safely determine Trakt "
+                    f"list item capacity ({reason}).[/bold red]"
+                )
+
+            logger.error(
+                "Blocked Trakt list item update for list %s: %s "
+                "(current=%s, additions=%s, projected=%s, maximum=%s)",
+                list_id,
+                reason,
+                current,
+                additions,
+                projected,
+                maximum,
+            )
+
+            return False, True, None
 
         added_episodes = []
         if episodes_to_add:

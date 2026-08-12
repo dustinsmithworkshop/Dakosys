@@ -861,6 +861,90 @@ def assess_trakt_list_creation(
     }
 
 
+def assess_trakt_list_item_addition(
+    current_item_count,
+    additional_item_count,
+    *,
+    capabilities=None,
+):
+    """
+    Determine whether items can safely be added to a personal Trakt list.
+
+    Uses only the item limit reported by /users/settings. Unknown or malformed
+    values fail closed.
+    """
+    current = _optional_nonnegative_int(current_item_count)
+    additions = _optional_nonnegative_int(additional_item_count)
+
+    if current is None:
+        return {
+            "allowed": False,
+            "reason": "current_item_count_unknown",
+            "current": None,
+            "additional": additions,
+            "projected": None,
+            "maximum": None,
+            "remaining": None,
+        }
+
+    if additions is None:
+        return {
+            "allowed": False,
+            "reason": "additional_item_count_unknown",
+            "current": current,
+            "additional": None,
+            "projected": None,
+            "maximum": None,
+            "remaining": None,
+        }
+
+    if capabilities is None:
+        capabilities = get_trakt_list_capabilities()
+
+    if not isinstance(capabilities, dict):
+        return {
+            "allowed": False,
+            "reason": "capabilities_unavailable",
+            "current": current,
+            "additional": additions,
+            "projected": current + additions,
+            "maximum": None,
+            "remaining": None,
+        }
+
+    maximum = _optional_nonnegative_int(
+        capabilities.get("max_items_per_list")
+    )
+
+    if maximum is None:
+        return {
+            "allowed": False,
+            "reason": "item_limit_unknown",
+            "current": current,
+            "additional": additions,
+            "projected": current + additions,
+            "maximum": None,
+            "remaining": None,
+        }
+
+    projected = current + additions
+    remaining = max(maximum - current, 0)
+
+    return {
+        "allowed": projected <= maximum,
+        "reason": (
+            "capacity_available"
+            if projected <= maximum
+            else "item_limit_exceeded"
+        ),
+        "current": current,
+        "additional": additions,
+        "projected": projected,
+        "maximum": maximum,
+        "remaining": remaining,
+    }
+
+
 if __name__ == "__main__":
     # Setup logging
     logging.basicConfig(
