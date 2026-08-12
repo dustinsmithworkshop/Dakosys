@@ -70,36 +70,10 @@ def _quiet_call(func, *args, **kwargs):
 
 
 def _get_afl_catalog() -> list[str]:
-    command = [sys.executable, "anime_trakt_manager.py", "list-anime"]
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    combined = "\n".join(
-        part for part in (result.stdout, result.stderr) if part
-    )
+    """Compatibility wrapper around shared AFL discovery."""
+    from anime_discovery import get_afl_catalog
 
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"`{' '.join(command)}` failed with exit code {result.returncode}: "
-            f"{combined[-1500:]}"
-        )
-
-    pattern = re.compile(
-        r"^\s*\d+\.\s+(\S+)(?:\s+\(Mapped to: .+\))?\s*$"
-    )
-    slugs: list[str] = []
-    for line in combined.splitlines():
-        match = pattern.match(line)
-        if match:
-            slugs.append(match.group(1).strip())
-
-    if not slugs:
-        raise RuntimeError("No AnimeFillerList entries could be parsed.")
-
-    return list(dict.fromkeys(slugs))
+    return get_afl_catalog()
 
 
 def _get_tmdb_id(show) -> Optional[str]:

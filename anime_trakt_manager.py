@@ -4434,22 +4434,33 @@ def list_lists(format, filter, anime, all, debug):
 
 @cli.command()
 def sync_collections():
-    """Manually synchronize the collections file with Trakt lists."""
+    """Generate Kometa anime episode collections from local discovery."""
     try:
         # First reload configuration to get the latest mappings
         reload_config()
 
-        # Import the sync function
-        from asset_manager import sync_anime_episode_collections
+        # Import collection generation helpers
+        from asset_manager import (
+            get_kometa_paths,
+            sync_anime_episode_collections,
+        )
 
-        console.print("[bold blue]Synchronizing collections file with Trakt lists...[/bold blue]")
+        console.print(
+            "[bold blue]Generating anime episode collections "
+            "from Plex + AnimeFillerList...[/bold blue]"
+        )
 
         if sync_anime_episode_collections(CONFIG, force_update=True):
             console.print("[bold green]Collections synchronized successfully![/bold green]")
-            # Show the path to the updated file for the user
-            collections_dir = CONFIG.get('services', {}).get('tv_status_tracker', {}).get('collections_dir', '/kometa/config/collections')
-            collections_file = os.path.join(collections_dir, 'anime_episode_type.yml')
-            console.print(f"[blue]Updated file: {collections_file}[/blue]")
+            # Report the same collections path used by asset_manager.
+            _, collections_dir = get_kometa_paths(CONFIG)
+            collections_file = os.path.join(
+                collections_dir,
+                'anime_episode_type.yml',
+            )
+            console.print(
+                f"[blue]Updated file: {collections_file}[/blue]"
+            )
         else:
             console.print("[bold red]Failed to synchronize collections[/bold red]")
     except Exception as e:

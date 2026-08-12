@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import logging
+
+import requests
+from bs4 import BeautifulSoup
 from collections.abc import Iterable
 from typing import Any
 
@@ -9,6 +12,46 @@ import mappings_manager
 
 
 logger = logging.getLogger("anime_discovery")
+
+
+AFL_SHOWS_URL = "https://www.animefillerlist.com/shows"
+
+
+def get_afl_catalog() -> list[str]:
+    """
+    Return the current AnimeFillerList show slugs.
+
+    Catalog membership is discovery input only. Valid historical AFL pages may
+    be supplemented later by known Dakosys mapping identities.
+    """
+
+    response = requests.get(
+        AFL_SHOWS_URL,
+        timeout=30,
+    )
+
+    response.raise_for_status()
+
+    soup = BeautifulSoup(
+        response.text,
+        "html.parser",
+    )
+
+    slugs = {
+        href[len("/shows/"):].strip("/")
+        for link in soup.find_all("a", href=True)
+        if (
+            (href := str(link.get("href") or "")).startswith("/shows/")
+            and href[len("/shows/"):].strip("/")
+        )
+    }
+
+    if not slugs:
+        raise RuntimeError(
+            "No AnimeFillerList entries could be discovered."
+        )
+
+    return sorted(slugs)
 
 
 # These mapping sections are keyed by the canonical Dakosys anime identity.

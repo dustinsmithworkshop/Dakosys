@@ -120,10 +120,12 @@ def setup_fonts(config):
 def sync_anime_episode_collections(config, force_update=False):
     """
     Generate Kometa anime episode-type collections using Plex aired-order
-    numbering instead of Trakt's season/episode numbering.
+    numbering.
 
-    Trakt list names are still used to determine which Dakosys anime/type
-    combinations currently exist.
+    Anime/type combinations are discovered locally from the live
+    AnimeFillerList catalog plus known Dakosys mapping identities, then
+    validated against Plex and AnimeFillerList before being passed to the
+    Plex-aware episode mapper.
     """
     logger = logging.getLogger("asset_manager")
 
@@ -132,84 +134,102 @@ def sync_anime_episode_collections(config, force_update=False):
     if not ensure_directory(collections_dir):
         return False
 
-    trakt_username = config.get('trakt', {}).get('username')
-    if not trakt_username:
+    try:
+        import anime_trakt_manager as atm
+        from anime_discovery import (
+            build_discovery_candidates,
+            get_afl_catalog,
+        )
+
+        # asset_manager can be invoked from several entry points. Explicitly
+        # reuse the caller's loaded configuration so Plex resolution, mappings,
+        # AFL overrides, aliases, and ignored entries all use the same state.
+        atm.CONFIG = config
+
+        plex = atm.connect_to_plex()
+        if plex is None:
+            logger.error(
+                "Could not connect to Plex for local anime discovery"
+            )
+            return False
+
+        afl_catalog = get_afl_catalog()
+        candidates = build_discovery_candidates(afl_catalog)
+
+        type_map = {
+            'FILLER': 'filler',
+            'MANGA CANON': 'manga',
+            'ANIME CANON': 'anime',
+            'MIXED CANON/FILLER': 'mixed',
+        }
+
+        anime_specs = []
+        seen_specs = set()
+
+        plex_matches = 0
+        afl_valid = 0
+
+        for slug in candidates:
+            show = atm.get_plex_anime_show(plex, slug)
+            if show is None:
+                continue
+
+            plex_matches += 1
+
+            episodes = atm.get_anime_episodes(
+                slug,
+                None,
+                silent=True,
+            )
+
+            if not episodes:
+                continue
+
+            afl_valid += 1
+
+            present_types = set()
+
+            for episode in episodes:
+                raw_type = str(
+                    episode.get('type') or ''
+                ).strip().upper()
+
+                mapped_type = type_map.get(raw_type)
+
+                if mapped_type:
+                    present_types.add(mapped_type)
+
+            for mapped_type in sorted(present_types):
+                spec_key = (slug, mapped_type)
+
+                if spec_key in seen_specs:
+                    continue
+
+                seen_specs.add(spec_key)
+
+                anime_specs.append({
+                    'anime_name': slug,
+                    'episode_type': mapped_type,
+                })
+
+        logger.info(
+            "Local anime discovery complete: "
+            f"{len(afl_catalog)} live AFL entries, "
+            f"{len(candidates)} discovery candidates, "
+            f"{plex_matches} Plex matches, "
+            f"{afl_valid} AFL-valid shows, "
+            f"{len(anime_specs)} anime/type specs"
+        )
+
+    except Exception as e:
         logger.error(
-            "Trakt username not found in config - "
-            "cannot discover Dakosys episode lists"
+            f"Error during local anime discovery: {str(e)}"
         )
         return False
-
-    import trakt_auth
-
-    access_token = trakt_auth.ensure_trakt_auth(quiet=True)
-    if not access_token:
-        logger.error("Failed to get Trakt access token")
-        return False
-
-    headers = trakt_auth.get_trakt_headers(access_token)
-
-    trakt_api_url = 'https://api.trakt.tv'
-    lists_url = f"{trakt_api_url}/users/me/lists"
-
-    response = requests.get(
-        lists_url,
-        headers=headers,
-        params={"limit": 1000},
-    )
-
-    if response.status_code != 200:
-        logger.error(
-            f"Failed to get Trakt lists. "
-            f"Status: {response.status_code}"
-        )
-        return False
-
-    trakt_lists = response.json()
-
-    anime_specs = []
-
-    for trakt_list in trakt_lists:
-        name = trakt_list.get('name', '')
-
-        if '_' not in name:
-            continue
-
-        anime_name, episode_type = name.split('_', 1)
-        normalized_type = episode_type.lower().strip()
-
-        if normalized_type == 'filler':
-            mapped_type = 'filler'
-
-        elif normalized_type in (
-            'manga-canon',
-            'manga canon',
-        ):
-            mapped_type = 'manga'
-
-        elif normalized_type in (
-            'anime-canon',
-            'anime canon',
-        ):
-            mapped_type = 'anime'
-
-        elif normalized_type in (
-            'mixed-canon-filler',
-            'mixed canon/filler',
-        ):
-            mapped_type = 'mixed'
-
-        else:
-            continue
-
-        anime_specs.append({
-            'anime_name': anime_name,
-            'episode_type': mapped_type,
-        })
 
     if not anime_specs:
         logger.error(
-            "No Dakosys anime episode lists found on Trakt"
+            "Local anime discovery produced no valid anime episode specs"
         )
         return False
 
