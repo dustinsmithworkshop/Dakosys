@@ -16,3 +16,9 @@ bleach_manga_canon.txt
 test_bleach_kometa.py
 test_bleach_mapping.py
 test_kometa_mapper_integration.py
+
+# Next.js / frontend build artifacts
+web/node_modules/
+web/.next/
+web/out/
+web/tsconfig.tsbuildinfo

@@ -116,6 +116,77 @@ def run_anime_episode_update():
             if 'SCHEDULER_MODE' in os.environ:
                 del os.environ['SCHEDULER_MODE']
 
+def run_auto_schedule_refresh():
+    """
+    Refresh generated active/future anime schedule when stale.
+
+    This job is intentionally separate from Anime Episode Type
+    generation so a Trakt failure cannot prevent the local Plex + AFL
+    collections from being generated.
+    """
+    config = load_config()
+
+    if not config:
+        logger.error(
+            "Automatic schedule refresh: failed to load configuration"
+        )
+        return False
+
+    auto = (
+        config
+        .get('scheduler', {})
+        .get('auto_schedule', {})
+        or {}
+    )
+
+    if not auto.get('enabled', False):
+        logger.info(
+            "Automatic anime scheduling is disabled; skipping refresh"
+        )
+        return True
+
+    try:
+        from scheduled_anime_manager import refresh_scheduled_anime
+
+        result = refresh_scheduled_anime(
+            config,
+            force=False,
+            notify=True,
+        )
+
+        if not result.get('success', False):
+            logger.error(
+                "Automatic anime schedule refresh failed: %s",
+                result.get('error') or 'unknown error',
+            )
+            return False
+
+        if result.get('skipped', False):
+            logger.info(
+                "Automatic anime schedule is still within refresh cache"
+            )
+        elif result.get('changed', False):
+            logger.info(
+                "Automatic anime schedule updated: +%d / -%d / %d total",
+                len(result.get('added', [])),
+                len(result.get('removed', [])),
+                len(result.get('scheduled_anime', [])),
+            )
+        else:
+            logger.info(
+                "Automatic anime schedule refreshed with no membership changes"
+            )
+
+        return True
+
+    except Exception as exc:
+        logger.error(
+            "Automatic anime schedule refresh failed: %s",
+            exc,
+        )
+        return False
+
+
 def run_tv_status_update():
     """Run the TV/Anime Status Tracker update job."""
     config = load_config()
@@ -395,28 +466,39 @@ def setup_scheduler():
     services_configured = False
     scheduled_services = []
 
+    # Automatic active/future anime scheduling is independent from
+    # Anime Episode Type generation. Check once per hour; the generated
+    # scheduler's refresh_hours cache controls when network discovery
+    # actually runs.
+    auto_schedule = (
+        config
+        .get('scheduler', {})
+        .get('auto_schedule', {})
+        or {}
+    )
+
+    if auto_schedule.get('enabled', False):
+        schedule.every().hour.at(":05").do(
+            run_auto_schedule_refresh
+        ).tag('auto_schedule')
+
+        services_configured = True
+
+        logger.info(
+            "Automatic active/future anime schedule enabled - "
+            "checked hourly, refresh cache %.1f hours",
+            float(auto_schedule.get('refresh_hours', 24) or 24),
+        )
+
     # Configure Anime Episode Type service if enabled
     if config.get('services', {}).get('anime_episode_type', {}).get('enabled', True):
         service_scheduler = config.get('scheduler', {}).get('anime_episode_type', {})
 
-        # Log the anime list that will be updated
-        scheduled_anime = config.get('scheduler', {}).get('scheduled_anime', [])
+        logger.info(
+            "Anime Episode Type service enabled - "
+            "local Plex + AnimeFillerList generation"
+        )
 
-        # Create a list of display names (Plex titles) with better mapping
-        anime_display_list = []
-        for afl_name in scheduled_anime:
-            # Get Plex name from mappings
-            plex_name = config.get('mappings', {}).get(afl_name, afl_name)
-            # If still AFL format, make it user-friendly
-            if '-' in plex_name:
-                plex_name = plex_name.replace('-', ' ').title()
-            anime_display_list.append(plex_name)
-
-        logger.info(f"Anime Episode Type service enabled - {len(scheduled_anime)} anime scheduled")
-        if scheduled_anime:
-            # Use the display names (Plex titles) in the log instead of AFL names
-            logger.info(f"Scheduled anime titles: {', '.join(anime_display_list)}")
-        
         if setup_service_schedule('anime_episode_type', service_scheduler, run_anime_episode_update):
             services_configured = True
             

@@ -56,6 +56,31 @@ def load_config():
 
 load_config()
 
+
+def load_generated_scheduled_anime(config=None):
+    """
+    Return the generated automatic active/future anime schedule.
+
+    The legacy scheduler.scheduled_anime config field is intentionally
+    not used. scheduled-anime.yaml is the runtime source of truth.
+    """
+    cfg = config or CONFIG or {}
+
+    try:
+        from scheduled_anime_manager import load_scheduled_anime
+
+        return load_scheduled_anime(
+            cfg,
+            fallback_to_config=False,
+        )
+    except Exception as exc:
+        logger.error(
+            "Could not load generated anime schedule: %s",
+            exc,
+        )
+        return []
+
+
 def normalize_episode_title(title):
     """Normalize episode title for better matching."""
     title = re.sub(r'[^\w\s]', ' ', title).lower()
@@ -122,8 +147,11 @@ def get_anime_lists(trakt_lists):
     anime_lists = []
     config = trakt_auth.load_config()
 
-    scheduled_anime = config.get('scheduler', {}).get('scheduled_anime', [])
-    logger.info(f"Scheduled anime: {scheduled_anime}")
+    scheduled_anime = load_generated_scheduled_anime(config)
+    logger.info(
+        "Generated active/future anime schedule: %s",
+        scheduled_anime,
+    )
 
     for trakt_list in trakt_lists:
         name = trakt_list['name']
@@ -463,9 +491,12 @@ def run_trakt_episode_list_update(match_by="hybrid"):
         logger.error("Failed to connect to Plex server")
         return False
 
-    scheduled_anime = CONFIG.get('scheduler', {}).get('scheduled_anime', [])
+    scheduled_anime = load_generated_scheduled_anime(CONFIG)
     if not scheduled_anime:
-        logger.info("No anime scheduled for updates")
+        logger.error(
+            "Legacy Trakt episode-list publishing requires a generated "
+            "automatic anime schedule, but no scheduled titles were found"
+        )
         return False
 
     trakt_lists = get_all_trakt_lists(access_token)

@@ -77,11 +77,25 @@ export type ServiceName = "anime_episode_type" | "tv_status_tracker" | "size_ove
 export interface AnimeEntry {
   afl_name: string;
   display_name: string;
+  trakt_title?: string;
+  trakt_status?: string;
+  decision?: string;
+  override?: "include" | null;
 }
 
 export interface AnimeScheduleResponse {
   anime: AnimeEntry[];
   count: number;
+  auto_enabled: boolean;
+  generated_at?: string | null;
+  source?: string | null;
+  schedule_path?: string;
+  review_count?: number;
+  ignored_count?: number;
+  stats?: Record<string, number>;
+  always_include?: string[];
+  always_exclude?: string[];
+  error?: string | null;
 }
 
 export interface TraktList {
@@ -125,6 +139,17 @@ export interface AddAnimeResponse {
   success: boolean;
   afl_name: string;
   plex_name: string;
+  schedule_override?: "include" | null;
+  refresh_required?: boolean;
+}
+
+export interface AnimeScheduleOverrideResponse {
+  success: boolean;
+  afl_name: string;
+  mode: "include" | "exclude" | "auto";
+  always_include: string[];
+  always_exclude: string[];
+  refresh_required: boolean;
 }
 
 export interface FailedEpisodeDetail {

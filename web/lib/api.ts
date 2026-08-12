@@ -118,8 +118,33 @@ export const api = {
       body: JSON.stringify({ afl_name: aflName, plex_name: plexName, add_to_schedule: addToSchedule }),
     }),
 
+  setAnimeScheduleOverride: (
+    aflName: string,
+    mode: "include" | "exclude" | "auto",
+  ) =>
+    apiFetch<{
+      success: boolean;
+      afl_name: string;
+      mode: "include" | "exclude" | "auto";
+      always_include: string[];
+      always_exclude: string[];
+      refresh_required: boolean;
+    }>(
+      `/api/anime/schedule/${encodeURIComponent(aflName)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+      },
+    ),
+
   removeFromSchedule: (aflName: string) =>
-    apiFetch<{ success: boolean; afl_name: string }>(
+    apiFetch<{
+      success: boolean;
+      afl_name: string;
+      mode: "exclude";
+      refresh_required: boolean;
+    }>(
       `/api/anime/schedule/${encodeURIComponent(aflName)}`,
       { method: "DELETE" },
     ),

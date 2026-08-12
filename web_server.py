@@ -466,33 +466,108 @@ def set_service_enabled(service: str, payload: ServiceEnabledPayload):
 
 @app.get("/api/anime-schedule")
 def get_anime_schedule():
-    """Return the scheduled anime list with display names from config."""
+    """
+    Return generated automatic-schedule state.
+
+    scheduled-anime.yaml is the runtime source of truth. The legacy
+    scheduler.scheduled_anime field in config.yaml is intentionally ignored.
+    """
     config = load_config()
     if not config:
-        return {"anime": [], "count": 0}
+        return {
+            "anime": [],
+            "count": 0,
+            "auto_enabled": False,
+            "error": "Config file not found",
+        }
 
-    scheduled = config.get("scheduler", {}).get("scheduled_anime", [])
-    mappings = config.get("mappings", {})
+    auto = config.get("scheduler", {}).get("auto_schedule", {}) or {}
 
-    mappings_file = os.path.join(os.path.dirname(CONFIG_FILE), "mappings.yaml")
-    if os.path.exists(mappings_file):
-        try:
-            with open(mappings_file, "r") as f:
-                mdata = yaml.safe_load(f) or {}
-            mappings = {**mdata.get("mappings", {}), **mappings}
-        except Exception:
-            pass
+    always_include = {
+        str(item).strip()
+        for item in (auto.get("always_include", []) or [])
+        if str(item).strip()
+    }
+    always_exclude = {
+        str(item).strip()
+        for item in (auto.get("always_exclude", []) or [])
+        if str(item).strip()
+    }
+
+    try:
+        import scheduled_anime_manager as _sam
+
+        schedule_path = _sam._resolve_schedule_path(config)
+        generated = _sam._load_generated(schedule_path)
+
+        scheduled = _sam.load_scheduled_anime(
+            config,
+            fallback_to_config=False,
+        )
+    except Exception as exc:
+        return {
+            "anime": [],
+            "count": 0,
+            "auto_enabled": bool(auto.get("enabled", False)),
+            "error": str(exc),
+        }
+
+    # Exclusions take effect in the UI immediately, even before the next
+    # generated-schedule refresh. Includes are NOT synthesized here: they
+    # still have to pass Plex/AFL/Trakt validation during a real refresh.
+    scheduled = [
+        slug
+        for slug in scheduled
+        if slug not in always_exclude
+    ]
+
+    mappings = _load_all_mappings(config)
+    generated_shows = generated.get("shows", {}) or {}
 
     anime_list = []
+
     for afl_name in scheduled:
         plex_name = mappings.get(afl_name, afl_name)
-        display_name = plex_name if plex_name != afl_name else afl_name.replace("-", " ").title()
+
+        generated_show = generated_shows.get(afl_name, {}) or {}
+        generated_plex_title = str(
+            generated_show.get("plex_title") or ""
+        ).strip()
+
+        if generated_plex_title:
+            display_name = generated_plex_title
+        elif plex_name != afl_name:
+            display_name = plex_name
+        else:
+            display_name = afl_name.replace("-", " ").title()
+
         anime_list.append({
             "afl_name": afl_name,
             "display_name": display_name,
+            "trakt_title": generated_show.get("trakt_title", ""),
+            "trakt_status": generated_show.get("trakt_status", ""),
+            "decision": generated_show.get("decision", ""),
+            "override": (
+                "include"
+                if afl_name in always_include
+                else None
+            ),
         })
 
-    return {"anime": anime_list, "count": len(anime_list)}
+    return {
+        "anime": anime_list,
+        "count": len(anime_list),
+        "auto_enabled": bool(auto.get("enabled", False)),
+        "generated_at": generated.get("generated_at"),
+        "source": generated.get("source"),
+        "schedule_path": str(schedule_path),
+        "review_count": len(generated.get("review", {}) or {}),
+        "ignored_count": len(generated.get("ignored", {}) or {}),
+        "stats": generated.get("stats", {}) or {},
+        "always_include": sorted(always_include),
+        "always_exclude": sorted(always_exclude),
+        "error": None,
+    }
 
 _DAKOSYS_SUFFIXES = ["_filler", "_manga canon", "_anime canon", "_mixed canon/filler"]
 
@@ -860,41 +935,104 @@ def get_plex_shows():
 
 @app.post("/api/run/anime/{afl_name}")
 def trigger_anime_run(afl_name: str):
-    """Trigger a create-all update for a single scheduled anime."""
+    """
+    Backward-compatible endpoint for the old per-title web action.
+
+    Local Anime Episode Type generation is now a full Plex+AFL sync.
+    If automatic scheduling is enabled, refresh its generated state first.
+    """
     if anime_run_status.get(afl_name):
-        return {"started": False, "message": f"Already running for {afl_name}"}
+        return {
+            "started": False,
+            "message": f"Already running for {afl_name}",
+        }
+
+    if run_status.get("anime_episode_type"):
+        return {
+            "started": False,
+            "message": "Anime Episode Type is already running",
+        }
 
     def _run():
         import logging as _logging
         import traceback as _tb
+
         _log = _logging.getLogger("anime_trakt_manager")
+
         anime_run_status[afl_name] = True
+        anime_run_errors[afl_name] = None
+        run_status["anime_episode_type"] = True
+
         try:
-            import auto_update as _au
-            import anime_trakt_manager as _atm
-            _au.load_config()
-            _atm.load_config()
-            if _au.CONFIG:
-                original = list(_au.CONFIG.get("scheduler", {}).get("scheduled_anime", []))
-                _au.CONFIG.setdefault("scheduler", {})["scheduled_anime"] = [afl_name]
-                try:
-                    _au.run_anime_episode_update()
-                finally:
-                    if _au.CONFIG:
-                        _au.CONFIG.setdefault("scheduler", {})["scheduled_anime"] = original
+            config = load_config()
+            if not config:
+                raise RuntimeError("Config file not found")
+
+            auto = (
+                config
+                .get("scheduler", {})
+                .get("auto_schedule", {})
+                or {}
+            )
+
+            if auto.get("enabled", False):
+                import scheduled_anime_manager as _sam
+
+                refresh = _sam.refresh_scheduled_anime(
+                    config,
+                    force=True,
+                    notify=False,
+                )
+
+                if not refresh.get("success", False):
+                    raise RuntimeError(
+                        "Automatic schedule refresh failed: "
+                        f"{refresh.get('error') or 'unknown error'}"
+                    )
+
+            from asset_manager import sync_anime_episode_collections
+
+            if not sync_anime_episode_collections(
+                config,
+                force_update=True,
+            ):
+                raise RuntimeError(
+                    "Anime Episode Type collection generation failed"
+                )
+
         except Exception as exc:
-            _log.error(f"Per-anime create-all for '{afl_name}' failed: {exc}\n{_tb.format_exc()}")
+            anime_run_errors[afl_name] = str(exc)
+            _log.error(
+                "Web Anime Episode Type run failed: %s\n%s",
+                exc,
+                _tb.format_exc(),
+            )
         finally:
+            run_status["anime_episode_type"] = False
             anime_run_status[afl_name] = False
 
-    threading.Thread(target=_run, daemon=True).start()
-    return {"started": True}
+    threading.Thread(
+        target=_run,
+        daemon=True,
+    ).start()
+
+    return {
+        "started": True,
+        "message": (
+            "Automatic schedule refresh and full local Anime Episode "
+            "Type sync started"
+        ),
+    }
 
 
 @app.get("/api/run/anime/{afl_name}/status")
 def get_anime_run_status(afl_name: str):
-    """Check whether a per-anime create-all is in progress."""
-    return {"afl_name": afl_name, "running": anime_run_status.get(afl_name, False)}
+    """Check the compatibility Anime Episode Type web run."""
+    return {
+        "afl_name": afl_name,
+        "running": anime_run_status.get(afl_name, False),
+        "error": anime_run_errors.get(afl_name),
+    }
 
 @app.get("/api/afl/search")
 def search_afl(q: str = ""):
@@ -968,69 +1106,205 @@ class AddAnimePayload(BaseModel):
     add_to_schedule: bool = True
 
 
-def _write_scheduled_anime(scheduled: List[str]) -> None:
-    """Persist the scheduled_anime list to config.yaml (atomic write)."""
-    config = load_config()
-    if not config:
-        raise RuntimeError("Config file not found")
-    config.setdefault("scheduler", {})["scheduled_anime"] = scheduled
-    config_to_save = {
-        k: v for k, v in config.items()
-        if k not in ("mappings", "trakt_mappings", "title_mappings")
-    }
+class AnimeScheduleOverridePayload(BaseModel):
+    mode: str
+
+
+def _write_config_atomic(config: dict) -> None:
+    """Atomically persist config.yaml with a backup of the previous file."""
     os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+
     tmp = CONFIG_FILE + ".tmp"
     bak = CONFIG_FILE + ".bak"
-    with open(tmp, "w") as f:
-        yaml.dump(config_to_save, f, default_flow_style=False, allow_unicode=True)
+
+    with open(tmp, "w", encoding="utf-8") as handle:
+        yaml.safe_dump(
+            config,
+            handle,
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+        )
+
     if os.path.exists(CONFIG_FILE):
         shutil.copy2(CONFIG_FILE, bak)
+
     os.replace(tmp, CONFIG_FILE)
+
+
+def _set_auto_schedule_override(
+    afl_name: str,
+    mode: str,
+) -> dict:
+    """
+    Set one automatic-scheduler override.
+
+    mode=include -> scheduler.auto_schedule.always_include
+    mode=exclude -> scheduler.auto_schedule.always_exclude
+    mode=auto    -> remove explicit override and return to automatic decision
+    """
+    afl_name = str(afl_name or "").strip()
+    mode = str(mode or "").strip().lower()
+
+    if not afl_name:
+        raise HTTPException(
+            status_code=400,
+            detail="afl_name is required",
+        )
+
+    if mode not in {"include", "exclude", "auto"}:
+        raise HTTPException(
+            status_code=400,
+            detail="mode must be include, exclude, or auto",
+        )
+
+    config = load_config()
+    if not config:
+        raise HTTPException(
+            status_code=500,
+            detail="Config file not found",
+        )
+
+    scheduler = config.setdefault("scheduler", {})
+    auto = scheduler.setdefault("auto_schedule", {})
+
+    if not isinstance(auto, dict):
+        raise HTTPException(
+            status_code=500,
+            detail="scheduler.auto_schedule must be a mapping",
+        )
+
+    if (
+        mode in {"include", "exclude"}
+        and not auto.get("enabled", False)
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Automatic anime scheduling is disabled. "
+                "Enable scheduler.auto_schedule before setting "
+                "schedule overrides."
+            ),
+        )
+
+    always_include = {
+        str(item).strip()
+        for item in (auto.get("always_include", []) or [])
+        if str(item).strip()
+    }
+    always_exclude = {
+        str(item).strip()
+        for item in (auto.get("always_exclude", []) or [])
+        if str(item).strip()
+    }
+
+    if mode == "include":
+        always_include.add(afl_name)
+        always_exclude.discard(afl_name)
+    elif mode == "exclude":
+        always_exclude.add(afl_name)
+        always_include.discard(afl_name)
+    else:
+        always_include.discard(afl_name)
+        always_exclude.discard(afl_name)
+
+    auto["always_include"] = sorted(always_include)
+    auto["always_exclude"] = sorted(always_exclude)
+
+    _write_config_atomic(config)
+
+    return {
+        "afl_name": afl_name,
+        "mode": mode,
+        "always_include": auto["always_include"],
+        "always_exclude": auto["always_exclude"],
+    }
+
+
+@app.put("/api/anime/schedule/{afl_name}")
+def set_anime_schedule_override(
+    afl_name: str,
+    payload: AnimeScheduleOverridePayload,
+):
+    """Set or clear an automatic-scheduler override."""
+    result = _set_auto_schedule_override(
+        afl_name,
+        payload.mode,
+    )
+
+    return {
+        "success": True,
+        **result,
+        "refresh_required": True,
+    }
 
 
 @app.post("/api/anime/add")
 def add_anime(payload: AddAnimePayload):
-    """Save AFL→Plex mapping and optionally add anime to the scheduled list."""
+    """
+    Save an AFL→Plex mapping and optionally force-include it in the
+    automatic active/future schedule.
+    """
     afl_name = payload.afl_name.strip()
     plex_name = payload.plex_name.strip()
 
     if not afl_name or not plex_name:
-        raise HTTPException(status_code=400, detail="afl_name and plex_name are required")
+        raise HTTPException(
+            status_code=400,
+            detail="afl_name and plex_name are required",
+        )
 
     try:
         import mappings_manager
-        mappings_manager.add_plex_mapping(afl_name, plex_name)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save mapping: {e}")
+
+        mappings_manager.add_plex_mapping(
+            afl_name,
+            plex_name,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save mapping: {exc}",
+        )
+
+    override = None
 
     if payload.add_to_schedule:
-        config = load_config()
-        if not config:
-            raise HTTPException(status_code=500, detail="Config file not found")
-        scheduled: List[str] = config.get("scheduler", {}).get("scheduled_anime", [])
-        if afl_name not in scheduled:
-            try:
-                _write_scheduled_anime(scheduled + [afl_name])
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Failed to update config: {e}")
+        override = _set_auto_schedule_override(
+            afl_name,
+            "include",
+        )
 
-    return {"success": True, "afl_name": afl_name, "plex_name": plex_name}
+    return {
+        "success": True,
+        "afl_name": afl_name,
+        "plex_name": plex_name,
+        "schedule_override": (
+            override.get("mode")
+            if override
+            else None
+        ),
+        "refresh_required": bool(payload.add_to_schedule),
+    }
 
 
 @app.delete("/api/anime/schedule/{afl_name}")
 def remove_from_schedule(afl_name: str):
-    """Remove an anime from scheduled_anime in config.yaml."""
-    config = load_config()
-    if not config:
-        raise HTTPException(status_code=500, detail="Config file not found")
-    scheduled: List[str] = config.get("scheduler", {}).get("scheduled_anime", [])
-    if afl_name not in scheduled:
-        raise HTTPException(status_code=404, detail=f"{afl_name} not in schedule")
-    try:
-        _write_scheduled_anime([a for a in scheduled if a != afl_name])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update config: {e}")
-    return {"success": True, "afl_name": afl_name}
+    """
+    Exclude an anime from the automatic active/future schedule.
+
+    The generated scheduled-anime.yaml file is never edited directly.
+    """
+    result = _set_auto_schedule_override(
+        afl_name,
+        "exclude",
+    )
+
+    return {
+        "success": True,
+        **result,
+        "refresh_required": True,
+    }
 
 def _parse_failed_episodes_log() -> list:
     """Parse failed_episodes.log into structured list of error groups."""
