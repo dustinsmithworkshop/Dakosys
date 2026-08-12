@@ -2315,9 +2315,13 @@ def clean_error_log(anime_name, episode_type, fixed_episodes):
         return False
 
 def _create_list_internal(anime_name, episode_type, match_by="hybrid"):
-    """Internal function to create lists without using Click command."""
-    # Force reload config to get latest mappings
+    """Internal legacy Trakt episode-list publisher used without Click."""
+    # Force reload config so the publishing opt-in is evaluated from the
+    # current configuration before any Trakt authentication is attempted.
     reload_config()
+
+    if not require_trakt_episode_list_publishing():
+        return False
 
     # Map episode type input to the full name used on AnimeFillerList
     episode_type_mapping = {
@@ -2403,15 +2407,6 @@ def _create_list_internal(anime_name, episode_type, match_by="hybrid"):
         console.print("[green]docker compose run --rm dakosys fix-mappings[/green]")
 
     return not has_failures
-
-    if not has_failures:
-        try:
-            from asset_manager import sync_anime_episode_collections
-            logger.info("Synchronizing collections file with Trakt lists...")
-            return sync_anime_episode_collections(CONFIG, force_update=True)
-        except Exception as e:
-            logger.error(f"Error synchronizing collections: {str(e)}")
-            return not has_failures
 
 @click.group()
 def cli():
@@ -3833,7 +3828,10 @@ def create_all_lists(anime_name):
 
 @cli.command()
 def fix_mappings():
-    """Interactive tool to fix mapping errors from previous runs."""
+    """Interactive tool for legacy Trakt episode-list mapping errors."""
+    if not require_trakt_episode_list_publishing():
+        return
+
     try:
         console.print("[bold blue]Loading mapping errors from logs...[/bold blue]")
 
@@ -4117,7 +4115,7 @@ def fix_mappings():
 
                     # Ask if they want to re-run the list creation
                     if manual_mappings and click.confirm(f"Would you like to regenerate the {entry.get('trakt_type', entry.get('type', 'unknown'))} list for {anime_name} now?", default=True):
-                        # Get the correct episode type for create-list
+                        # Get the correct episode type for create
                         actual_type = entry.get('trakt_type', entry.get('type', 'unknown').upper())
                         console.print(f"[bold blue]Regenerating {actual_type} list for {anime_name}...[/bold blue]")
 
@@ -4135,11 +4133,38 @@ def fix_mappings():
                         else:
                             # Not in Docker, run Docker command
                             import subprocess
-                            cmd = f"docker compose run --rm dakosys create-list {anime_name} {actual_type}"
-                            console.print(f"[dim]Running: {cmd}[/dim]")
-                            subprocess.run(cmd, shell=True)
-                            success = True
-                            console.print("[bold green]List regenerated![/bold green]")
+
+                            cmd = [
+                                "docker",
+                                "compose",
+                                "run",
+                                "--rm",
+                                "dakosys",
+                                "create",
+                                anime_name,
+                                actual_type,
+                            ]
+
+                            console.print(
+                                "[dim]Running: "
+                                + " ".join(cmd)
+                                + "[/dim]"
+                            )
+
+                            result = subprocess.run(
+                                cmd,
+                                check=False,
+                            )
+                            success = result.returncode == 0
+
+                            if success:
+                                console.print(
+                                    "[bold green]List regenerated![/bold green]"
+                                )
+                            else:
+                                console.print(
+                                    "[yellow]List regeneration failed.[/yellow]"
+                                )
 
                         # Clean error log regardless
                         clean_error_log(anime_name, entry['type'], list(manual_mappings.keys()))

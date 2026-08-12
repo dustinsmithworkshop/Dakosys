@@ -1,10 +1,10 @@
-# Dakosys v1.2 starter configuration
+# Dakosys starter configuration
 # Copy this file to: config/config.yaml
 #
 # IMPORTANT:
 # - Replace all example values before use.
 # - Do not commit your real Plex token, Trakt credentials, or Discord webhook.
-# - Dakosys v1.1 automatic anime scheduling generates config/scheduled-anime.yaml.
+# - Automatic anime scheduling generates config/scheduled-anime.yaml.
 #   A manually maintained anime schedule list is not used when
 #   scheduler.auto_schedule.enabled is true.
 

@@ -178,7 +178,7 @@ export default function MappingsPage() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-white">Fix Mappings</h1>
         <p className="text-zinc-400 mt-1">
-          Resolve episode title mismatches between Plex and Trakt
+          Override episode titles when AnimeFillerList names do not match the titles used by your media metadata
         </p>
       </div>
 
@@ -323,7 +323,7 @@ export default function MappingsPage() {
           <div className="mb-4">
             <h2 className="text-xl font-bold text-white">Saved Mappings</h2>
             <p className="text-zinc-400 text-sm mt-1">
-              Existing episode title mappings (Plex → Trakt). Click a row to edit.
+              Existing episode title overrides (source title → mapped title). Click a row to edit.
             </p>
           </div>
 
@@ -368,7 +368,7 @@ export default function MappingsPage() {
                                   />
                                   <Input
                                     size="sm"
-                                    label="Trakt title"
+                                    label="Mapped title"
                                     value={editState[k].traktTitle}
                                     onValueChange={(v) =>
                                       setEditState((p) => ({ ...p, [k]: { ...p[k], traktTitle: v } }))

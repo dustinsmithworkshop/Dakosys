@@ -68,7 +68,7 @@ def setup_rotating_logger(logger_name, log_file, level=logging.INFO, max_size_mb
     console_handler = logging.StreamHandler()
 
     is_cli_command = (
-        'create-list' in sys.argv or
+        'create' in sys.argv or
         'create-all' in sys.argv or
         'setup' in sys.argv or
         'list-lists' in sys.argv or
