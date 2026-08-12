@@ -30,7 +30,7 @@ def test_discord_notification(webhook_url):
                 {
                     "title": "DAKOSYS Notification Test",
                     "description": "Your Discord notifications are configured correctly! 🎉",
-                    "color": 5814783,  
+                    "color": 5814783,
                     "footer": {
                         "text": "DAKOSYS - Setup"
                     },
@@ -60,20 +60,20 @@ def test_discord_notification(webhook_url):
 def setup_service_scheduler(config, service_name):
     """Configure scheduler for a specific service."""
     console.print(f"\n[bold cyan]{service_name.replace('_', ' ').title()} Schedule[/bold cyan]")
-    
+
     if 'scheduler' not in config:
         config['scheduler'] = {}
-    
+
     if service_name not in config['scheduler']:
         config['scheduler'][service_name] = {}
-    
+
     schedule_type = click.prompt(
         "Schedule type",
         type=click.Choice(['daily', 'hourly', 'weekly', 'monthly']),
         default=config['scheduler'].get(service_name, {}).get('type', 'daily')
     )
     config['scheduler'][service_name]['type'] = schedule_type
-    
+
     if schedule_type == 'daily':
         default_time = config['scheduler'].get(service_name, {}).get('times', ["03:00"])[0] if 'times' in config['scheduler'].get(service_name, {}) else "03:00"
         update_time = click.prompt("Daily update time (HH:MM in 24-hour format)", default=default_time)
@@ -101,14 +101,93 @@ def setup_service_scheduler(config, service_name):
         config['scheduler'][service_name]['dates'] = [int(date)]
         config['scheduler'][service_name]['time'] = time
 
+def ensure_trakt_configuration(
+    config,
+    *,
+    require_list_settings=False,
+):
+    """
+    Ensure fields required by Trakt-dependent services are configured.
+
+    Existing values are preserved. Only missing values are prompted for.
+    Legacy episode-list publishing remains disabled unless explicitly enabled
+    elsewhere.
+    """
+    trakt_config = config.setdefault('trakt', {})
+
+    if not isinstance(trakt_config, dict):
+        trakt_config = {}
+        config['trakt'] = trakt_config
+
+    publishing = trakt_config.setdefault(
+        'episode_list_publishing',
+        {},
+    )
+
+    if not isinstance(publishing, dict):
+        publishing = {}
+        trakt_config['episode_list_publishing'] = publishing
+
+    publishing.setdefault('enabled', False)
+
+    console.print("\n[bold]Trakt Configuration[/bold]")
+
+    if not str(trakt_config.get('client_id') or '').strip():
+        trakt_config['client_id'] = click.prompt(
+            "Enter your Trakt Client ID"
+        )
+
+    if not str(trakt_config.get('client_secret') or '').strip():
+        trakt_config['client_secret'] = click.prompt(
+            "Enter your Trakt Client Secret"
+        )
+
+    if not str(trakt_config.get('username') or '').strip():
+        trakt_config['username'] = click.prompt(
+            "Enter your Trakt username"
+        )
+
+    if not str(trakt_config.get('redirect_uri') or '').strip():
+        trakt_config['redirect_uri'] = click.prompt(
+            "Enter redirect URI",
+            default="urn:ietf:wg:oauth:2.0:oob",
+        )
+
+    if require_list_settings:
+        lists_config = config.setdefault('lists', {})
+
+        if not isinstance(lists_config, dict):
+            lists_config = {}
+            config['lists'] = lists_config
+
+        if not str(
+            lists_config.get('default_privacy') or ''
+        ).strip():
+            lists_config['default_privacy'] = click.prompt(
+                "Default privacy for created lists",
+                type=click.Choice(
+                    ['private', 'public'],
+                    case_sensitive=False,
+                ),
+                default="private",
+            )
+
+
 def setup_anime_episode_type(config):
     """Setup for Anime Episode Type service."""
     console.print("\n[bold cyan]Anime Episode Type Tracker[/bold cyan]")
-    console.print("[yellow]This service tracks anime episodes by type (filler, manga canon, etc.) and creates Trakt lists for each type.[/yellow]")
-    
-    enable_service = click.confirm("Enable Anime Episode Type service?", 
+    console.print(
+        "[yellow]Generates filler, manga canon, anime canon, and mixed "
+        "episode collections locally from Plex + AnimeFillerList.[/yellow]"
+    )
+    console.print(
+        "[green]Trakt is not required for Anime Episode Type generation."
+        "[/green]"
+    )
+
+    enable_service = click.confirm("Enable Anime Episode Type service?",
                                   default=config.get('services', {}).get('anime_episode_type', {}).get('enabled', False))
-    
+
     if 'anime_episode_type' not in config.get('services', {}):
         config['services']['anime_episode_type'] = {}
 
@@ -125,7 +204,7 @@ def setup_anime_episode_type(config):
             'back_height': 125,
             'back_color': '#262626'
         }
-    
+
     if not enable_service:
         console.print("[yellow]Service disabled. No further configuration needed.[/yellow]")
         return
@@ -134,18 +213,18 @@ def setup_anime_episode_type(config):
 
     anime_libraries = []
     existing_libraries = config.get('plex', {}).get('libraries', {}).get('anime', [])
-    
+
     if existing_libraries:
         console.print(f"[green]Found existing anime libraries: {', '.join(existing_libraries)}[/green]")
         use_existing = click.confirm("Use these existing anime libraries?", default=True)
         if use_existing:
             anime_libraries = existing_libraries
-    
+
     if not anime_libraries:
         console.print("[yellow]Please configure at least one anime library.[/yellow]")
         anime_library = click.prompt("Enter anime library name", default="Anime")
         anime_libraries = [anime_library]
-        
+
         while click.confirm("Do you want to add another anime library?", default=False):
             additional_library = click.prompt("Enter additional anime library name")
             anime_libraries.append(additional_library)
@@ -164,9 +243,15 @@ def setup_anime_episode_type(config):
 def setup_tv_status_tracker(config):
     """Setup for TV/Anime Status Tracker service."""
     console.print("\n[bold cyan]TV/Anime Status Tracker[/bold cyan]")
-    console.print("[yellow]This service creates Kometa overlays and Trakt lists for next airing episodes, season finales, etc.[/yellow]")
-    console.print("[yellow]It can work with both anime and regular TV shows.[/yellow]")
-    
+    console.print(
+        "[yellow]Creates Kometa status overlays and maintains the single "
+        "Next Airing Trakt personal list.[/yellow]"
+    )
+    console.print(
+        "[yellow]It can work with both anime and regular TV shows and "
+        "requires Trakt.[/yellow]"
+    )
+
     enable_service = click.confirm("Enable TV/Anime Status Tracker service?",
                                   default=config.get('services', {}).get('tv_status_tracker', {}).get('enabled', False))
 
@@ -182,7 +267,7 @@ def setup_tv_status_tracker(config):
             'FINAL_EPISODE': '#8B0000',
             'SEASON_PREMIERE': '#228B22'
         }
-    
+
     # Ensure 'overlay' dictionary and its keys exist with defaults from main config init if this function is called by setup_service
     # The main config object in run_setup() is the primary source for these defaults.
     overlay_config = config['services']['tv_status_tracker'].setdefault('overlay', {})
@@ -200,17 +285,27 @@ def setup_tv_status_tracker(config):
     overlay_config.setdefault('apply_gradient_background', False)
 
     config['services']['tv_status_tracker']['enabled'] = enable_service
-    
+
     if not enable_service:
-        console.print("[yellow]Service disabled. No further configuration needed.[/yellow]")
+        console.print(
+            "[yellow]Service disabled. "
+            "No further configuration needed.[/yellow]"
+        )
         return
+
+    # TV Status Tracker uses Trakt metadata and maintains the single
+    # Next Airing personal list.
+    ensure_trakt_configuration(
+        config,
+        require_list_settings=True,
+    )
 
     apply_gradient = click.confirm(
         "Apply gradient background for TV/Anime Status Tracker overlays?",
         default=overlay_config.get('apply_gradient_background', False)
     )
     overlay_config['apply_gradient_background'] = apply_gradient
-    
+
     console.print("\n[bold]Library Configuration[/bold]")
 
     selected_libraries = []
@@ -225,7 +320,7 @@ def setup_tv_status_tracker(config):
         if click.confirm("Do you want to add anime libraries?", default=False):
             anime_library = click.prompt("Enter anime library name", default="Anime")
             anime_libraries = [anime_library]
-            
+
             while click.confirm("Do you want to add another anime library?", default=False):
                 additional_library = click.prompt("Enter additional anime library name")
                 anime_libraries.append(additional_library)
@@ -248,7 +343,7 @@ def setup_tv_status_tracker(config):
         if click.confirm("Do you want to add TV show libraries?", default=True):
             tv_library = click.prompt("Enter TV show library name", default="TV Shows")
             tv_libraries = [tv_library]
-            
+
             while click.confirm("Do you want to add another TV show library?", default=False):
                 additional_library = click.prompt("Enter additional TV show library name")
                 tv_libraries.append(additional_library)
@@ -273,10 +368,10 @@ def setup_size_overlay(config):
     """Setup for Size Overlay service."""
     console.print("\n[bold cyan]Size Overlay Service[/bold cyan]")
     console.print("[yellow]This service creates Kometa overlays displaying file sizes for movies and TV shows.[/yellow]")
-    
+
     enable_service = click.confirm("Enable Size Overlay service?",
                                   default=config.get('services', {}).get('size_overlay', {}).get('enabled', False))
-    
+
     if 'size_overlay' not in config.get('services', {}):
         config['services']['size_overlay'] = {
             'movie_overlay': {
@@ -309,9 +404,9 @@ def setup_size_overlay(config):
                 'show_episode_count': False
             }
         }
-    
+
     config['services']['size_overlay']['enabled'] = enable_service
-    
+
     if not enable_service:
         console.print("[yellow]Service disabled. No further configuration needed.[/yellow]")
         return
@@ -341,7 +436,7 @@ def setup_size_overlay(config):
             default=config['services']['size_overlay']['show_overlay'].get('gradient_name', 'gradient_bottom.png')
         )
         config['services']['size_overlay']['show_overlay']['gradient_name'] = gradient_name_shows
-    
+
     console.print("\n[bold]Library Configuration[/bold]")
 
     selected_movie_libraries = []
@@ -358,7 +453,7 @@ def setup_size_overlay(config):
         if click.confirm("Do you want to add movie libraries?", default=True):
             movie_library = click.prompt("Enter movie library name", default="Movies")
             movie_libraries = [movie_library]
-            
+
             while click.confirm("Do you want to add another movie library?", default=False):
                 additional_library = click.prompt("Enter additional movie library name")
                 movie_libraries.append(additional_library)
@@ -381,7 +476,7 @@ def setup_size_overlay(config):
         if click.confirm("Do you want to add TV show libraries?", default=False):
             tv_library = click.prompt("Enter TV show library name", default="TV Shows")
             tv_libraries = [tv_library]
-            
+
             while click.confirm("Do you want to add another TV show library?", default=False):
                 additional_library = click.prompt("Enter additional TV show library name")
                 tv_libraries.append(additional_library)
@@ -404,7 +499,7 @@ def setup_size_overlay(config):
         if click.confirm("Do you want to add anime libraries?", default=False):
             anime_library = click.prompt("Enter anime library name", default="Anime")
             anime_libraries = [anime_library]
-            
+
             while click.confirm("Do you want to add another anime library?", default=False):
                 additional_library = click.prompt("Enter additional anime library name")
                 anime_libraries.append(additional_library)
@@ -433,15 +528,15 @@ def setup_service(service_name):
         console.print(f"[bold red]Error: Unknown service '{service_name}'.[/bold red]")
         console.print("[yellow]Available services: anime_episode_type, tv_status_tracker, size_overlay[/yellow]")
         return
-    
+
     console.print(f"[bold]Running targeted setup for {service_name} service.[/bold]")
 
     config_dir = 'config'
     if os.environ.get('RUNNING_IN_DOCKER') == 'true':
         config_dir = "/app/config"
-    
+
     config_path = os.path.join(config_dir, 'config.yaml')
-    
+
     if not os.path.exists(config_path):
         console.print("[bold red]Error: Configuration file not found. Please run full setup first.[/bold red]")
         return
@@ -464,11 +559,11 @@ def setup_service(service_name):
     console.print(f"[bold green]Configuration for {service_name} updated successfully![/bold green]")
 
     console.print("\n[bold]Service Configuration Summary:[/bold]")
-    
+
     if service_name == 'anime_episode_type':
         if config['services']['anime_episode_type']['enabled']:
             console.print("✅ Anime Episode Type Tracker [green]ENABLED[/green]")
-            
+
             libraries = config['services']['anime_episode_type'].get('libraries', [])
             if libraries:
                 console.print(f"   [dim]Libraries: {', '.join(libraries)}[/dim]")
@@ -486,11 +581,11 @@ def setup_service(service_name):
                     console.print(f"   [dim]Schedule: Monthly on day(s) {', '.join(map(str, sched['dates']))} at {sched['time']}[/dim]")
         else:
             console.print("❌ Anime Episode Type Tracker [red]DISABLED[/red]")
-            
+
     elif service_name == 'tv_status_tracker':
         if config['services']['tv_status_tracker']['enabled']:
             console.print("✅ TV/Anime Status Tracker [green]ENABLED[/green]")
-            
+
             libraries = config['services']['tv_status_tracker'].get('libraries', [])
             if libraries:
                 console.print(f"   [dim]Libraries: {', '.join(libraries)}[/dim]")
@@ -508,11 +603,11 @@ def setup_service(service_name):
                     console.print(f"   [dim]Schedule: Monthly on day(s) {', '.join(map(str, sched['dates']))} at {sched['time']}[/dim]")
         else:
             console.print("❌ TV/Anime Status Tracker [red]DISABLED[/red]")
-            
+
     elif service_name == 'size_overlay':
         if config['services']['size_overlay']['enabled']:
             console.print("✅ Size Overlay Service [green]ENABLED[/green]")
-            
+
             libraries = []
             if config['services']['size_overlay'].get('movie_libraries', []):
                 libraries.extend([f"Movie: {name}" for name in config['services']['size_overlay']['movie_libraries']])
@@ -537,7 +632,7 @@ def setup_service(service_name):
                     console.print(f"   [dim]Schedule: Monthly on day(s) {', '.join(map(str, sched['dates']))} at {sched['time']}[/dim]")
         else:
             console.print("❌ Size Overlay Service [red]DISABLED[/red]")
-    
+
     console.print("\n[yellow]Remember to restart the updater to apply changes:[/yellow]")
     console.print("[green]docker compose restart dakosys-updater[/green]")
 
@@ -577,7 +672,7 @@ def run_setup():
                 existing_config = yaml.safe_load(file) or {}
         except Exception:
             pass
-            
+
     default_date_format = existing_config.get('date_format', 'DD/MM')
     date_format_preference = click.prompt(
         "Preferred date format for display (e.g., in TV Status Tracker)",
@@ -595,7 +690,11 @@ def run_setup():
                 'movie': []
             }
         },
-        'trakt': {},
+        'trakt': {
+            'episode_list_publishing': {
+                'enabled': False,
+            },
+        },
         'lists': {},
         'kometa_config': {
             'yaml_output_dir': '/kometa/config/overlays',
@@ -697,10 +796,10 @@ def run_setup():
     console.print("\n[bold]Kometa Asset & Font Directories[/bold]")
     console.print("[yellow]Specify directories for Kometa to find custom fonts and assets (like gradients).[/yellow]")
     console.print("[yellow]These paths are relative to Kometa's main configuration directory (e.g., '/kometa/config').[/yellow]")
-    
+
     font_dir = click.prompt("Enter Kometa font directory", default=config['kometa_config'].get('font_directory', "config/fonts"))
     config['kometa_config']['font_directory'] = font_dir
-    
+
     asset_dir = click.prompt("Enter Kometa asset directory", default=config['kometa_config'].get('asset_directory', "config/assets"))
     config['kometa_config']['asset_directory'] = asset_dir
 
@@ -708,15 +807,118 @@ def run_setup():
     console.print("[yellow]DAKOSYS supports multiple services that can be enabled independently.[/yellow]")
 
     console.print("\n[bold cyan]Anime Episode Type Tracker[/bold cyan]")
-    console.print("[yellow]This service tracks anime episodes by type (filler, manga canon, etc.) and creates Trakt lists for each type.[/yellow]")
-    anime_episode_service = click.confirm("Enable Anime Episode Type service?", default=True)
-    config['services']['anime_episode_type']['enabled'] = anime_episode_service
+    console.print(
+        "[yellow]Generates filler, manga canon, anime canon, and mixed "
+        "episode collections locally from Plex + AnimeFillerList.[/yellow]"
+    )
+    console.print(
+        "[green]Trakt is not required for Anime Episode Type generation."
+        "[/green]"
+    )
+    anime_episode_service = click.confirm(
+        "Enable Anime Episode Type service?",
+        default=True,
+    )
+    config['services']['anime_episode_type']['enabled'] = (
+        anime_episode_service
+    )
+
+    auto_schedule_enabled = False
+    legacy_episode_publishing = False
+
+    if anime_episode_service:
+        existing_auto = (
+            existing_config
+            .get('scheduler', {})
+            .get('auto_schedule', {})
+        )
+
+        console.print(
+            "\n[bold cyan]Automatic Anime Scheduling[/bold cyan]"
+        )
+        console.print(
+            "[yellow]Uses Trakt show metadata to identify anime that may "
+            "produce future episodes.[/yellow]"
+        )
+        console.print(
+            "[yellow]This feature requires Trakt, but does not create "
+            "episode-type personal lists.[/yellow]"
+        )
+
+        auto_schedule_enabled = click.confirm(
+            "Enable automatic anime scheduling?",
+            default=existing_auto.get('enabled', False),
+        )
+
+        config['scheduler']['auto_schedule'] = {
+            'enabled': auto_schedule_enabled,
+            'file': existing_auto.get(
+                'file',
+                'config/scheduled-anime.yaml',
+            ),
+            'refresh_hours': existing_auto.get(
+                'refresh_hours',
+                24,
+            ),
+            'notify_on_change': existing_auto.get(
+                'notify_on_change',
+                True,
+            ),
+            'always_include': existing_auto.get(
+                'always_include',
+                [],
+            ),
+            'always_exclude': existing_auto.get(
+                'always_exclude',
+                [],
+            ),
+        }
+
+        console.print(
+            "\n[bold cyan]Legacy Trakt Episode-List Publishing[/bold cyan]"
+        )
+        console.print(
+            "[yellow]Optional legacy compatibility feature that publishes "
+            "AnimeFillerList episode classifications into many Trakt "
+            "personal lists.[/yellow]"
+        )
+        console.print(
+            "[yellow]It is not required for Kometa Anime Episode Type "
+            "collections and is disabled by default.[/yellow]"
+        )
+
+        existing_publishing = (
+            existing_config
+            .get('trakt', {})
+            .get('episode_list_publishing', {})
+            .get('enabled', False)
+        )
+
+        legacy_episode_publishing = click.confirm(
+            "Enable legacy Trakt episode-list publishing?",
+            default=existing_publishing,
+        )
+
+        config['trakt']['episode_list_publishing']['enabled'] = (
+            legacy_episode_publishing
+        )
 
     console.print("\n[bold cyan]TV/Anime Status Tracker[/bold cyan]")
-    console.print("[yellow]This service creates Kometa overlays and Trakt lists for next airing episodes, season finales, etc.[/yellow]")
-    console.print("[yellow]It can work with both anime and regular TV shows.[/yellow]")
-    tv_status_service = click.confirm("Enable TV/Anime Status Tracker service?", default=False)
-    config['services']['tv_status_tracker']['enabled'] = tv_status_service
+    console.print(
+        "[yellow]Creates Kometa status overlays and maintains the single "
+        "Next Airing Trakt personal list.[/yellow]"
+    )
+    console.print(
+        "[yellow]It can work with both anime and regular TV shows and "
+        "requires Trakt.[/yellow]"
+    )
+    tv_status_service = click.confirm(
+        "Enable TV/Anime Status Tracker service?",
+        default=False,
+    )
+    config['services']['tv_status_tracker']['enabled'] = (
+        tv_status_service
+    )
 
     console.print("\n[bold cyan]Size Overlay Service[/bold cyan]")
     console.print("[yellow]This service creates Kometa overlays displaying file sizes for movies and TV shows.[/yellow]")
@@ -778,49 +980,49 @@ def run_setup():
 
     if tv_status_service:
         console.print("\n[bold cyan]TV/Anime Status Tracker Library Selection[/bold cyan]")
-        
+
         selected_libraries = []
-        
+
         if anime_libraries:
             if click.confirm("Include anime libraries for TV/Anime Status Tracker?", default=True):
                 selected_libraries.extend(anime_libraries)
                 console.print(f"[green]Including anime libraries: {', '.join(anime_libraries)}[/green]")
-        
+
         if tv_libraries:
             if click.confirm("Include TV show libraries for TV/Anime Status Tracker?", default=True):
                 selected_libraries.extend(tv_libraries)
                 console.print(f"[green]Including TV libraries: {', '.join(tv_libraries)}[/green]")
-        
+
         if not selected_libraries:
             console.print("[yellow]Warning: No libraries selected for TV/Anime Status Tracker.[/yellow]")
-        
+
         config['services']['tv_status_tracker']['libraries'] = selected_libraries
 
     if size_overlay_service:
         console.print("\n[bold cyan]Size Overlay Library Selection[/bold cyan]")
-        
+
         selected_movie_libraries = []
         selected_tv_libraries = []
         selected_anime_libraries = []
-        
+
         if movie_libraries:
             if click.confirm("Include movie libraries for Size Overlay?", default=True):
                 selected_movie_libraries.extend(movie_libraries)
                 console.print(f"[green]Including movie libraries: {', '.join(movie_libraries)}[/green]")
-        
+
         if tv_libraries:
             if click.confirm("Include TV show libraries for Size Overlay?", default=True):
                 selected_tv_libraries.extend(tv_libraries)
                 console.print(f"[green]Including TV libraries: {', '.join(tv_libraries)}[/green]")
-        
+
         if anime_libraries:
             if click.confirm("Include anime libraries for Size Overlay?", default=True):
                 selected_anime_libraries.extend(anime_libraries)
                 console.print(f"[green]Including anime libraries: {', '.join(anime_libraries)}[/green]")
-        
+
         if not (selected_movie_libraries or selected_tv_libraries or selected_anime_libraries):
             console.print("[yellow]Warning: No libraries selected for Size Overlay.[/yellow]")
-        
+
         config['services']['size_overlay']['movie_libraries'] = selected_movie_libraries
         config['services']['size_overlay']['tv_libraries'] = selected_tv_libraries
         config['services']['size_overlay']['anime_libraries'] = selected_anime_libraries
@@ -828,7 +1030,7 @@ def run_setup():
     if tv_status_service:
         console.print("\n[bold]TV/Anime Status Tracker Configuration[/bold]")
         console.print("[yellow]This service will use the global Kometa configuration paths.[/yellow]")
-        
+
         console.print("\n[bold]TV/Anime Status Tracker - Overlay Style[/bold]")
         console.print("Choose how the status overlay will be displayed:")
         console.print("  - [cyan]background_color[/cyan]: Displays status text (typically white) on a solid background.")
@@ -840,8 +1042,8 @@ def run_setup():
         # Ensure overlay dict exists (it should from main config init)
         overlay_settings = config['services']['tv_status_tracker'].setdefault('overlay', {})
         # Get current or default style (default is set in main config init in run_setup)
-        current_overlay_style = overlay_settings.get('overlay_style', 'background_color') 
-        
+        current_overlay_style = overlay_settings.get('overlay_style', 'background_color')
+
         chosen_overlay_style = click.prompt(
             "Choose overlay style",
             type=click.Choice(['background_color', 'colored_text'], case_sensitive=False),
@@ -851,28 +1053,73 @@ def run_setup():
         # The font_name will default to "Juventus-Fans-Bold.ttf" as per the initial config dictionary.
         # The user can manually edit config.yaml to change services.tv_status_tracker.overlay.font_name.
 
-    console.print("\n[bold]Trakt Configuration[/bold]")
-    console.print("[yellow]You'll need to create a Trakt.tv API application first at: https://trakt.tv/oauth/applications[/yellow]")
-    console.print("\n[bold]When creating your Trakt application:[/bold]")
-    console.print("1. Name: [green]DAKOSYS[/green] (or any name you prefer)")
-    console.print("2. Redirect URI: [bold green]urn:ietf:wg:oauth:2.0:oob[/bold green] (use exactly this value)")
-    console.print("3. JavaScript Origins: [green]Leave blank[/green]")
-    console.print("4. Permissions: Select [green]Auto-refresh token[/green] to avoid manual reauthorization")
-    console.print("5. Check: [green]Skip authorization (single user)[/green]")
-    console.print("\n[yellow]After creating your application, you'll see both a Client ID and Client Secret that you'll need below.[/yellow]")
-
-    console.print("\n[bold]Enter your Trakt application details:[/bold]")
-    config['trakt']['client_id'] = click.prompt("Enter your Trakt Client ID (a long string of letters and numbers)")
-    config['trakt']['client_secret'] = click.prompt("Enter your Trakt Client Secret (needed for auto-refresh)")
-    config['trakt']['username'] = click.prompt("Enter your Trakt username")
-    config['trakt']['redirect_uri'] = click.prompt("Enter redirect URI", default="urn:ietf:wg:oauth:2.0:oob")
-
-    console.print("\n[bold]List Settings[/bold]")
-    config['lists']['default_privacy'] = click.prompt(
-        "Default privacy for created lists",
-        type=click.Choice(['private', 'public']),
-        default="private"
+    trakt_required = (
+        tv_status_service
+        or auto_schedule_enabled
+        or legacy_episode_publishing
     )
+
+    if trakt_required:
+        console.print("\n[bold]Trakt Configuration[/bold]")
+        console.print(
+            "[yellow]One or more enabled features requires Trakt."
+            "[/yellow]"
+        )
+        console.print(
+            "[yellow]Create a Trakt.tv API application first at: "
+            "https://trakt.tv/oauth/applications[/yellow]"
+        )
+        console.print(
+            "\n[bold]When creating your Trakt application:[/bold]"
+        )
+        console.print(
+            "1. Name: [green]DAKOSYS[/green] "
+            "(or any name you prefer)"
+        )
+        console.print(
+            "2. Redirect URI: "
+            "[bold green]urn:ietf:wg:oauth:2.0:oob[/bold green]"
+        )
+        console.print(
+            "3. JavaScript Origins: [green]Leave blank[/green]"
+        )
+        console.print(
+            "4. Permissions: Select [green]Auto-refresh token[/green]"
+        )
+        console.print(
+            "5. Check: [green]Skip authorization "
+            "(single user)[/green]"
+        )
+
+        console.print(
+            "\n[bold]Enter your Trakt application details:[/bold]"
+        )
+        config['trakt']['client_id'] = click.prompt(
+            "Enter your Trakt Client ID"
+        )
+        config['trakt']['client_secret'] = click.prompt(
+            "Enter your Trakt Client Secret"
+        )
+        config['trakt']['username'] = click.prompt(
+            "Enter your Trakt username"
+        )
+        config['trakt']['redirect_uri'] = click.prompt(
+            "Enter redirect URI",
+            default="urn:ietf:wg:oauth:2.0:oob",
+        )
+    else:
+        console.print(
+            "\n[green]Trakt configuration skipped: none of the "
+            "enabled features require Trakt.[/green]"
+        )
+
+    if tv_status_service or legacy_episode_publishing:
+        console.print("\n[bold]Trakt List Settings[/bold]")
+        config['lists']['default_privacy'] = click.prompt(
+            "Default privacy for created lists",
+            type=click.Choice(['private', 'public']),
+            default="private",
+        )
 
     console.print("\n[bold]Service Schedules[/bold]")
     console.print("[yellow]Configure when each enabled service will run.[/yellow]")
@@ -1077,7 +1324,7 @@ def run_setup():
     console.print("\n[bold]Services Configuration Summary:[/bold]")
     if config['services']['anime_episode_type']['enabled']:
         console.print("✅ Anime Episode Type Tracker [green]ENABLED[/green]")
-        
+
         libraries = config['services']['anime_episode_type'].get('libraries', [])
         if libraries:
             console.print(f"   [dim]Libraries: {', '.join(libraries)}[/dim]")
@@ -1098,7 +1345,7 @@ def run_setup():
 
     if config['services']['tv_status_tracker']['enabled']:
         console.print("✅ TV/Anime Status Tracker [green]ENABLED[/green]")
-        
+
         libraries = config['services']['tv_status_tracker'].get('libraries', [])
         if libraries:
             console.print(f"   [dim]Libraries: {', '.join(libraries)}[/dim]")
@@ -1119,7 +1366,7 @@ def run_setup():
 
     if config['services']['size_overlay']['enabled']:
         console.print("✅ Size Overlay Service [green]ENABLED[/green]")
-        
+
         libraries = []
         if config['services']['size_overlay'].get('movie_libraries', []):
             libraries.extend([f"Movie: {name}" for name in config['services']['size_overlay']['movie_libraries']])

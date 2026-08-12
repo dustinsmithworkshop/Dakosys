@@ -1,4 +1,4 @@
-# Dakosys v1.1 starter configuration
+# Dakosys v1.2 starter configuration
 # Copy this file to: config/config.yaml
 #
 # IMPORTANT:
@@ -20,7 +20,21 @@ plex:
       - TV
 
 trakt:
+  # Trakt is NOT required for services.anime_episode_type.
+  #
+  # It IS required when using:
+  # - scheduler.auto_schedule
+  # - services.tv_status_tracker
+  # - optional legacy episode-list publishing
   username: REPLACE_WITH_TRAKT_USERNAME
+  client_id: REPLACE_WITH_TRAKT_CLIENT_ID
+  client_secret: REPLACE_WITH_TRAKT_CLIENT_SECRET
+  redirect_uri: urn:ietf:wg:oauth:2.0:oob
+
+  # Legacy compatibility only.
+  # Local Anime Episode Type generation does not use these lists.
+  episode_list_publishing:
+    enabled: false
 
 lists:
   default_privacy: public
@@ -30,9 +44,12 @@ collections_dir: /kometa/collections
 yaml_output_dir: /kometa/overlays
 
 services:
+  # Plex + AnimeFillerList -> local episode mapper -> Kometa.
+  # No Trakt account or Trakt personal lists are required.
   anime_episode_type:
     enabled: true
 
+  # Uses Trakt metadata and maintains one personal "Next Airing" list.
   tv_status_tracker:
     enabled: true
     collections_dir: /kometa/collections
@@ -46,6 +63,7 @@ scheduler:
       - "03:00"
     type: daily
 
+  # Uses Trakt show metadata only; does not publish episode-type lists.
   auto_schedule:
     enabled: true
     file: config/scheduled-anime.yaml
