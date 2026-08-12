@@ -640,12 +640,6 @@ def get_anime_schedule():
         "error": None,
     }
 
-_DAKOSYS_SUFFIXES = ["_filler", "_manga canon", "_anime canon", "_mixed canon/filler"]
-
-sync_running: bool = False
-
-anime_run_status: Dict[str, bool] = {}
-anime_run_errors: Dict[str, Optional[str]] = {}  # None = success, str = error message
 
 _tmdb_poster_cache: Dict[int, str] = {}
 
@@ -866,118 +860,6 @@ def test_trakt_connection():
     return result
 
 
-@app.get("/api/trakt/lists")
-def get_trakt_lists():
-    """Return all DAKOSYS Trakt lists with episode counts and mapped Plex names."""
-    config = load_config()
-    if not config:
-        return {"lists": [], "total": 0, "error": "Config file not found"}
-
-    username = config.get("trakt", {}).get("username")
-    if not username:
-        return {"lists": [], "total": 0, "error": "Trakt username not configured"}
-
-    try:
-        import trakt_auth
-
-        all_lists = trakt_auth.make_trakt_request("users/me/lists", params={"limit": 1000})
-        if all_lists is None:
-            rl = trakt_auth.get_rate_limit_remaining()
-            if rl > 0:
-                error_msg = f"Trakt rate limited — retry in {rl:.0f}s"
-            else:
-                error_msg = "Failed to fetch Trakt lists — check Trakt authentication"
-            return {"lists": [], "total": 0, "error": error_msg}
-
-        mappings = _load_all_mappings(config)
-
-        result = []
-        for lst in all_lists:
-            name = lst.get("name", "")
-            for suffix in _DAKOSYS_SUFFIXES:
-                if name.endswith(suffix):
-                    anime_name = name[: -len(suffix)]
-                    episode_type = suffix[1:]
-                    plex_name = mappings.get(anime_name) or anime_name.replace("-", " ").title()
-                    result.append(
-                        {
-                            "id": lst["ids"]["trakt"],
-                            "name": name,
-                            "anime_name": anime_name,
-                            "plex_name": plex_name,
-                            "episode_type": episode_type,
-                            "item_count": lst.get("item_count", 0),
-                        }
-                    )
-                    break
-
-        return {"lists": result, "total": len(result), "error": None, "trakt_username": username}
-    except Exception as e:
-        return {"lists": [], "total": 0, "error": str(e)}
-
-
-@app.delete("/api/trakt/lists/{list_id}")
-def delete_trakt_list(list_id: int):
-    """Delete a specific Trakt list by its Trakt ID."""
-    config = load_config()
-    if not config:
-        raise HTTPException(status_code=500, detail="Config file not found")
-
-    username = config.get("trakt", {}).get("username")
-    if not username:
-        raise HTTPException(status_code=400, detail="Trakt username not configured")
-
-    try:
-        import trakt_auth
-
-        result = trakt_auth.make_trakt_request(
-            f"users/me/lists/{list_id}", method="DELETE"
-        )
-        if result is None:
-            raise HTTPException(status_code=502, detail="Failed to delete list on Trakt")
-
-        return {"success": True}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/trakt/sync")
-def trigger_sync():
-    """Sync the Kometa collections YAML with current Trakt lists (background thread)."""
-    global sync_running
-    if sync_running:
-        return {"started": False, "message": "Sync already in progress"}
-
-    def _sync():
-        global sync_running
-        import logging as _logging
-        _log = _logging.getLogger("anime_trakt_manager")
-        sync_running = True
-        try:
-            from asset_manager import sync_anime_episode_collections
-            cfg = load_config()
-            if cfg:
-                sync_anime_episode_collections(cfg, force_update=True)
-            else:
-                _log.error("Sync: failed to load config")
-        except Exception as exc:
-            import traceback as _tb
-            _log.error(f"Collections sync failed: {exc}\n{_tb.format_exc()}")
-        finally:
-            sync_running = False
-
-    threading.Thread(target=_sync, daemon=True).start()
-    return {"started": True}
-
-
-@app.get("/api/trakt/sync/status")
-def get_sync_status():
-    """Check whether a collections sync is currently running."""
-    return {"running": sync_running}
-
-
 @app.get("/api/plex/shows")
 def get_plex_shows():
     """Return all show titles in the configured Plex anime library."""
@@ -1003,107 +885,6 @@ def get_plex_shows():
     except Exception as e:
         return {"shows": [], "error": str(e)}
 
-
-@app.post("/api/run/anime/{afl_name}")
-def trigger_anime_run(afl_name: str):
-    """
-    Backward-compatible endpoint for the old per-title web action.
-
-    Local Anime Episode Type generation is now a full Plex+AFL sync.
-    If automatic scheduling is enabled, refresh its generated state first.
-    """
-    if anime_run_status.get(afl_name):
-        return {
-            "started": False,
-            "message": f"Already running for {afl_name}",
-        }
-
-    if run_status.get("anime_episode_type"):
-        return {
-            "started": False,
-            "message": "Anime Episode Type is already running",
-        }
-
-    def _run():
-        import logging as _logging
-        import traceback as _tb
-
-        _log = _logging.getLogger("anime_trakt_manager")
-
-        anime_run_status[afl_name] = True
-        anime_run_errors[afl_name] = None
-        run_status["anime_episode_type"] = True
-
-        try:
-            config = load_config()
-            if not config:
-                raise RuntimeError("Config file not found")
-
-            auto = (
-                config
-                .get("scheduler", {})
-                .get("auto_schedule", {})
-                or {}
-            )
-
-            if auto.get("enabled", False):
-                import scheduled_anime_manager as _sam
-
-                refresh = _sam.refresh_scheduled_anime(
-                    config,
-                    force=True,
-                    notify=False,
-                )
-
-                if not refresh.get("success", False):
-                    raise RuntimeError(
-                        "Automatic schedule refresh failed: "
-                        f"{refresh.get('error') or 'unknown error'}"
-                    )
-
-            from asset_manager import sync_anime_episode_collections
-
-            if not sync_anime_episode_collections(
-                config,
-                force_update=True,
-            ):
-                raise RuntimeError(
-                    "Anime Episode Type collection generation failed"
-                )
-
-        except Exception as exc:
-            anime_run_errors[afl_name] = str(exc)
-            _log.error(
-                "Web Anime Episode Type run failed: %s\n%s",
-                exc,
-                _tb.format_exc(),
-            )
-        finally:
-            run_status["anime_episode_type"] = False
-            anime_run_status[afl_name] = False
-
-    threading.Thread(
-        target=_run,
-        daemon=True,
-    ).start()
-
-    return {
-        "started": True,
-        "message": (
-            "Automatic schedule refresh and full local Anime Episode "
-            "Type sync started"
-        ),
-    }
-
-
-@app.get("/api/run/anime/{afl_name}/status")
-def get_anime_run_status(afl_name: str):
-    """Check the compatibility Anime Episode Type web run."""
-    return {
-        "afl_name": afl_name,
-        "running": anime_run_status.get(afl_name, False),
-        "error": anime_run_errors.get(afl_name),
-    }
 
 @app.get("/api/afl/search")
 def search_afl(q: str = ""):
@@ -1498,7 +1279,7 @@ class FixMappingPayload(BaseModel):
 
 @app.post("/api/mappings/fix")
 def save_mapping_fix(payload: FixMappingPayload):
-    """Save title mapping fixes, clean the error log, then regenerate the Trakt list."""
+    """Save title mapping fixes, clean the error log, then regenerate local Anime Episode Type outputs."""
     saved = 0
     try:
         import mappings_manager as _mm
@@ -1520,14 +1301,39 @@ def save_mapping_fix(payload: FixMappingPayload):
         def _regen():
             import logging as _logging
             import traceback as _tb
-            _log = _logging.getLogger("anime_trakt_manager")
+
+            _log = _logging.getLogger("web_server")
+
             try:
-                import anime_trakt_manager as _atm
-                _atm.load_config()
-                _atm._create_list_internal(payload.anime_name, payload.episode_type.upper(), "hybrid")
+                import asset_manager as _asset_manager
+
+                config = load_config()
+                if not config:
+                    raise RuntimeError(
+                        "Config unavailable for local Anime Episode Type regeneration"
+                    )
+
+                success = _asset_manager.sync_anime_episode_collections(
+                    config,
+                    force_update=True,
+                )
+
+                if not success:
+                    raise RuntimeError(
+                        "Local Anime Episode Type regeneration returned failure"
+                    )
+
             except Exception as exc:
-                _log.error(f"List regen after mapping fix failed: {exc}\n{_tb.format_exc()}")
-        threading.Thread(target=_regen, daemon=True).start()
+                _log.error(
+                    "Local regeneration after mapping fix failed: %s\n%s",
+                    exc,
+                    _tb.format_exc(),
+                )
+
+        threading.Thread(
+            target=_regen,
+            daemon=True,
+        ).start()
 
     return {"success": True, "saved": saved}
 

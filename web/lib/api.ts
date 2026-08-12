@@ -9,7 +9,6 @@ import type {
   RunStatusResponse,
   ServiceName,
   AnimeScheduleResponse,
-  TraktListsResponse,
   PlexShowsResponse,
   AflSearchResponse,
   AflEpisodesResponse,
@@ -86,28 +85,7 @@ export const api = {
 
   testTraktConnection: () => apiFetch<TraktTestResult>("/api/trakt/test"),
 
-  getTraktLists: () => apiFetch<TraktListsResponse>("/api/trakt/lists"),
-
-  deleteTraktList: (listId: number) =>
-    apiFetch<{ success: boolean }>(`/api/trakt/lists/${listId}`, { method: "DELETE" }),
-
-  syncTraktCollections: () =>
-    apiFetch<{ started: boolean; message?: string }>("/api/trakt/sync", { method: "POST" }),
-
-  getSyncStatus: () => apiFetch<{ running: boolean }>("/api/trakt/sync/status"),
-
   getPlexShows: () => apiFetch<PlexShowsResponse>("/api/plex/shows"),
-
-  triggerAnimeRun: (aflName: string) =>
-    apiFetch<{ started: boolean; message?: string }>(
-      `/api/run/anime/${encodeURIComponent(aflName)}`,
-      { method: "POST" },
-    ),
-
-  getAnimeRunStatus: (aflName: string) =>
-    apiFetch<{ afl_name: string; running: boolean }>(
-      `/api/run/anime/${encodeURIComponent(aflName)}/status`,
-    ),
 
   searchAfl: (q: string) =>
     apiFetch<AflSearchResponse>(`/api/afl/search?q=${encodeURIComponent(q)}`),

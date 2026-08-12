@@ -67,7 +67,7 @@ const navItems: NavItem[] = [
       </svg>
     ),
     children: [
-      { href: "/trakt", label: "Trakt Lists" },
+      { href: "/trakt", label: "Trakt" },
       { href: "/mappings", label: "Fix Mappings" },
     ],
   },

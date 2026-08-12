@@ -1418,7 +1418,7 @@ def run_setup():
     console.print("1. Start the updater: [green]docker compose up -d dakosys-updater[/green]")
 
     if config['services']['anime_episode_type']['enabled']:
-        console.print("2. Create your first anime list: [green]docker compose run --rm dakosys create-all 'One Piece' or docker compose run --rm dakosys create one-piece MANGA [/green]")
+        console.print("2. Run the Anime Episode Type service to generate local episode classification data for Kometa.")
 
 def save_config_with_comments(config, path):
     """Save config to YAML with comments."""

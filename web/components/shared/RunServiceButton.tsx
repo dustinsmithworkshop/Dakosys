@@ -7,7 +7,7 @@ import type { ServiceName } from "@/types/api";
 
 const SERVICE_DESCRIPTIONS: Record<ServiceName, string> = {
   anime_episode_type:
-    "Fetches episode lists from AnimeFillerList, matches them with Trakt.tv episodes, and updates Filler / Canon / Mixed lists. Generates Kometa overlay YAML files.",
+    "Reads episode classifications from AnimeFillerList, matches them to your Plex anime, and regenerates the local Filler / Canon / Mixed data used by Kometa. Trakt is not required.",
   tv_status_tracker:
     "Scans your Plex libraries, fetches current show status from Trakt, updates Kometa overlay files, and sends Discord notifications for any status changes.",
   size_overlay:

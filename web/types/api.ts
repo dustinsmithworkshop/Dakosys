@@ -107,22 +107,6 @@ export interface AnimeScheduleResponse {
   error?: string | null;
 }
 
-export interface TraktList {
-  id: number;
-  name: string;
-  anime_name: string;
-  plex_name: string;
-  episode_type: "filler" | "manga canon" | "anime canon" | "mixed canon/filler";
-  item_count: number;
-}
-
-export interface TraktListsResponse {
-  lists: TraktList[];
-  total: number;
-  error: string | null;
-  trakt_username?: string;
-}
-
 export interface PlexShowsResponse {
   shows: string[];
   error: string | null;
