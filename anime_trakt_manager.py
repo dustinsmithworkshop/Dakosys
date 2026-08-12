@@ -30,6 +30,46 @@ CONFIG = {}
 DATA_DIR = "data"
 CONFIG_FILE = "config/config.yaml"
 
+
+def trakt_episode_list_publishing_enabled(config=None):
+    """
+    Return whether optional Trakt personal-list publishing is enabled.
+
+    Publishing is fail-closed: missing or malformed configuration means
+    disabled.
+    """
+    cfg = config if isinstance(config, dict) else CONFIG
+    trakt_config = cfg.get("trakt", {}) or {}
+
+    if not isinstance(trakt_config, dict):
+        return False
+
+    publishing = trakt_config.get("episode_list_publishing", {}) or {}
+
+    # Allow a simple boolean for compatibility/convenience.
+    if isinstance(publishing, bool):
+        return publishing
+
+    if not isinstance(publishing, dict):
+        return False
+
+    return publishing.get("enabled") is True
+
+
+def require_trakt_episode_list_publishing():
+    """Fail closed before any Trakt personal-list mutation."""
+    if trakt_episode_list_publishing_enabled():
+        return True
+
+    console.print(
+        "[yellow]Trakt episode-list publishing is disabled.[/yellow]"
+    )
+    console.print(
+        "[yellow]Enable trakt.episode_list_publishing.enabled "
+        "to create or update personal Trakt lists.[/yellow]"
+    )
+    return False
+
 # Cache AFL identity failures for the lifetime of this process.
 # generate_kometa_episode_files asks for ANIME/FILLER/MANGA/MIXED separately;
 # a known-bad AFL page should be fetched/logged once, not four times.
@@ -1009,6 +1049,9 @@ def get_trakt_episode_id(trakt_show_id, trakt_season, trakt_episode, access_toke
 
 def create_or_get_trakt_list(list_name, access_token):
     """Create a new Trakt list or get existing one."""
+    if not require_trakt_episode_list_publishing():
+        return None, False
+
     try:
         headers = trakt_auth.get_trakt_headers(access_token)
         if not headers:
@@ -1092,6 +1135,9 @@ def add_episodes_to_trakt_list(list_id, episodes, access_token, trakt_show_id, m
     3. Adding episodes in batches
     4. Handling rate limits with proper retries
     """
+    if not require_trakt_episode_list_publishing():
+        return False, False, None
+
     import os
 
     try:
@@ -2611,6 +2657,9 @@ def create(anime_name, episode_type, match_by, force_map):
     ANIME_NAME: Name of the anime (e.g. 'attack-titan' or 'Attack on Titan')
     EPISODE_TYPE: Type of episodes to include (FILLER, MANGA, ANIME, MIXED)
     """
+    if not require_trakt_episode_list_publishing():
+        return False
+
     # Clear the error log at the start
     clear_error_log()
     # Map episode type input to the full name used on AnimeFillerList
@@ -2874,6 +2923,9 @@ def smart_create_all(anime_name, sync_collections=True):
                           after processing this anime. Batch update callers can
                           set this to False and synchronize once after the batch.
     """
+    if not require_trakt_episode_list_publishing():
+        return False
+
     # Clear the error log at the start
     clear_error_log()
     # All possible episode types

@@ -389,6 +389,49 @@ def update_anime_list(anime_list, access_token, plex, match_by="hybrid"):
     return success
 
 def run_anime_episode_update(match_by="hybrid"):
+    """
+    Generate Anime Episode Type collections locally.
+
+    The match_by argument is retained for API compatibility with older
+    callers but is no longer used by the Plex-aware local mapper.
+    """
+    global CONFIG
+
+    logger.info(
+        "Starting local Anime Episode Type collection generation"
+    )
+
+    if not CONFIG:
+        load_config()
+
+    try:
+        from asset_manager import sync_anime_episode_collections
+
+        success = sync_anime_episode_collections(
+            CONFIG,
+            force_update=True,
+        )
+
+        if success:
+            logger.info(
+                "Anime Episode Type collections generated successfully"
+            )
+        else:
+            logger.error(
+                "Anime Episode Type collection generation failed"
+            )
+
+        return bool(success)
+
+    except Exception as exc:
+        logger.error(
+            "Error generating Anime Episode Type collections: %s",
+            exc,
+        )
+        return False
+
+
+def run_trakt_episode_list_update(match_by="hybrid"):
     """Run the anime episode type service updates with enhanced list creation.
     
     This improved function:
@@ -396,10 +439,17 @@ def run_anime_episode_update(match_by="hybrid"):
     2. Creates new lists when finding episodes of a new type
     3. Syncs the collections file after any changes
     """
-    logger.info("Starting Anime Episode Type service updates")
+    logger.info("Starting legacy Trakt episode-list publishing")
 
     import anime_trakt_manager as _atm
     _atm.load_config()
+
+    if not _atm.trakt_episode_list_publishing_enabled(_atm.CONFIG):
+        logger.info(
+            "Trakt episode-list publishing is disabled; "
+            "skipping legacy list update"
+        )
+        return True
 
     from anime_trakt_manager import clear_error_log_for_anime, add_episodes_to_trakt_list, create_or_get_trakt_list, get_list_name_format
     
