@@ -39,9 +39,10 @@ trakt:
 lists:
   default_privacy: public
 
-asset_directory: /kometa/assets
-collections_dir: /kometa/collections
-yaml_output_dir: /kometa/overlays
+kometa_config:
+  asset_directory: /kometa/assets
+  collections_dir: /kometa/collections
+  yaml_output_dir: /kometa/overlays
 
 services:
   # Plex + AnimeFillerList -> local episode mapper -> Kometa.
