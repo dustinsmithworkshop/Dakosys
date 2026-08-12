@@ -3263,6 +3263,247 @@ def smart_create_all(anime_name, sync_collections=True):
     # was processed and no list/episode operation reported a failure.
     return bool(created_lists) and not processing_failed
 
+@cli.command(name="trakt-list-usage")
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    help="Output current Trakt personal-list usage as JSON.",
+)
+@click.option(
+    "--tracked-list",
+    default="Next Airing",
+    show_default=True,
+    help="Personal list whose item capacity should be inspected.",
+)
+def trakt_list_usage(json_output=False, tracked_list="Next Airing"):
+    """
+    Show current personal-list usage against Trakt-reported limits.
+
+    This command is read-only and never modifies Trakt.
+    """
+    import json
+
+    usage = trakt_auth.get_trakt_list_usage(
+        tracked_list_name=tracked_list,
+    )
+
+    if usage is None:
+        if json_output:
+            print(json.dumps(
+                {"error": "Could not retrieve Trakt list usage"},
+                indent=2,
+            ))
+        else:
+            console.print(
+                "[bold red]Could not retrieve Trakt list "
+                "usage.[/bold red]"
+            )
+        return
+
+    if json_output:
+        print(
+            json.dumps(
+                usage,
+                indent=2,
+                sort_keys=True,
+                ensure_ascii=False,
+            )
+        )
+        return
+
+    console.print("[bold]Trakt Personal-List Usage[/bold]")
+
+    username = usage.get("username")
+    if username:
+        console.print(f"User: {username}")
+
+    lists = usage.get("lists", {}) or {}
+    tracked = usage.get("tracked_list", {}) or {}
+
+    console.print(
+        "Personal lists: "
+        f"{lists.get('current')} / {lists.get('maximum')}"
+    )
+    console.print(
+        f"Remaining list slots: {lists.get('remaining')}"
+    )
+
+    console.print(
+        f"\n[bold]{tracked.get('name')}[/bold]"
+    )
+    console.print(
+        f"Exists: {tracked.get('exists')}"
+    )
+    console.print(
+        f"Items: {tracked.get('current_items')} / "
+        f"{usage.get('items_per_list', {}).get('maximum')}"
+    )
+    console.print(
+        "Remaining item slots: "
+        f"{tracked.get('remaining_item_slots')}"
+    )
+
+
+@cli.command(name="trakt-list-capacity")
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    help="Output normalized Trakt personal-list capacity as JSON.",
+)
+def trakt_list_capacity(json_output=False):
+    """
+    Show normalized personal-list limits reported by Trakt.
+
+    This command is read-only and does not create, update, or delete lists.
+    """
+    import json
+
+    capabilities = trakt_auth.get_trakt_list_capabilities()
+
+    if capabilities is None:
+        if json_output:
+            print(json.dumps(
+                {"error": "Could not retrieve Trakt list capabilities"},
+                indent=2,
+            ))
+        else:
+            console.print(
+                "[bold red]Could not retrieve Trakt list "
+                "capabilities.[/bold red]"
+            )
+        return
+
+    if json_output:
+        print(
+            json.dumps(
+                capabilities,
+                indent=2,
+                sort_keys=True,
+                ensure_ascii=False,
+            )
+        )
+        return
+
+    console.print("[bold]Trakt Personal-List Capacity[/bold]")
+
+    username = capabilities.get("username")
+    if username:
+        console.print(f"User: {username}")
+
+    console.print(f"VIP: {capabilities.get('vip')}")
+    console.print(f"VIP EP: {capabilities.get('vip_ep')}")
+
+    max_lists = capabilities.get("max_lists")
+    max_items = capabilities.get("max_items_per_list")
+
+    console.print(
+        "Maximum personal lists: "
+        + (
+            str(max_lists)
+            if max_lists is not None
+            else "unknown"
+        )
+    )
+
+    console.print(
+        "Maximum items per list: "
+        + (
+            str(max_items)
+            if max_items is not None
+            else "unknown"
+        )
+    )
+
+    console.print(
+        "Aggregate personal-list item limit: "
+        "[dim]not reported by /users/settings[/dim]"
+    )
+
+
+@cli.command(name="trakt-capabilities")
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    help="Output capability information as JSON.",
+)
+def trakt_capabilities(json_output=False):
+    """
+    Show limits and permissions reported by the authenticated Trakt account.
+
+    This is diagnostic only. It does not create, update, or delete lists.
+    """
+    import json
+
+    capabilities = trakt_auth.get_trakt_account_capabilities()
+
+    if capabilities is None:
+        if json_output:
+            print(json.dumps(
+                {"error": "Could not retrieve Trakt account capabilities"},
+                indent=2,
+            ))
+        else:
+            console.print(
+                "[bold red]Could not retrieve Trakt account "
+                "capabilities.[/bold red]"
+            )
+        return
+
+    if json_output:
+        print(
+            json.dumps(
+                capabilities,
+                indent=2,
+                sort_keys=True,
+                ensure_ascii=False,
+            )
+        )
+        return
+
+    user = capabilities.get("user", {}) or {}
+    limits = capabilities.get("limits", {}) or {}
+    permissions = capabilities.get("permissions", {}) or {}
+
+    console.print("[bold]Trakt Account Capabilities[/bold]")
+
+    username = user.get("username")
+    if username:
+        console.print(f"User: {username}")
+
+    if "vip" in user:
+        console.print(f"VIP: {user['vip']}")
+
+    if "vip_ep" in user:
+        console.print(f"VIP EP: {user['vip_ep']}")
+
+    console.print("\n[bold]Limits reported by Trakt:[/bold]")
+    if limits:
+        console.print_json(
+            json.dumps(
+                limits,
+                sort_keys=True,
+                ensure_ascii=False,
+            )
+        )
+    else:
+        console.print("[yellow]No limits object returned.[/yellow]")
+
+    console.print("\n[bold]Permissions reported by Trakt:[/bold]")
+    if permissions:
+        console.print_json(
+            json.dumps(
+                permissions,
+                sort_keys=True,
+                ensure_ascii=False,
+            )
+        )
+    else:
+        console.print("[yellow]No permissions object returned.[/yellow]")
+
+
 @cli.command(name="create-all")
 @click.argument('anime_name')
 def create_all_lists(anime_name):

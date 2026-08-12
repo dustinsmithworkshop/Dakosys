@@ -508,6 +508,297 @@ def make_trakt_request(endpoint, method="GET", data=None, params=None):
         logger.error(f"Error making Trakt API request: {str(e)}")
         return None
 
+def get_trakt_account_capabilities():
+    """
+    Return capability information reported by Trakt for the authenticated user.
+
+    The Trakt /users/settings endpoint is authoritative for account limits and
+    permissions. Do not infer capabilities from VIP status alone.
+    """
+    settings = make_trakt_request("users/settings")
+
+    if not isinstance(settings, dict):
+        logger.error(
+            "Could not retrieve Trakt account capabilities"
+        )
+        return None
+
+    raw_user = settings.get("user", {}) or {}
+    raw_limits = settings.get("limits", {}) or {}
+    raw_permissions = settings.get("permissions", {}) or {}
+
+    if not isinstance(raw_user, dict):
+        raw_user = {}
+
+    if not isinstance(raw_limits, dict):
+        raw_limits = {}
+
+    if not isinstance(raw_permissions, dict):
+        raw_permissions = {}
+
+    # Keep the account summary intentionally small. We only need identity and
+    # plan-related fields here; do not expose unrelated user settings.
+    user = {
+        key: raw_user[key]
+        for key in ("username", "vip", "vip_ep")
+        if key in raw_user
+    }
+
+    return {
+        "user": user,
+        "limits": raw_limits,
+        "permissions": raw_permissions,
+    }
+
+
+def _optional_nonnegative_int(value):
+    """Return a non-negative integer or None for an unusable API value."""
+    if isinstance(value, bool):
+        return None
+
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+
+    if parsed < 0:
+        return None
+
+    return parsed
+
+
+def get_trakt_list_capabilities(capabilities=None):
+    """
+    Normalize the personal-list limits reported by Trakt.
+
+    Only fields actually returned by /users/settings are represented here.
+    Missing limits remain unknown rather than being filled with assumed
+    Free/VIP defaults.
+    """
+    if capabilities is None:
+        capabilities = get_trakt_account_capabilities()
+
+    if not isinstance(capabilities, dict):
+        return None
+
+    user = capabilities.get("user", {}) or {}
+    limits = capabilities.get("limits", {}) or {}
+    permissions = capabilities.get("permissions", {}) or {}
+
+    if not isinstance(user, dict):
+        user = {}
+
+    if not isinstance(limits, dict):
+        limits = {}
+
+    if not isinstance(permissions, dict):
+        permissions = {}
+
+    list_limits = limits.get("list", {}) or {}
+    if not isinstance(list_limits, dict):
+        list_limits = {}
+
+    vip = user.get("vip")
+    if not isinstance(vip, bool):
+        vip = None
+
+    vip_ep = user.get("vip_ep")
+    if not isinstance(vip_ep, bool):
+        vip_ep = None
+
+    max_lists = _optional_nonnegative_int(
+        list_limits.get("count")
+    )
+    max_items_per_list = _optional_nonnegative_int(
+        list_limits.get("item_count")
+    )
+
+    return {
+        "username": user.get("username"),
+        "vip": vip,
+        "vip_ep": vip_ep,
+        "max_lists": max_lists,
+        "max_items_per_list": max_items_per_list,
+        "limits_known": (
+            max_lists is not None
+            and max_items_per_list is not None
+        ),
+        "permissions": permissions,
+    }
+
+
+def _get_all_trakt_pages(endpoint, *, page_size=100):
+    """
+    Retrieve all pages from a Trakt endpoint that returns a JSON list.
+
+    Stops when a page contains fewer than page_size items. Any request or
+    response failure returns None so callers can fail closed.
+    """
+    page = 1
+    items = []
+
+    while True:
+        batch = make_trakt_request(
+            endpoint,
+            params={
+                "page": page,
+                "limit": page_size,
+            },
+        )
+
+        if batch is None:
+            return None
+
+        if not isinstance(batch, list):
+            logger.error(
+                "Unexpected Trakt response type for %s: %s",
+                endpoint,
+                type(batch).__name__,
+            )
+            return None
+
+        items.extend(batch)
+
+        if len(batch) < page_size:
+            break
+
+        page += 1
+
+    return items
+
+
+def get_trakt_list_usage(
+    *,
+    tracked_list_name="Next Airing",
+):
+    """
+    Return current personal-list usage plus capacity for one tracked list.
+
+    This function is read-only. It never creates, updates, or deletes lists.
+    Missing account limits or failed API requests remain unknown rather than
+    being replaced with assumed Free/VIP defaults.
+    """
+    capabilities = get_trakt_list_capabilities()
+
+    if capabilities is None:
+        return None
+
+    lists = _get_all_trakt_pages("users/me/lists")
+    if lists is None:
+        return None
+
+    max_lists = capabilities.get("max_lists")
+    max_items_per_list = capabilities.get(
+        "max_items_per_list"
+    )
+
+    current_lists = len(lists)
+
+    remaining_lists = None
+    if max_lists is not None:
+        remaining_lists = max(
+            max_lists - current_lists,
+            0,
+        )
+
+    expected_slug = (
+        str(tracked_list_name)
+        .strip()
+        .lower()
+        .replace(" ", "-")
+    )
+
+    tracked_list = None
+
+    for item in lists:
+        if not isinstance(item, dict):
+            continue
+
+        name = str(item.get("name") or "").strip()
+        ids = item.get("ids", {}) or {}
+
+        if not isinstance(ids, dict):
+            ids = {}
+
+        slug = str(ids.get("slug") or "").strip()
+
+        if (
+            name.casefold()
+            == str(tracked_list_name).strip().casefold()
+            or slug.casefold() == expected_slug.casefold()
+        ):
+            tracked_list = item
+            break
+
+    tracked = {
+        "name": tracked_list_name,
+        "exists": tracked_list is not None,
+        "id": None,
+        "slug": None,
+        "current_items": 0 if tracked_list is None else None,
+        "remaining_item_slots": (
+            max_items_per_list
+            if tracked_list is None
+            and max_items_per_list is not None
+            else None
+        ),
+    }
+
+    if tracked_list is not None:
+        ids = tracked_list.get("ids", {}) or {}
+
+        if not isinstance(ids, dict):
+            ids = {}
+
+        list_id = ids.get("trakt")
+        list_slug = ids.get("slug")
+
+        tracked["id"] = list_id
+        tracked["slug"] = list_slug
+
+        identifier = list_id or list_slug
+
+        if identifier is None:
+            logger.error(
+                "Tracked Trakt list has no usable ID or slug: %s",
+                tracked_list_name,
+            )
+            return None
+
+        items = _get_all_trakt_pages(
+            f"users/me/lists/{identifier}/items"
+        )
+
+        if items is None:
+            return None
+
+        current_items = len(items)
+
+        tracked["current_items"] = current_items
+
+        if max_items_per_list is not None:
+            tracked["remaining_item_slots"] = max(
+                max_items_per_list - current_items,
+                0,
+            )
+
+    return {
+        "username": capabilities.get("username"),
+        "vip": capabilities.get("vip"),
+        "vip_ep": capabilities.get("vip_ep"),
+        "limits_known": capabilities.get("limits_known"),
+        "lists": {
+            "current": current_lists,
+            "maximum": max_lists,
+            "remaining": remaining_lists,
+        },
+        "items_per_list": {
+            "maximum": max_items_per_list,
+        },
+        "tracked_list": tracked,
+    }
+
+
 if __name__ == "__main__":
     # Setup logging
     logging.basicConfig(
