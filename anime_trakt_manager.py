@@ -1130,6 +1130,55 @@ def create_or_get_trakt_list(list_name, access_token):
         console.print(f"[bold red]Error creating/getting list: {str(e)}[/bold red]")
         return None, False
 
+LEGACY_DAKOSYS_EPISODE_LIST_SUFFIXES = (
+    "_filler",
+    "_manga canon",
+    "_anime canon",
+    "_mixed canon/filler",
+)
+
+
+def is_next_airing_trakt_list(item):
+    """Return True only for the protected Next Airing personal list."""
+    if not isinstance(item, dict):
+        return False
+
+    name = str(item.get("name") or "").strip().casefold()
+
+    ids = item.get("ids", {}) or {}
+    if not isinstance(ids, dict):
+        ids = {}
+
+    slug = str(ids.get("slug") or "").strip().casefold()
+
+    return (
+        name == "next airing"
+        or slug == "next-airing"
+    )
+
+
+def is_legacy_dakosys_episode_list(item):
+    """
+    Identify old Dakosys AFL episode-type personal lists.
+
+    Matching is intentionally conservative. Arbitrary Trakt personal lists
+    are never considered legacy Dakosys lists merely because they are not
+    Next Airing.
+    """
+    if not isinstance(item, dict):
+        return False
+
+    if is_next_airing_trakt_list(item):
+        return False
+
+    name = str(item.get("name") or "").strip().casefold()
+
+    return any(
+        name.endswith(suffix)
+        for suffix in LEGACY_DAKOSYS_EPISODE_LIST_SUFFIXES
+    )
+
+
 def get_list_name_format(afl_name, episode_type):
     """Get proper list name format matching the original script."""
     episode_type_mapping = {
@@ -3370,6 +3419,216 @@ def smart_create_all(anime_name, sync_collections=True):
     # A scheduled update counts as successful only if at least one episode list
     # was processed and no list/episode operation reported a failure.
     return bool(created_lists) and not processing_failed
+
+@cli.command(name="prune-legacy-lists")
+@click.option(
+    "--apply",
+    is_flag=True,
+    help="Actually delete matched legacy Dakosys lists.",
+)
+@click.option(
+    "--verbose",
+    is_flag=True,
+    help="Show every matched legacy list.",
+)
+def prune_legacy_lists(apply=False, verbose=False):
+    """
+    Remove legacy Dakosys episode-type Trakt lists.
+
+    Next Airing is explicitly protected. Dry-run is the default; no list is
+    deleted unless --apply is supplied.
+    """
+    access_token = trakt_auth.ensure_trakt_auth()
+    if not access_token:
+        console.print(
+            "[bold red]Could not authenticate to Trakt.[/bold red]"
+        )
+        return
+
+    headers = trakt_auth.get_trakt_headers(access_token)
+    if not headers:
+        console.print(
+            "[bold red]Could not build Trakt API headers.[/bold red]"
+        )
+        return
+
+    lists = trakt_auth._get_all_trakt_pages(
+        "users/me/lists"
+    )
+
+    if lists is None:
+        console.print(
+            "[bold red]Could not retrieve Trakt personal lists.[/bold red]"
+        )
+        return
+
+    protected = []
+    legacy = []
+    unrelated = []
+
+    for item in lists:
+        if is_next_airing_trakt_list(item):
+            protected.append(item)
+        elif is_legacy_dakosys_episode_list(item):
+            legacy.append(item)
+        else:
+            unrelated.append(item)
+
+    console.print(
+        "\n[bold]Trakt Legacy List Cleanup[/bold]"
+    )
+    console.print(
+        f"Total personal lists:       {len(lists)}"
+    )
+    console.print(
+        f"Protected Next Airing:      {len(protected)}"
+    )
+    console.print(
+        f"Legacy Dakosys lists:       {len(legacy)}"
+    )
+    console.print(
+        f"Other lists untouched:      {len(unrelated)}"
+    )
+
+    if protected:
+        for item in protected:
+            ids = item.get("ids", {}) or {}
+            console.print(
+                "[green]PROTECTED: "
+                f"{item.get('name')} "
+                f"({ids.get('slug')})[/green]"
+            )
+    else:
+        console.print(
+            "[bold yellow]WARNING: Next Airing was not found. "
+            "No protected status list was detected.[/bold yellow]"
+        )
+
+    if unrelated:
+        console.print(
+            "\n[bold yellow]Unrelated lists that will NOT be "
+            "deleted:[/bold yellow]"
+        )
+
+        for item in unrelated:
+            console.print(
+                f"  - {item.get('name')}"
+            )
+
+    console.print(
+        "\n[bold]Matched legacy Dakosys lists:[/bold]"
+    )
+
+    if verbose:
+        display_items = legacy
+    else:
+        display_items = legacy[:25]
+
+    for item in display_items:
+        console.print(
+            f"  - {item.get('name')}"
+        )
+
+    if not verbose and len(legacy) > len(display_items):
+        console.print(
+            f"  ... and {len(legacy) - len(display_items)} more"
+        )
+        console.print(
+            "[dim]Use --verbose to display all candidates.[/dim]"
+        )
+
+    if not legacy:
+        console.print(
+            "\n[green]No legacy Dakosys episode lists found.[/green]"
+        )
+        return
+
+    if not apply:
+        console.print(
+            "\n[bold yellow]DRY RUN: no lists were deleted.[/bold yellow]"
+        )
+        console.print(
+            "[yellow]Run again with --apply only after reviewing "
+            "the counts above.[/yellow]"
+        )
+        return
+
+    console.print(
+        "\n[bold red]Deleting matched legacy Dakosys lists...[/bold red]"
+    )
+
+    deleted = 0
+    failed = []
+
+    for item in legacy:
+        ids = item.get("ids", {}) or {}
+        list_id = ids.get("trakt")
+        name = str(item.get("name") or "")
+
+        if not list_id:
+            failed.append(
+                {
+                    "name": name,
+                    "reason": "missing Trakt list ID",
+                }
+            )
+            continue
+
+        url = (
+            "https://api.trakt.tv/users/me/lists/"
+            f"{list_id}"
+        )
+
+        try:
+            response = requests.delete(
+                url,
+                headers=headers,
+                timeout=30,
+            )
+        except Exception as exc:
+            failed.append(
+                {
+                    "name": name,
+                    "reason": str(exc),
+                }
+            )
+            continue
+
+        if response.status_code in (200, 204):
+            deleted += 1
+            console.print(
+                f"[green]Deleted: {name}[/green]"
+            )
+        else:
+            failed.append(
+                {
+                    "name": name,
+                    "reason": (
+                        f"HTTP {response.status_code}: "
+                        f"{response.text[:200]}"
+                    ),
+                }
+            )
+
+    console.print(
+        "\n[bold]Cleanup summary[/bold]"
+    )
+    console.print(
+        f"Deleted: {deleted}"
+    )
+    console.print(
+        f"Failed:  {len(failed)}"
+    )
+
+    if failed:
+        console.print(
+            "\n[bold red]Failed deletions:[/bold red]"
+        )
+        for item in failed:
+            console.print(
+                f"  - {item['name']}: {item['reason']}"
+            )
+
 
 @cli.command(name="trakt-list-usage")
 @click.option(
