@@ -5,6 +5,7 @@ from typing import Protocol, runtime_checkable
 from ..models import ProviderResult, ShowIdentity
 from .sonarr import SonarrProvider
 from .tmdb import TMDBProvider
+from .tvmaze import TVmazeProvider
 
 
 @runtime_checkable
@@ -24,5 +25,6 @@ class TVMetadataProvider(Protocol):
 __all__ = [
     "SonarrProvider",
     "TMDBProvider",
+    "TVmazeProvider",
     "TVMetadataProvider",
 ]
