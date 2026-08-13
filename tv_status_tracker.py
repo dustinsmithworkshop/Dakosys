@@ -18,6 +18,15 @@ from datetime import datetime
 from plexapi.server import PlexServer
 from rich.console import Console
 
+from tv_metadata import build_show_identity
+from tv_metadata.presentation import present_show_status
+from tv_metadata.providers import (
+    SonarrProvider,
+    TMDBProvider,
+    TVmazeProvider,
+)
+from tv_metadata.resolver import TVMetadataResolver
+
 console = Console()
 
 logger = logging.getLogger("tv_status_tracker")
@@ -25,7 +34,7 @@ logger = logging.getLogger("tv_status_tracker")
 class TVStatusTracker:
     """TV and Anime Status Tracker for DAKOSYS."""
 
-    def __init__(self, config):
+    def __init__(self, config, metadata_resolver=None):
         """Initialize with DAKOSYS configuration."""
         self.config = config
 
@@ -102,6 +111,13 @@ class TVStatusTracker:
 
         self.airing_shows = []
 
+        if metadata_resolver is not None:
+            self.metadata_resolver = metadata_resolver
+        else:
+            self.metadata_resolver = (
+                self._build_metadata_resolver()
+            )
+
         self.token_file = os.path.join(self.data_dir, "trakt_token.json")
 
         self.overlay_style = self.overlay_config.get('overlay_style', 'background_color')
@@ -109,6 +125,177 @@ class TVStatusTracker:
 
 
         self.yaml_file_template = "overlay_tv_status_{library}.yml"
+
+    def _build_metadata_resolver(self):
+        """Build the provider resolver from currently available env vars.
+
+        This is intentionally configuration-schema neutral for now.
+        Sonarr and TMDB are enabled only when their existing environment
+        variables are available. TVmaze is appended as the credential-free
+        fallback when at least one primary provider is configured.
+        """
+        providers = []
+
+        sonarr_url = os.environ.get(
+            "SONARR_URL"
+        )
+        sonarr_api_key = os.environ.get(
+            "SONARR_API_KEY"
+        )
+
+        if sonarr_url and sonarr_api_key:
+            providers.append(
+                SonarrProvider(
+                    sonarr_url,
+                    sonarr_api_key,
+                )
+            )
+        elif sonarr_url or sonarr_api_key:
+            logging.warning(
+                "Sonarr TV metadata provider disabled: "
+                "both SONARR_URL and SONARR_API_KEY "
+                "are required."
+            )
+
+        tmdb_token = os.environ.get(
+            "TMDB_TOKEN"
+        )
+
+        if tmdb_token:
+            providers.append(
+                TMDBProvider(
+                    tmdb_token
+                )
+            )
+
+        if not providers:
+            logging.info(
+                "TV metadata resolver not auto-enabled: "
+                "no Sonarr or TMDB provider credentials "
+                "were found."
+            )
+            return None
+
+        providers.append(
+            TVmazeProvider()
+        )
+
+        logging.info(
+            "TV metadata resolver providers: %s",
+            " -> ".join(
+                provider.name
+                for provider in providers
+            ),
+        )
+
+        return TVMetadataResolver(
+            providers
+        )
+
+    def _library_roles_for(
+        self,
+        library_name,
+    ):
+        """Return configured Plex roles for one physical library."""
+        plex_libraries = (
+            self.config
+            .get("plex", {})
+            .get("libraries", {})
+        )
+
+        return tuple(
+            role
+            for role, libraries
+            in plex_libraries.items()
+            if library_name
+            in (libraries or [])
+        )
+
+    def resolve_show_status(
+        self,
+        show,
+        library_name,
+    ):
+        """Resolve normalized metadata for one Plex show."""
+        if self.metadata_resolver is None:
+            return None
+
+        identity = build_show_identity(
+            show,
+            library_name,
+            library_roles=(
+                self._library_roles_for(
+                    library_name
+                )
+            ),
+        )
+
+        status = (
+            self.metadata_resolver.resolve(
+                identity
+            )
+        )
+
+        for warning in status.warnings:
+            logging.warning(
+                "TV metadata warning for %s: %s",
+                identity.title,
+                warning,
+            )
+
+        next_source = None
+
+        if status.next_episode is not None:
+            next_source = (
+                status.next_episode.source
+            )
+
+        logging.debug(
+            "Resolved TV metadata for %s: "
+            "lifecycle=%s lifecycle_source=%s "
+            "next_source=%s",
+            identity.title,
+            status.lifecycle.value,
+            status.lifecycle_source,
+            next_source,
+        )
+
+        return status
+
+    def present_resolved_status(
+        self,
+        status,
+    ):
+        """Translate ShowStatus into the tracker's legacy show-info shape."""
+        if status is None:
+            return None
+
+        return present_show_status(
+            status,
+            labels=self.labels,
+            colors=self.colors,
+            font=self.font_path_yaml,
+            timezone_name=self.timezone,
+            date_format=self.config.get(
+                "date_format",
+                "DD/MM",
+            ),
+        )
+
+    def resolve_show_info(
+        self,
+        show,
+        library_name,
+    ):
+        """Resolve and present one Plex show without using Trakt."""
+        status = self.resolve_show_status(
+            show,
+            library_name,
+        )
+
+        return self.present_resolved_status(
+            status
+        )
 
     def setup_logging(self):
         """Set up logging for the TV Status Tracker."""
