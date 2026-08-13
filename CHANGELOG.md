@@ -2,7 +2,7 @@
 
 All notable changes to this fork are documented here.
 
-## [2.0.0] - Unreleased
+## [2.0.0] - 2026-08-13
 
 DAKOSYS 2.0 is an intentional architecture change.
 
