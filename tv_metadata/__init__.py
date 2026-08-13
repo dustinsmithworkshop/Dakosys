@@ -1,5 +1,7 @@
 """TV metadata provider framework for Dakosys."""
 
+from .identity import build_show_identity
+
 from .models import (
     EpisodeState,
     NextEpisode,
@@ -10,6 +12,7 @@ from .models import (
 )
 
 __all__ = [
+    "build_show_identity",
     "EpisodeState",
     "NextEpisode",
     "ProviderResult",
