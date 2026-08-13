@@ -15,7 +15,7 @@ from tv_metadata.resolver import (
 )
 
 
-def identity() -> ShowIdentity:
+def identity():
     return ShowIdentity(
         title="Example Show",
         year=2025,
@@ -27,9 +27,7 @@ def identity() -> ShowIdentity:
     )
 
 
-def next_episode(
-    source: str,
-) -> NextEpisode:
+def episode(source):
     return NextEpisode(
         source=source,
         season=2,
@@ -48,72 +46,50 @@ def next_episode(
 class StubProvider:
     def __init__(
         self,
-        name: str,
-        result: ProviderResult,
-    ) -> None:
+        name,
+        *,
+        matched=True,
+        lifecycle=ShowLifecycle.UNKNOWN,
+        next_episode=None,
+        warnings=(),
+    ):
         self.name = name
-        self.result = result
         self.calls = 0
+
+        self.result = ProviderResult(
+            source=name,
+            matched=matched,
+            lifecycle=lifecycle,
+            next_episode=next_episode,
+            warnings=warnings,
+        )
 
     def get_metadata(
         self,
-        show: ShowIdentity,
-    ) -> ProviderResult:
+        show,
+    ):
         del show
-
         self.calls += 1
-
         return self.result
-
-
-def result(
-    source: str,
-    *,
-    matched: bool = True,
-    lifecycle: ShowLifecycle = (
-        ShowLifecycle.UNKNOWN
-    ),
-    episode: NextEpisode | None = None,
-    warnings: tuple[str, ...] = (),
-) -> ProviderResult:
-    return ProviderResult(
-        source=source,
-        matched=matched,
-        lifecycle=lifecycle,
-        next_episode=episode,
-        warnings=warnings,
-    )
 
 
 class TVMetadataResolverTests(
     unittest.TestCase
 ):
-    def test_complete_primary_result_short_circuits(
+    def test_tmdb_wins_lifecycle_conflict(
         self,
-    ) -> None:
+    ):
         sonarr = StubProvider(
             "sonarr",
-            result(
-                "sonarr",
-                lifecycle=(
-                    ShowLifecycle.RETURNING
-                ),
-                episode=next_episode(
-                    "sonarr"
-                ),
+            lifecycle=(
+                ShowLifecycle.RETURNING
             ),
         )
 
         tmdb = StubProvider(
             "tmdb",
-            result(
-                "tmdb",
-                lifecycle=(
-                    ShowLifecycle.RETURNING
-                ),
-                episode=next_episode(
-                    "tmdb"
-                ),
+            lifecycle=(
+                ShowLifecycle.ENDED
             ),
         )
 
@@ -121,222 +97,40 @@ class TVMetadataResolverTests(
             [sonarr, tmdb]
         )
 
-        resolved = resolver.resolve(
+        result = resolver.resolve(
             identity()
         )
 
         self.assertEqual(
-            resolved.lifecycle,
-            ShowLifecycle.RETURNING,
-        )
-
-        self.assertEqual(
-            resolved.lifecycle_source,
-            "sonarr",
-        )
-
-        assert (
-            resolved.next_episode
-            is not None
-        )
-
-        self.assertEqual(
-            resolved.next_episode.source,
-            "sonarr",
-        )
-
-        self.assertEqual(
-            sonarr.calls,
-            1,
-        )
-
-        self.assertEqual(
-            tmdb.calls,
-            0,
-        )
-
-    def test_fallback_can_supply_next_episode(
-        self,
-    ) -> None:
-        sonarr = StubProvider(
-            "sonarr",
-            result(
-                "sonarr",
-                lifecycle=(
-                    ShowLifecycle.RETURNING
-                ),
-            ),
-        )
-
-        tmdb = StubProvider(
-            "tmdb",
-            result(
-                "tmdb",
-                lifecycle=(
-                    ShowLifecycle.RETURNING
-                ),
-                episode=next_episode(
-                    "tmdb"
-                ),
-            ),
-        )
-
-        resolver = TVMetadataResolver(
-            [sonarr, tmdb]
-        )
-
-        resolved = resolver.resolve(
-            identity()
-        )
-
-        self.assertEqual(
-            resolved.lifecycle_source,
-            "sonarr",
-        )
-
-        assert (
-            resolved.next_episode
-            is not None
-        )
-
-        self.assertEqual(
-            resolved.next_episode.source,
-            "tmdb",
-        )
-
-        self.assertEqual(
-            sonarr.calls,
-            1,
-        )
-
-        self.assertEqual(
-            tmdb.calls,
-            1,
-        )
-
-    def test_unmatched_provider_falls_through(
-        self,
-    ) -> None:
-        sonarr = StubProvider(
-            "sonarr",
-            result(
-                "sonarr",
-                matched=False,
-            ),
-        )
-
-        tmdb = StubProvider(
-            "tmdb",
-            result(
-                "tmdb",
-                lifecycle=(
-                    ShowLifecycle.RETURNING
-                ),
-                episode=next_episode(
-                    "tmdb"
-                ),
-            ),
-        )
-
-        resolver = TVMetadataResolver(
-            [sonarr, tmdb]
-        )
-
-        resolved = resolver.resolve(
-            identity()
-        )
-
-        self.assertEqual(
-            resolved.lifecycle_source,
-            "tmdb",
-        )
-
-        assert (
-            resolved.next_episode
-            is not None
-        )
-
-        self.assertEqual(
-            resolved.next_episode.source,
-            "tmdb",
-        )
-
-    def test_ended_primary_stops_fallback(
-        self,
-    ) -> None:
-        sonarr = StubProvider(
-            "sonarr",
-            result(
-                "sonarr",
-                lifecycle=(
-                    ShowLifecycle.ENDED
-                ),
-            ),
-        )
-
-        tmdb = StubProvider(
-            "tmdb",
-            result(
-                "tmdb",
-                lifecycle=(
-                    ShowLifecycle.RETURNING
-                ),
-                episode=next_episode(
-                    "tmdb"
-                ),
-            ),
-        )
-
-        resolver = TVMetadataResolver(
-            [sonarr, tmdb]
-        )
-
-        resolved = resolver.resolve(
-            identity()
-        )
-
-        self.assertEqual(
-            resolved.lifecycle,
+            result.lifecycle,
             ShowLifecycle.ENDED,
         )
 
         self.assertEqual(
-            resolved.lifecycle_source,
-            "sonarr",
+            result.lifecycle_source,
+            "tmdb",
         )
 
-        self.assertIsNone(
-            resolved.next_episode
-        )
-
-        self.assertEqual(
-            tmdb.calls,
-            0,
-        )
-
-    def test_unknown_lifecycle_falls_through(
+    def test_sonarr_wins_next_episode(
         self,
-    ) -> None:
+    ):
         sonarr = StubProvider(
             "sonarr",
-            result(
-                "sonarr",
-                lifecycle=(
-                    ShowLifecycle.UNKNOWN
-                ),
+            lifecycle=(
+                ShowLifecycle.RETURNING
+            ),
+            next_episode=episode(
+                "sonarr"
             ),
         )
 
         tmdb = StubProvider(
             "tmdb",
-            result(
-                "tmdb",
-                lifecycle=(
-                    ShowLifecycle.RETURNING
-                ),
-                episode=next_episode(
-                    "tmdb"
-                ),
+            lifecycle=(
+                ShowLifecycle.RETURNING
+            ),
+            next_episode=episode(
+                "tmdb"
             ),
         )
 
@@ -344,98 +138,37 @@ class TVMetadataResolverTests(
             [sonarr, tmdb]
         )
 
-        resolved = resolver.resolve(
+        result = resolver.resolve(
             identity()
         )
 
         self.assertEqual(
-            resolved.lifecycle,
-            ShowLifecycle.RETURNING,
-        )
-
-        self.assertEqual(
-            resolved.lifecycle_source,
+            result.lifecycle_source,
             "tmdb",
         )
 
-    def test_primary_episode_survives_lifecycle_fallback(
-        self,
-    ) -> None:
-        first = StubProvider(
-            "first",
-            result(
-                "first",
-                lifecycle=(
-                    ShowLifecycle.UNKNOWN
-                ),
-                episode=next_episode(
-                    "first"
-                ),
-            ),
-        )
-
-        second = StubProvider(
-            "second",
-            result(
-                "second",
-                lifecycle=(
-                    ShowLifecycle.RETURNING
-                ),
-            ),
-        )
-
-        resolver = TVMetadataResolver(
-            [first, second]
-        )
-
-        resolved = resolver.resolve(
-            identity()
-        )
-
         self.assertEqual(
-            resolved.lifecycle_source,
-            "second",
+            result.next_episode.source,
+            "sonarr",
         )
 
-        assert (
-            resolved.next_episode
-            is not None
-        )
-
-        self.assertEqual(
-            resolved.next_episode.source,
-            "first",
-        )
-
-    def test_warnings_are_prefixed_and_aggregated(
+    def test_tmdb_supplies_next_when_sonarr_has_none(
         self,
-    ) -> None:
+    ):
         sonarr = StubProvider(
             "sonarr",
-            result(
-                "sonarr",
-                lifecycle=(
-                    ShowLifecycle.RETURNING
-                ),
-                warnings=(
-                    "first_warning",
-                ),
+            lifecycle=(
+                ShowLifecycle.RETURNING
             ),
         )
 
         tmdb = StubProvider(
             "tmdb",
-            result(
-                "tmdb",
-                lifecycle=(
-                    ShowLifecycle.RETURNING
-                ),
-                episode=next_episode(
-                    "tmdb"
-                ),
-                warnings=(
-                    "title_differs",
-                ),
+            lifecycle=(
+                ShowLifecycle.RETURNING
+            ),
+            next_episode=episode(
+                "tmdb"
             ),
         )
 
@@ -443,42 +176,65 @@ class TVMetadataResolverTests(
             [sonarr, tmdb]
         )
 
-        resolved = resolver.resolve(
+        result = resolver.resolve(
             identity()
         )
 
         self.assertEqual(
-            resolved.warnings,
-            (
-                "sonarr:first_warning",
-                "tmdb:title_differs",
-            ),
+            result.lifecycle_source,
+            "tmdb",
         )
 
-    def test_all_unmatched_returns_unknown(
+        self.assertEqual(
+            result.next_episode.source,
+            "tmdb",
+        )
+
+    def test_sonarr_lifecycle_fallback_when_tmdb_unmatched(
         self,
-    ) -> None:
-        sonarr = StubProvider(
-            "sonarr",
-            result(
-                "sonarr",
-                matched=False,
-            ),
-        )
-
+    ):
         tmdb = StubProvider(
             "tmdb",
-            result(
-                "tmdb",
-                matched=False,
+            matched=False,
+        )
+
+        sonarr = StubProvider(
+            "sonarr",
+            lifecycle=(
+                ShowLifecycle.RETURNING
             ),
+        )
+
+        resolver = TVMetadataResolver(
+            [sonarr, tmdb]
+        )
+
+        result = resolver.resolve(
+            identity()
+        )
+
+        self.assertEqual(
+            result.lifecycle_source,
+            "sonarr",
+        )
+
+    def test_tvmaze_final_lifecycle_fallback(
+        self,
+    ):
+        tmdb = StubProvider(
+            "tmdb",
+            matched=False,
+        )
+
+        sonarr = StubProvider(
+            "sonarr",
+            matched=False,
         )
 
         tvmaze = StubProvider(
             "tvmaze",
-            result(
-                "tvmaze",
-                matched=False,
+            lifecycle=(
+                ShowLifecycle.ENDED
             ),
         )
 
@@ -490,26 +246,93 @@ class TVMetadataResolverTests(
             ]
         )
 
-        resolved = resolver.resolve(
+        result = resolver.resolve(
             identity()
         )
 
         self.assertEqual(
-            resolved.lifecycle,
-            ShowLifecycle.UNKNOWN,
+            result.lifecycle_source,
+            "tvmaze",
         )
 
-        self.assertIsNone(
-            resolved.lifecycle_source
+    def test_ended_lifecycle_can_have_future_episode(
+        self,
+    ):
+        tmdb = StubProvider(
+            "tmdb",
+            lifecycle=(
+                ShowLifecycle.ENDED
+            ),
         )
 
-        self.assertIsNone(
-            resolved.next_episode
+        sonarr = StubProvider(
+            "sonarr",
+            lifecycle=(
+                ShowLifecycle.RETURNING
+            ),
+            next_episode=episode(
+                "sonarr"
+            ),
+        )
+
+        resolver = TVMetadataResolver(
+            [sonarr, tmdb]
+        )
+
+        result = resolver.resolve(
+            identity()
         )
 
         self.assertEqual(
-            sonarr.calls,
-            1,
+            result.lifecycle,
+            ShowLifecycle.ENDED,
+        )
+
+        self.assertEqual(
+            result.lifecycle_source,
+            "tmdb",
+        )
+
+        self.assertIsNotNone(
+            result.next_episode
+        )
+
+        self.assertEqual(
+            result.next_episode.source,
+            "sonarr",
+        )
+
+        self.assertIn(
+            "resolver:ended_with_next_episode",
+            result.warnings,
+        )
+
+    def test_provider_called_at_most_once(
+        self,
+    ):
+        tmdb = StubProvider(
+            "tmdb",
+            lifecycle=(
+                ShowLifecycle.RETURNING
+            ),
+            next_episode=episode(
+                "tmdb"
+            ),
+        )
+
+        sonarr = StubProvider(
+            "sonarr",
+            lifecycle=(
+                ShowLifecycle.RETURNING
+            ),
+        )
+
+        resolver = TVMetadataResolver(
+            [sonarr, tmdb]
+        )
+
+        resolver.resolve(
+            identity()
         )
 
         self.assertEqual(
@@ -518,8 +341,78 @@ class TVMetadataResolverTests(
         )
 
         self.assertEqual(
-            tvmaze.calls,
+            sonarr.calls,
             1,
+        )
+
+    def test_warnings_are_preserved(
+        self,
+    ):
+        tmdb = StubProvider(
+            "tmdb",
+            lifecycle=(
+                ShowLifecycle.RETURNING
+            ),
+            warnings=(
+                "title_differs",
+            ),
+        )
+
+        sonarr = StubProvider(
+            "sonarr",
+            next_episode=episode(
+                "sonarr"
+            ),
+        )
+
+        resolver = TVMetadataResolver(
+            [sonarr, tmdb]
+        )
+
+        result = resolver.resolve(
+            identity()
+        )
+
+        self.assertIn(
+            "tmdb:title_differs",
+            result.warnings,
+        )
+
+    def test_all_unmatched_returns_unknown(
+        self,
+    ):
+        providers = [
+            StubProvider(
+                "sonarr",
+                matched=False,
+            ),
+            StubProvider(
+                "tmdb",
+                matched=False,
+            ),
+            StubProvider(
+                "tvmaze",
+                matched=False,
+            ),
+        ]
+
+        result = TVMetadataResolver(
+            providers
+        ).resolve(
+            identity()
+        )
+
+        self.assertEqual(
+            result.lifecycle,
+            ShowLifecycle.UNKNOWN,
+        )
+
+        self.assertIsNone(
+            result.lifecycle_source
+        )
+
+        self.assertIsNone(
+            result.next_episode
         )
 
 

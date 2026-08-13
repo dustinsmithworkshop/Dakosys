@@ -70,15 +70,15 @@ def present_show_status(
 
     episode = status.next_episode
 
-    if status.lifecycle is ShowLifecycle.ENDED:
-        return {
-            "text_content": labels["ended"],
-            "back_color": colors["ENDED"],
-            "font": font,
-            "status_type": "ENDED",
-        }
-
     if episode is None:
+        if status.lifecycle is ShowLifecycle.ENDED:
+            return {
+                "text_content": labels["ended"],
+                "back_color": colors["ENDED"],
+                "font": font,
+                "status_type": "ENDED",
+            }
+
         if status.lifecycle is ShowLifecycle.RETURNING:
             return {
                 "text_content": labels["returning"],

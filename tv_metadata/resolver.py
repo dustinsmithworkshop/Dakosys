@@ -12,24 +12,29 @@ from .models import (
 from .providers import TVMetadataProvider
 
 
+DEFAULT_LIFECYCLE_ORDER = (
+    "tmdb",
+    "sonarr",
+    "tvmaze",
+)
+
+DEFAULT_NEXT_EPISODE_ORDER = (
+    "sonarr",
+    "tmdb",
+    "tvmaze",
+)
+
+
 class TVMetadataResolver:
-    """Resolve TV metadata across ordered providers.
+    """Resolve lifecycle and next episode independently.
 
-    Provider order expresses precedence.
+    Lifecycle precedence:
+        TMDB -> Sonarr -> TVmaze
 
-    Lifecycle:
-    - first matched provider with a known lifecycle wins
-    - later providers never override it
+    Next-episode precedence:
+        Sonarr -> TMDB -> TVmaze
 
-    Next episode:
-    - first matched provider with a next episode wins
-    - fallback providers may supplement a lifecycle result
-      that has no upcoming episode
-
-    Resolution stops when:
-    - an authoritative lifecycle is ENDED, or
-    - both lifecycle and next episode are resolved, or
-    - all providers are exhausted
+    Each provider is called at most once per show.
     """
 
     def __init__(
@@ -37,73 +42,127 @@ class TVMetadataResolver:
         providers: Sequence[
             TVMetadataProvider
         ],
+        *,
+        lifecycle_order: Sequence[str] = (
+            DEFAULT_LIFECYCLE_ORDER
+        ),
+        next_episode_order: Sequence[str] = (
+            DEFAULT_NEXT_EPISODE_ORDER
+        ),
     ) -> None:
         self.providers = tuple(providers)
+
+        self._providers_by_name = {
+            provider.name: provider
+            for provider in self.providers
+        }
+
+        self.lifecycle_order = tuple(
+            lifecycle_order
+        )
+
+        self.next_episode_order = tuple(
+            next_episode_order
+        )
 
     def resolve(
         self,
         identity: ShowIdentity,
     ) -> ShowStatus:
-        lifecycle = ShowLifecycle.UNKNOWN
-        lifecycle_source: str | None = None
-
-        next_episode = None
-
+        results = {}
         warnings: list[str] = []
 
-        for provider in self.providers:
+        def get_result(
+            provider_name: str,
+        ):
+            if provider_name in results:
+                return results[
+                    provider_name
+                ]
+
+            provider = (
+                self._providers_by_name.get(
+                    provider_name
+                )
+            )
+
+            if provider is None:
+                return None
+
             result = provider.get_metadata(
                 identity
             )
 
-            if not result.matched:
+            results[
+                provider_name
+            ] = result
+
+            if result.matched:
+                for warning in (
+                    result.warnings
+                ):
+                    warnings.append(
+                        f"{result.source}:"
+                        f"{warning}"
+                    )
+
+            return result
+
+        lifecycle = ShowLifecycle.UNKNOWN
+        lifecycle_source = None
+
+        for provider_name in (
+            self.lifecycle_order
+        ):
+            result = get_result(
+                provider_name
+            )
+
+            if (
+                result is None
+                or not result.matched
+                or result.lifecycle
+                is ShowLifecycle.UNKNOWN
+            ):
                 continue
 
-            for warning in result.warnings:
-                warnings.append(
-                    f"{result.source}:"
-                    f"{warning}"
-                )
+            lifecycle = result.lifecycle
+            lifecycle_source = (
+                result.source
+            )
+            break
+
+        next_episode = None
+
+        for provider_name in (
+            self.next_episode_order
+        ):
+            result = get_result(
+                provider_name
+            )
 
             if (
-                lifecycle
-                is ShowLifecycle.UNKNOWN
-                and result.lifecycle
-                is not ShowLifecycle.UNKNOWN
+                result is None
+                or not result.matched
+                or result.next_episode
+                is None
             ):
-                lifecycle = result.lifecycle
-                lifecycle_source = (
-                    result.source
-                )
+                continue
 
-            if (
-                next_episode is None
-                and result.next_episode
-                is not None
-            ):
-                next_episode = (
-                    result.next_episode
-                )
+            next_episode = (
+                result.next_episode
+            )
+            break
 
-            # A higher-priority provider that
-            # definitively says the show has ended
-            # is authoritative. Do not search lower
-            # priority providers for future episodes.
-            if (
-                lifecycle
-                is ShowLifecycle.ENDED
-            ):
-                next_episode = None
-                break
-
-            # Both independently resolvable fields
-            # are now satisfied.
-            if (
-                lifecycle
-                is not ShowLifecycle.UNKNOWN
-                and next_episode is not None
-            ):
-                break
+        if (
+            lifecycle
+            is ShowLifecycle.ENDED
+            and next_episode is not None
+        ):
+            warnings.append(
+                "resolver:"
+                "ended_with_next_episode"
+            )
 
         return ShowStatus(
             lifecycle=lifecycle,

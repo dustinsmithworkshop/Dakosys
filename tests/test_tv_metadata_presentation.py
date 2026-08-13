@@ -221,6 +221,36 @@ class TVStatusPresentationTests(
                     status_type,
                 )
 
+    def test_future_episode_beats_ended_lifecycle(
+        self,
+    ):
+        result = present(
+            ShowStatus(
+                lifecycle=ShowLifecycle.ENDED,
+                lifecycle_source="tmdb",
+                next_episode=NextEpisode(
+                    source="sonarr",
+                    air_date=date(
+                        2026,
+                        8,
+                        14,
+                    ),
+                    state=EpisodeState.AIRING,
+                ),
+            )
+        )
+
+        self.assertEqual(
+            result["text_content"],
+            "AIRING 14/08",
+        )
+
+        self.assertEqual(
+            result["status_type"],
+            "AIRING",
+        )
+
+
     def test_unknown_episode_state_defaults_to_airing(self):
         result = present(
             ShowStatus(
