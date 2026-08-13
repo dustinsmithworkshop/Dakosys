@@ -11,6 +11,7 @@ import shutil
 import threading
 import traceback
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Dict, List, Optional, Any
 
 import yaml
@@ -99,12 +100,21 @@ def mask_secrets(config: dict) -> dict:
     return masked
 
 
-def compute_next_run(schedule_config: dict) -> Optional[str]:
+def compute_next_run(
+    schedule_config: dict,
+    timezone_name: Optional[str] = None,
+) -> Optional[str]:
     """Compute the next ISO-8601 run time from a scheduler config block."""
     if not schedule_config:
         return None
     schedule_type = schedule_config.get("type", "daily").lower()
-    now = datetime.now()
+
+    try:
+        tz = ZoneInfo(timezone_name) if timezone_name else None
+    except Exception:
+        tz = None
+
+    now = datetime.now(tz)
 
     try:
         if schedule_type == "run":
@@ -270,7 +280,7 @@ def get_status():
             enabled = bool(config.get("services", {}).get(svc, {}).get("enabled", False))
             if enabled:
                 sched_cfg = config.get("scheduler", {}).get(svc, {})
-                next_run = compute_next_run(sched_cfg)
+                next_run = compute_next_run(sched_cfg, config.get("timezone"))
         services_info[svc] = {
             "enabled": enabled,
             "running": run_status.get(svc, False),
