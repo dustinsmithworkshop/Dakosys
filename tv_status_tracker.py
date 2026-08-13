@@ -26,6 +26,11 @@ from tv_metadata.providers import (
     TVmazeProvider,
 )
 from tv_metadata.resolver import TVMetadataResolver
+from tv_metadata.shadow import (
+    compare_presentations,
+    normalized_status_type,
+    presented_date,
+)
 
 console = Console()
 
@@ -296,6 +301,346 @@ class TVStatusTracker:
         return self.present_resolved_status(
             status
         )
+
+    def _shadow_record(
+        self,
+        show,
+        library_name,
+        headers,
+    ):
+        """Compare legacy Trakt and provider metadata for one Plex show."""
+        legacy_info = None
+        provider_status = None
+        provider_info = None
+        errors = []
+
+        try:
+            legacy_info = self.process_show(
+                show,
+                headers,
+            )
+        except Exception as exc:
+            logging.exception(
+                "Legacy shadow lookup failed for %s",
+                show.title,
+            )
+            errors.append(
+                f"legacy:{type(exc).__name__}:{exc}"
+            )
+
+        try:
+            provider_status = (
+                self.resolve_show_status(
+                    show,
+                    library_name,
+                )
+            )
+
+            provider_info = (
+                self.present_resolved_status(
+                    provider_status
+                )
+            )
+        except Exception as exc:
+            logging.exception(
+                "Provider shadow lookup failed for %s",
+                show.title,
+            )
+            errors.append(
+                f"provider:{type(exc).__name__}:{exc}"
+            )
+
+        if errors:
+            comparison = "ERROR"
+        else:
+            comparison = (
+                compare_presentations(
+                    legacy_info,
+                    provider_info,
+                )
+            )
+
+        provider_lifecycle = None
+        lifecycle_source = None
+        next_source = None
+        next_state = None
+        warnings = []
+
+        if provider_status is not None:
+            provider_lifecycle = (
+                provider_status.lifecycle.value
+            )
+            lifecycle_source = (
+                provider_status.lifecycle_source
+            )
+            warnings = list(
+                provider_status.warnings
+            )
+
+            if (
+                provider_status.next_episode
+                is not None
+            ):
+                next_source = (
+                    provider_status
+                    .next_episode
+                    .source
+                )
+                next_state = (
+                    provider_status
+                    .next_episode
+                    .state
+                    .value
+                )
+
+        return {
+            "title": show.title,
+            "year": getattr(
+                show,
+                "year",
+                None,
+            ),
+            "library": library_name,
+            "plex_rating_key": str(
+                getattr(
+                    show,
+                    "ratingKey",
+                    "",
+                )
+            ),
+            "comparison": comparison,
+            "legacy": {
+                "status_type": (
+                    legacy_info.get(
+                        "status_type"
+                    )
+                    if legacy_info
+                    else None
+                ),
+                "normalized_status_type": (
+                    normalized_status_type(
+                        legacy_info
+                    )
+                ),
+                "date": presented_date(
+                    legacy_info
+                ),
+                "text": (
+                    legacy_info.get(
+                        "text_content"
+                    )
+                    if legacy_info
+                    else None
+                ),
+            },
+            "provider": {
+                "lifecycle": (
+                    provider_lifecycle
+                ),
+                "lifecycle_source": (
+                    lifecycle_source
+                ),
+                "next_episode_source": (
+                    next_source
+                ),
+                "next_episode_state": (
+                    next_state
+                ),
+                "status_type": (
+                    provider_info.get(
+                        "status_type"
+                    )
+                    if provider_info
+                    else None
+                ),
+                "normalized_status_type": (
+                    normalized_status_type(
+                        provider_info
+                    )
+                ),
+                "date": presented_date(
+                    provider_info
+                ),
+                "text": (
+                    provider_info.get(
+                        "text_content"
+                    )
+                    if provider_info
+                    else None
+                ),
+                "warnings": warnings,
+            },
+            "errors": errors,
+        }
+
+    def run_metadata_shadow_audit(
+        self,
+        *,
+        library_names=None,
+        limit=None,
+    ):
+        """Compare legacy Trakt metadata with the new provider resolver.
+
+        This audit is read-only with respect to Plex, Kometa, and Trakt
+        lists. Its only persistent output is a JSON report in data_dir.
+        """
+        if self.metadata_resolver is None:
+            console.print(
+                "[red]TV metadata resolver is not configured.[/red]"
+            )
+            return None
+
+        access_token = self.get_trakt_token()
+
+        if not access_token:
+            console.print(
+                "[red]Failed to get Trakt token for shadow audit.[/red]"
+            )
+            return None
+
+        headers = self.get_trakt_headers(
+            access_token
+        )
+
+        plex = PlexServer(
+            self.plex_url,
+            self.plex_token,
+        )
+
+        requested_libraries = (
+            library_names
+            if library_names is not None
+            else self.libraries
+        )
+
+        # Audit each physical Plex library once even when it serves
+        # multiple logical Dakosys roles.
+        libraries = list(
+            dict.fromkeys(
+                requested_libraries
+            )
+        )
+
+        records = []
+        summary = {}
+        processed = 0
+
+        # process_show() appends legacy next-airing records here.
+        # They are intentionally never published during this audit.
+        self.airing_shows = []
+
+        console.print(
+            "[bold]Starting TV metadata shadow audit...[/bold]"
+        )
+
+        for library_name in libraries:
+            console.print(
+                f"[bold blue]Shadow auditing library: "
+                f"{library_name}[/bold blue]"
+            )
+
+            library = plex.library.section(
+                library_name
+            )
+
+            for show in library.all():
+                if (
+                    limit is not None
+                    and processed >= limit
+                ):
+                    break
+
+                record = self._shadow_record(
+                    show,
+                    library_name,
+                    headers,
+                )
+
+                records.append(record)
+                processed += 1
+
+                outcome = record[
+                    "comparison"
+                ]
+
+                summary[outcome] = (
+                    summary.get(
+                        outcome,
+                        0,
+                    )
+                    + 1
+                )
+
+                console.print(
+                    f"[dim]{show.title}: "
+                    f"{outcome}[/dim]"
+                )
+
+            if (
+                limit is not None
+                and processed >= limit
+            ):
+                break
+
+        provider_names = [
+            provider.name
+            for provider
+            in self.metadata_resolver.providers
+        ]
+
+        report = {
+            "generated_at": (
+                datetime.now(
+                    pytz.utc
+                ).isoformat()
+            ),
+            "providers": provider_names,
+            "libraries": libraries,
+            "shows_processed": processed,
+            "summary": summary,
+            "records": records,
+        }
+
+        report_path = os.path.join(
+            self.data_dir,
+            "tv_metadata_shadow_report.json",
+        )
+
+        with open(
+            report_path,
+            "w",
+            encoding="utf-8",
+        ) as file:
+            json.dump(
+                report,
+                file,
+                indent=2,
+                ensure_ascii=False,
+            )
+
+        # Do not leave legacy audit data looking like production
+        # Next Airing state inside this tracker instance.
+        self.airing_shows = []
+
+        console.print()
+        console.print(
+            "[bold green]TV metadata shadow audit complete[/bold green]"
+        )
+        console.print(
+            f"Shows processed: {processed}"
+        )
+
+        for outcome in sorted(summary):
+            console.print(
+                f"{outcome}: "
+                f"{summary[outcome]}"
+            )
+
+        console.print(
+            f"Report: {report_path}"
+        )
+
+        return report
 
     def setup_logging(self):
         """Set up logging for the TV Status Tracker."""
