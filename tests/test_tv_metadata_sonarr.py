@@ -134,6 +134,7 @@ def episode_record(
         "seasonNumber": season,
         "episodeNumber": episode,
         "title": "Example Episode",
+        "airDate": "2026-09-01",
         "airDateUtc": air_datetime,
         "finaleType": finale_type,
     }
@@ -411,6 +412,56 @@ class SonarrProviderTests(
                     result.next_episode.raw_episode_type,
                     finale_type,
                 )
+
+    def test_air_date_uses_sonarr_calendar_date(
+        self,
+    ) -> None:
+        next_airing = (
+            "2026-08-14T17:30:00Z"
+        )
+
+        episode = episode_record(
+            air_datetime=next_airing,
+        )
+
+        episode["airDate"] = (
+            "2026-08-15"
+        )
+
+        provider, _ = (
+            self.make_provider(
+                series=[
+                    series_record(
+                        next_airing=(
+                            next_airing
+                        )
+                    )
+                ],
+                episodes={
+                    42: [episode]
+                },
+            )
+        )
+
+        result = provider.get_metadata(
+            identity()
+        )
+
+        assert (
+            result.next_episode
+            is not None
+        )
+
+        self.assertEqual(
+            result.next_episode.air_date.isoformat(),
+            "2026-08-15",
+        )
+
+        self.assertEqual(
+            result.next_episode.air_datetime.isoformat(),
+            "2026-08-14T17:30:00+00:00",
+        )
+
 
     def test_next_airing_requires_exact_timestamp_match(
         self,

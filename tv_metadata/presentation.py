@@ -21,15 +21,18 @@ def _episode_air_date(
     if episode is None:
         return None
 
-    # Prefer the actual timestamp when a provider supplies one.
-    # This preserves the existing Dakosys behavior of converting
-    # UTC airing times into the configured local timezone.
+    # A provider-supplied calendar date is authoritative for
+    # presentation. This matters for international broadcasts where
+    # the UTC timestamp may fall on the previous calendar day.
+    if episode.air_date is not None:
+        return episode.air_date
+
     if episode.air_datetime is not None:
         return episode.air_datetime.astimezone(
             ZoneInfo(timezone_name)
         ).date()
 
-    return episode.air_date
+    return None
 
 
 def _format_date(

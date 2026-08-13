@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 import requests
@@ -14,6 +14,17 @@ from ..models import (
     ShowIdentity,
     ShowLifecycle,
 )
+
+
+def _parse_date(value: str | None) -> date | None:
+    if not value:
+        return None
+
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -227,9 +238,15 @@ class SonarrProvider:
                 "episodeNumber"
             ),
             air_date=(
-                air_datetime.date()
-                if air_datetime is not None
-                else None
+                _parse_date(
+                    episode.get("airDate")
+                )
+                if episode.get("airDate")
+                else (
+                    air_datetime.date()
+                    if air_datetime is not None
+                    else None
+                )
             ),
             air_datetime=air_datetime,
             title=episode.get("title"),
