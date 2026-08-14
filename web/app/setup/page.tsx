@@ -814,7 +814,7 @@ export default function SetupPage() {
                   <div>
                     <p className="text-xs text-zinc-500 mb-1">Libraries to scan</p>
                     <div className="flex flex-wrap gap-1">
-                      {[...w.anime_libs, ...w.tv_libs].map((lib) => (
+                      {Array.from(new Set([...w.anime_libs, ...w.tv_libs])).map((lib) => (
                         <button
                           key={lib}
                           onClick={() => {
