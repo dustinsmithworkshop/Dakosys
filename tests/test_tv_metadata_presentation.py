@@ -170,6 +170,43 @@ class TVStatusPresentationTests(
             "SEASON PREMIERE 27/09",
         )
 
+    def test_local_timestamp_date_beats_provider_calendar_date(
+        self,
+    ):
+        result = present(
+            ShowStatus(
+                lifecycle=ShowLifecycle.RETURNING,
+                lifecycle_source="tmdb",
+                next_episode=NextEpisode(
+                    source="sonarr",
+                    air_date=date(
+                        2026,
+                        9,
+                        3,
+                    ),
+                    air_datetime=datetime(
+                        2026,
+                        9,
+                        3,
+                        2,
+                        0,
+                        tzinfo=timezone.utc,
+                    ),
+                    state=(
+                        EpisodeState.SEASON_PREMIERE
+                    ),
+                ),
+            )
+        )
+
+        # 02:00 UTC on September 3 is still September 2
+        # in America/Chicago.
+        self.assertEqual(
+            result["text_content"],
+            "SEASON PREMIERE 02/09",
+        )
+
+
     def test_special_episode_states(self):
         cases = [
             (

@@ -21,18 +21,18 @@ def _episode_air_date(
     if episode is None:
         return None
 
-    # A provider-supplied calendar date is authoritative for
-    # presentation. This matters for international broadcasts where
-    # the UTC timestamp may fall on the previous calendar day.
-    if episode.air_date is not None:
-        return episode.air_date
-
+    # Dakosys presents airing dates in the configured user
+    # timezone. When a provider supplies an exact timestamp, preserve
+    # the existing tracker behavior by localizing that timestamp.
+    #
+    # The provider's calendar air_date remains available in the
+    # normalized model for provenance and providers without timestamps.
     if episode.air_datetime is not None:
         return episode.air_datetime.astimezone(
             ZoneInfo(timezone_name)
         ).date()
 
-    return None
+    return episode.air_date
 
 
 def _format_date(
