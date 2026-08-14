@@ -39,6 +39,11 @@ interface WizardState {
   kometa_collections: string;
   kometa_font_dir: string;
   kometa_asset_dir: string;
+  sonarr_enabled: boolean;
+  sonarr_url: string;
+  sonarr_api_key: string;
+  tmdb_enabled: boolean;
+  tvmaze_enabled: boolean;
   tmdb_api_key: string;
   trakt_client_id: string;
   trakt_client_secret: string;
@@ -257,6 +262,11 @@ export default function SetupPage() {
     kometa_collections: "/kometa/config/collections",
     kometa_font_dir: "config/fonts",
     kometa_asset_dir: "config/assets",
+    sonarr_enabled: true,
+    sonarr_url: "",
+    sonarr_api_key: "",
+    tmdb_enabled: true,
+    tvmaze_enabled: true,
     tmdb_api_key: "",
     trakt_client_id: "",
     trakt_client_secret: "",
@@ -270,12 +280,10 @@ export default function SetupPage() {
   const update = (patch: Partial<WizardState>) => setW((prev) => ({ ...prev, ...patch }));
 
   const traktRequired =
-    w.tv_status_tracker.enabled ||
     w.auto_schedule_enabled ||
     w.legacy_episode_publishing;
 
   const listSettingsRequired =
-    w.tv_status_tracker.enabled ||
     w.legacy_episode_publishing;
 
   const applyAssignments = useCallback((assignments: Record<string, LibAssignment>) => {
@@ -391,6 +399,19 @@ export default function SetupPage() {
           tv_status_tracker: {
             enabled: w.tv_status_tracker.enabled,
             libraries: w.tv_status_tracker.libraries ?? [],
+            metadata: {
+              sonarr: {
+                enabled: w.sonarr_enabled,
+                url: w.sonarr_url,
+                api_key: w.sonarr_api_key,
+              },
+              tmdb: {
+                enabled: w.tmdb_enabled,
+              },
+              tvmaze: {
+                enabled: w.tvmaze_enabled,
+              },
+            },
             schedule_type: w.tv_status_tracker.schedule_type,
             schedule_times: w.tv_status_tracker.schedule_times,
             schedule_minute: w.tv_status_tracker.schedule_minute,
@@ -777,8 +798,9 @@ export default function SetupPage() {
                 <div>
                   <p className="text-white font-medium">TV/Anime Status Tracker</p>
                   <p className="text-zinc-500 text-xs">
-                    Kometa overlays for airing status, finales, etc. Uses Trakt
-                    metadata and maintains one personal Next Airing list.
+                    Kometa overlays for airing status, finales, and upcoming
+                    episodes using Sonarr, TMDB, and TVmaze. Trakt is not
+                    required.
                   </p>
                 </div>
                 <Switch
@@ -955,13 +977,142 @@ export default function SetupPage() {
           <div className="space-y-6">
             <div>
               <h2 className="text-xl font-semibold text-white mb-1">
-                APIs & Trakt
+                Metadata & APIs
               </h2>
               <p className="text-zinc-400 text-sm">
-                Configure only the external APIs required by the features you
-                selected.
+                Configure TV metadata providers and any external APIs required
+                by the features you selected.
               </p>
             </div>
+
+            {w.tv_status_tracker.enabled && (
+              <div className="space-y-3">
+                <div>
+                  <p className="text-white text-sm font-medium">
+                    TV Metadata Providers
+                  </p>
+                  <p className="text-zinc-500 text-xs mt-1">
+                    Dakosys resolves lifecycle and upcoming episodes locally.
+                    Provider precedence is automatic.
+                  </p>
+                </div>
+
+                <div className="bg-zinc-900 rounded-lg p-4 border border-zinc-800 space-y-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-white text-sm font-medium">
+                        Sonarr
+                      </p>
+                      <p className="text-zinc-500 text-xs mt-1">
+                        Primary source for upcoming episode scheduling.
+                      </p>
+                    </div>
+
+                    <Switch
+                      isSelected={w.sonarr_enabled}
+                      onValueChange={(v) =>
+                        update({ sonarr_enabled: v })
+                      }
+                      color="secondary"
+                    />
+                  </div>
+
+                  {w.sonarr_enabled && (
+                    <div className="space-y-3">
+                      <Input
+                        label="Sonarr URL"
+                        placeholder="http://sonarr:8989"
+                        value={w.sonarr_url}
+                        onChange={(e) =>
+                          update({ sonarr_url: e.target.value })
+                        }
+                        classNames={{
+                          input: "text-white",
+                          inputWrapper:
+                            "bg-zinc-800 border-zinc-700",
+                          label: "text-zinc-400",
+                        }}
+                      />
+
+                      <Input
+                        label="Sonarr API Key"
+                        type="password"
+                        value={w.sonarr_api_key}
+                        onChange={(e) =>
+                          update({
+                            sonarr_api_key: e.target.value,
+                          })
+                        }
+                        classNames={{
+                          input: "text-white",
+                          inputWrapper:
+                            "bg-zinc-800 border-zinc-700",
+                          label: "text-zinc-400",
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-zinc-900 rounded-lg p-4 border border-zinc-800">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-white text-sm font-medium">
+                        TMDB
+                      </p>
+                      <p className="text-zinc-500 text-xs mt-1">
+                        Primary lifecycle source. Uses the global TMDB API key
+                        below, or TMDB_TOKEN from the container environment.
+                      </p>
+                    </div>
+
+                    <Switch
+                      isSelected={w.tmdb_enabled}
+                      onValueChange={(v) =>
+                        update({ tmdb_enabled: v })
+                      }
+                      color="secondary"
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-zinc-900 rounded-lg p-4 border border-zinc-800">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-white text-sm font-medium">
+                        TVmaze
+                      </p>
+                      <p className="text-zinc-500 text-xs mt-1">
+                        Credential-free fallback provider.
+                      </p>
+                    </div>
+
+                    <Switch
+                      isSelected={w.tvmaze_enabled}
+                      onValueChange={(v) =>
+                        update({ tvmaze_enabled: v })
+                      }
+                      color="secondary"
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-zinc-950/60 rounded-lg p-3 border border-zinc-800 text-xs text-zinc-500 space-y-1">
+                  <p>
+                    Lifecycle:{" "}
+                    <span className="text-zinc-300">
+                      TMDB → Sonarr → TVmaze
+                    </span>
+                  </p>
+                  <p>
+                    Next episode:{" "}
+                    <span className="text-zinc-300">
+                      Sonarr → TMDB → TVmaze
+                    </span>
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* TMDB */}
             <div className="bg-zinc-900 rounded-lg p-4 border border-zinc-800 space-y-3">
@@ -970,10 +1121,12 @@ export default function SetupPage() {
                   TMDB API Key
                 </p>
                 <p className="text-zinc-500 text-xs mb-2">
-                  Optional. Used for poster images on the Next Airing page.
+                  Used by the TMDB metadata provider and by the web UI for
+                  artwork. Sonarr can still provide TV metadata when this is
+                  blank.
                 </p>
                 <Input
-                  placeholder="Optional — leave blank to skip poster images"
+                  placeholder="TMDB v3 API key"
                   value={w.tmdb_api_key}
                   onChange={(e) =>
                     update({ tmdb_api_key: e.target.value })
@@ -993,8 +1146,9 @@ export default function SetupPage() {
                   Trakt is not required
                 </p>
                 <p className="text-zinc-400 text-xs mt-1">
-                  None of the selected features require Trakt. Anime Episode
-                  Type will run locally from Plex + AnimeFillerList.
+                  None of the selected features require Trakt. TV Status and
+                  Next Airing use local metadata providers, and Anime Episode
+                  Type uses Plex + AnimeFillerList.
                 </p>
               </div>
             ) : (
@@ -1008,9 +1162,6 @@ export default function SetupPage() {
                     {[
                       w.auto_schedule_enabled
                         ? "Automatic Active/Future Schedule"
-                        : null,
-                      w.tv_status_tracker.enabled
-                        ? "TV/Anime Status Tracker"
                         : null,
                       w.legacy_episode_publishing
                         ? "Legacy Episode-List Publishing"
@@ -1240,7 +1391,7 @@ export default function SetupPage() {
                   Default Trakt personal-list privacy
                 </p>
                 <p className="text-xs text-zinc-500 mb-3">
-                  Applies to the Next Airing list and/or legacy episode lists.
+                  Applies to legacy Trakt episode lists.
                 </p>
 
                 <div className="flex gap-3">
@@ -1294,9 +1445,63 @@ export default function SetupPage() {
               <ReviewRow label="Anime Episode Type" value={w.anime_episode_type.enabled ? "Enabled — local Plex + AFL" : "Disabled"} />
               <ReviewRow label="Automatic active/future schedule" value={w.auto_schedule_enabled ? "Enabled — Trakt metadata" : "Disabled"} />
               <ReviewRow label="Legacy Trakt episode publishing" value={w.legacy_episode_publishing ? "Enabled" : "Disabled"} />
-              <ReviewRow label="TV Status Tracker" value={w.tv_status_tracker.enabled ? "Enabled" : "Disabled"} />
+              <ReviewRow
+                label="TV Status Tracker"
+                value={
+                  w.tv_status_tracker.enabled
+                    ? "Enabled — local metadata providers"
+                    : "Disabled"
+                }
+              />
+              {w.tv_status_tracker.enabled && (
+                <>
+                  <ReviewRow
+                    label="Sonarr provider"
+                    value={
+                      w.sonarr_enabled
+                        ? w.sonarr_url && w.sonarr_api_key
+                          ? "Enabled — configured"
+                          : "Enabled — credentials incomplete"
+                        : "Disabled"
+                    }
+                    warn={
+                      w.sonarr_enabled &&
+                      (!w.sonarr_url || !w.sonarr_api_key)
+                    }
+                  />
+                  <ReviewRow
+                    label="TMDB provider"
+                    value={
+                      w.tmdb_enabled
+                        ? w.tmdb_api_key
+                          ? "Enabled — API key configured"
+                          : "Enabled — API key not set"
+                        : "Disabled"
+                    }
+                    warn={
+                      w.tmdb_enabled &&
+                      !w.tmdb_api_key
+                    }
+                  />
+                  <ReviewRow
+                    label="TVmaze provider"
+                    value={
+                      w.tvmaze_enabled
+                        ? "Enabled"
+                        : "Disabled"
+                    }
+                  />
+                </>
+              )}
               <ReviewRow label="Size Overlay" value={w.size_overlay.enabled ? "Enabled" : "Disabled"} />
-              <ReviewRow label="TMDB API key" value={w.tmdb_api_key ? "Set" : "Not set (posters disabled)"} />
+              <ReviewRow
+                label="TMDB API key"
+                value={
+                  w.tmdb_api_key
+                    ? "Set"
+                    : "Not set"
+                }
+              />
               <ReviewRow
                 label="Trakt"
                 value={traktRequired ? "Required by selected features" : "Not required"}
@@ -1353,7 +1558,7 @@ export default function SetupPage() {
 
   const stepTitles = [
     "Basic Settings", "Plex", "Libraries", "Services",
-    "Kometa", "APIs & Trakt", "Notifications", "Review",
+    "Kometa", "Metadata & APIs", "Notifications", "Review",
   ];
 
   return (
