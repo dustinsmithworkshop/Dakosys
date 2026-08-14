@@ -216,23 +216,12 @@ def _get_local_trakt_summary(config: Optional[dict]) -> dict:
     config = config or {}
 
     scheduler_cfg = config.get("scheduler", {}) or {}
-    services_cfg = config.get("services", {}) or {}
     trakt_cfg = config.get("trakt", {}) or {}
 
     auto_schedule = bool(
         (
             scheduler_cfg.get(
                 "auto_schedule",
-                {},
-            )
-            or {}
-        ).get("enabled", False)
-    )
-
-    tv_status_tracker = bool(
-        (
-            services_cfg.get(
-                "tv_status_tracker",
                 {},
             )
             or {}
@@ -251,7 +240,6 @@ def _get_local_trakt_summary(config: Optional[dict]) -> dict:
 
     required = bool(
         auto_schedule
-        or tv_status_tracker
         or legacy_episode_publishing
     )
 
@@ -268,7 +256,6 @@ def _get_local_trakt_summary(config: Optional[dict]) -> dict:
         "configured": configured,
         "features": {
             "auto_schedule": auto_schedule,
-            "tv_status_tracker": tv_status_tracker,
             "legacy_episode_publishing":
                 legacy_episode_publishing,
         },
@@ -2025,7 +2012,6 @@ def get_trakt_overview():
             "required": False,
             "requirements": {
                 "auto_schedule": False,
-                "tv_status_tracker": False,
                 "legacy_episode_publishing": False,
             },
             "legacy_episode_publishing": False,
@@ -2039,28 +2025,10 @@ def get_trakt_overview():
         "scheduler",
         {},
     ) or {}
-    services_cfg = config.get(
-        "services",
-        {},
-    ) or {}
-
     auto_schedule = bool(
         (
             scheduler_cfg.get(
                 "auto_schedule",
-                {},
-            )
-            or {}
-        ).get(
-            "enabled",
-            False,
-        )
-    )
-
-    tv_status_tracker = bool(
-        (
-            services_cfg.get(
-                "tv_status_tracker",
                 {},
             )
             or {}
@@ -2085,7 +2053,6 @@ def get_trakt_overview():
 
     required = bool(
         auto_schedule
-        or tv_status_tracker
         or legacy_episode_publishing
     )
 
@@ -2110,7 +2077,6 @@ def get_trakt_overview():
         "required": required,
         "requirements": {
             "auto_schedule": auto_schedule,
-            "tv_status_tracker": tv_status_tracker,
             "legacy_episode_publishing":
                 legacy_episode_publishing,
         },
@@ -2178,7 +2144,7 @@ def get_trakt_overview():
                 return result
 
         usage = _ta.get_trakt_list_usage(
-            tracked_list_name="Next Airing",
+            tracked_list_name=None,
         )
 
         if usage is None:

@@ -24,7 +24,6 @@ export interface StatusResponse {
     configured: boolean;
     features: {
       auto_schedule: boolean;
-      tv_status_tracker: boolean;
       legacy_episode_publishing: boolean;
     };
   };
@@ -238,7 +237,6 @@ export interface TraktOverviewResponse {
   required: boolean;
   requirements: {
     auto_schedule: boolean;
-    tv_status_tracker: boolean;
     legacy_episode_publishing: boolean;
   };
   legacy_episode_publishing: boolean;
@@ -255,14 +253,6 @@ export interface TraktOverviewResponse {
     };
     items_per_list: {
       maximum: number | null;
-    };
-    tracked_list: {
-      name: string;
-      exists: boolean;
-      id: number | null;
-      slug: string | null;
-      current_items: number | null;
-      remaining_item_slots: number | null;
     };
   } | null;
   error: string | null;

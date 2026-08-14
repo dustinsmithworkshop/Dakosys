@@ -365,7 +365,7 @@ export default function TraktPage() {
           </h1>
           <p className="text-zinc-400 mt-1">
             Authentication, live account
-            capabilities, and Next Airing usage
+            capabilities, and optional Trakt features
           </p>
         </div>
 
@@ -536,9 +536,11 @@ export default function TraktPage() {
                 Trakt-backed Features
               </h2>
               <p className="text-xs text-zinc-500 mt-1 mb-3">
-                Anime Episode Type itself is local
-                Plex + AnimeFillerList processing and
-                does not appear here.
+                Automatic scheduling and legacy
+                episode-list publishing are the only
+                Trakt-backed features. TV/Anime Status
+                Tracker, Next Airing, and Anime Episode
+                Type run without Trakt.
               </p>
 
               <div className="divide-y divide-zinc-800">
@@ -549,15 +551,6 @@ export default function TraktPage() {
                       .auto_schedule ?? false
                   }
                   detail="Uses Trakt show metadata only; does not publish episode-type lists."
-                />
-
-                <RequirementRow
-                  label="TV/Anime Status Tracker"
-                  enabled={
-                    overview?.requirements
-                      .tv_status_tracker ?? false
-                  }
-                  detail="Uses Trakt metadata and maintains the single Next Airing personal list."
                 />
 
                 <RequirementRow
@@ -640,72 +633,6 @@ export default function TraktPage() {
                 <p className="text-sm text-zinc-500">
                   Live capability data is not
                   available.
-                </p>
-              )}
-            </CardBody>
-          </Card>
-
-          {/* Next Airing */}
-          <Card className="bg-zinc-900 border border-zinc-800">
-            <CardBody className="p-6 space-y-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold text-white">
-                    Next Airing
-                  </h2>
-                  <p className="text-xs text-zinc-500 mt-1">
-                    The one personal list maintained
-                    by TV/Anime Status Tracker.
-                  </p>
-                </div>
-
-                {usage && (
-                  <Chip
-                    size="sm"
-                    variant="flat"
-                    color={
-                      usage.tracked_list.exists
-                        ? "success"
-                        : "default"
-                    }
-                  >
-                    {usage.tracked_list.exists
-                      ? "List exists"
-                      : "List not created"}
-                  </Chip>
-                )}
-              </div>
-
-              {usage ? (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <ValueCard
-                    label="Current items"
-                    value={formatNumber(
-                      usage.tracked_list
-                        .current_items,
-                    )}
-                  />
-
-                  <ValueCard
-                    label="Maximum items"
-                    value={formatNumber(
-                      usage.items_per_list
-                        .maximum,
-                    )}
-                  />
-
-                  <ValueCard
-                    label="Remaining slots"
-                    value={formatNumber(
-                      usage.tracked_list
-                        .remaining_item_slots,
-                    )}
-                  />
-                </div>
-              ) : (
-                <p className="text-sm text-zinc-500">
-                  Next Airing usage will appear after
-                  Trakt is configured and authorized.
                 </p>
               )}
             </CardBody>

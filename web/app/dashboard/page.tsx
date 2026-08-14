@@ -39,9 +39,6 @@ function TraktDependencyCard({
     trakt.features.auto_schedule
       ? "Automatic Schedule"
       : null,
-    trakt.features.tv_status_tracker
-      ? "TV Status"
-      : null,
     trakt.features.legacy_episode_publishing
       ? "Legacy Publishing"
       : null,

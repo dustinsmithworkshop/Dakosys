@@ -701,6 +701,26 @@ def get_trakt_list_usage(
             0,
         )
 
+    usage = {
+        "username": capabilities.get("username"),
+        "vip": capabilities.get("vip"),
+        "vip_ep": capabilities.get("vip_ep"),
+        "limits_known": capabilities.get(
+            "limits_known"
+        ),
+        "lists": {
+            "current": current_lists,
+            "maximum": max_lists,
+            "remaining": remaining_lists,
+        },
+        "items_per_list": {
+            "maximum": max_items_per_list,
+        },
+    }
+
+    if tracked_list_name is None:
+        return usage
+
     expected_slug = (
         str(tracked_list_name)
         .strip()
@@ -782,21 +802,9 @@ def get_trakt_list_usage(
                 0,
             )
 
-    return {
-        "username": capabilities.get("username"),
-        "vip": capabilities.get("vip"),
-        "vip_ep": capabilities.get("vip_ep"),
-        "limits_known": capabilities.get("limits_known"),
-        "lists": {
-            "current": current_lists,
-            "maximum": max_lists,
-            "remaining": remaining_lists,
-        },
-        "items_per_list": {
-            "maximum": max_items_per_list,
-        },
-        "tracked_list": tracked,
-    }
+    usage["tracked_list"] = tracked
+
+    return usage
 
 
 def assess_trakt_list_creation(
