@@ -307,6 +307,101 @@ class TVMetadataResolverTests(
             result.warnings,
         )
 
+    def test_uncorroborated_ended_provider_next_is_rejected(
+        self,
+    ):
+        sonarr = StubProvider(
+            "sonarr",
+            lifecycle=ShowLifecycle.ENDED,
+        )
+
+        tmdb = StubProvider(
+            "tmdb",
+            lifecycle=ShowLifecycle.ENDED,
+            next_episode=episode(
+                "tmdb"
+            ),
+        )
+
+        tvmaze = StubProvider(
+            "tvmaze",
+            lifecycle=ShowLifecycle.ENDED,
+        )
+
+        result = TVMetadataResolver(
+            [
+                sonarr,
+                tmdb,
+                tvmaze,
+            ]
+        ).resolve(
+            identity()
+        )
+
+        self.assertEqual(
+            result.lifecycle,
+            ShowLifecycle.ENDED,
+        )
+
+        self.assertIsNone(
+            result.next_episode
+        )
+
+        self.assertIn(
+            "resolver:"
+            "rejected_unconfirmed_ended_next:"
+            "tmdb",
+            result.warnings,
+        )
+
+    def test_corroborated_ended_provider_next_is_kept(
+        self,
+    ):
+        sonarr = StubProvider(
+            "sonarr",
+            lifecycle=ShowLifecycle.ENDED,
+        )
+
+        tmdb = StubProvider(
+            "tmdb",
+            lifecycle=ShowLifecycle.ENDED,
+            next_episode=episode(
+                "tmdb"
+            ),
+        )
+
+        tvmaze = StubProvider(
+            "tvmaze",
+            lifecycle=ShowLifecycle.ENDED,
+            next_episode=episode(
+                "tvmaze"
+            ),
+        )
+
+        result = TVMetadataResolver(
+            [
+                sonarr,
+                tmdb,
+                tvmaze,
+            ]
+        ).resolve(
+            identity()
+        )
+
+        self.assertIsNotNone(
+            result.next_episode
+        )
+
+        self.assertEqual(
+            result.next_episode.source,
+            "tmdb",
+        )
+
+        self.assertIn(
+            "resolver:ended_with_next_episode",
+            result.warnings,
+        )
+
     def test_provider_called_at_most_once(
         self,
     ):

@@ -132,6 +132,56 @@ class TVMetadataResolver:
             )
             break
 
+        def episode_date(
+            episode,
+        ):
+            if episode.air_date is not None:
+                return episode.air_date
+
+            if episode.air_datetime is not None:
+                return episode.air_datetime.date()
+
+            return None
+
+        def next_episode_is_corroborated(
+            provider_name,
+            candidate,
+        ):
+            candidate_date = episode_date(
+                candidate
+            )
+
+            if candidate_date is None:
+                return False
+
+            for other_name in (
+                self.next_episode_order
+            ):
+                if other_name == provider_name:
+                    continue
+
+                other = get_result(
+                    other_name
+                )
+
+                if (
+                    other is None
+                    or not other.matched
+                    or other.next_episode
+                    is None
+                ):
+                    continue
+
+                if (
+                    episode_date(
+                        other.next_episode
+                    )
+                    == candidate_date
+                ):
+                    return True
+
+            return False
+
         next_episode = None
 
         for provider_name in (
@@ -149,9 +199,30 @@ class TVMetadataResolver:
             ):
                 continue
 
-            next_episode = (
-                result.next_episode
+            candidate = result.next_episode
+
+            requires_corroboration = (
+                lifecycle
+                is ShowLifecycle.ENDED
+                and result.lifecycle
+                is ShowLifecycle.ENDED
             )
+
+            if (
+                requires_corroboration
+                and not next_episode_is_corroborated(
+                    provider_name,
+                    candidate,
+                )
+            ):
+                warnings.append(
+                    "resolver:"
+                    "rejected_unconfirmed_ended_next:"
+                    f"{result.source}"
+                )
+                continue
+
+            next_episode = candidate
             break
 
         if (
