@@ -226,6 +226,11 @@ export default function SetupPage() {
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [discordTesting, setDiscordTesting] = useState(false);
+  const [discordTestResult, setDiscordTestResult] = useState<{
+    success: boolean;
+    message: string;
+  } | null>(null);
 
   const [traktDeviceInfo, setTraktDeviceInfo] = useState<{
     device_code: string; user_code: string; verification_url: string; interval: number; expires_in: number;
@@ -372,6 +377,29 @@ export default function SetupPage() {
       }, res.expires_in * 1000);
     } catch (e: unknown) {
       setTraktError(e instanceof Error ? e.message : "Failed to get device code");
+    }
+  };
+
+  const testDiscordWebhook = async () => {
+    setDiscordTesting(true);
+    setDiscordTestResult(null);
+
+    try {
+      const result = await api.testDiscordWebhook(
+        w.discord_webhook.trim(),
+      );
+
+      setDiscordTestResult(result);
+    } catch (e: unknown) {
+      setDiscordTestResult({
+        success: false,
+        message:
+          e instanceof Error
+            ? e.message
+            : "Discord notification test failed",
+      });
+    } finally {
+      setDiscordTesting(false);
     }
   };
 
@@ -1358,30 +1386,70 @@ export default function SetupPage() {
 
                 <Switch
                   isSelected={w.notif_enabled}
-                  onValueChange={(v) =>
-                    update({ notif_enabled: v })
-                  }
+                  onValueChange={(v) => {
+                    update({ notif_enabled: v });
+
+                    if (!v) {
+                      setDiscordTestResult(null);
+                    }
+                  }}
                   color="secondary"
                 />
               </div>
 
               {w.notif_enabled && (
-                <Input
-                  label="Discord webhook URL"
-                  value={w.discord_webhook}
-                  onChange={(e) =>
-                    update({
-                      discord_webhook: e.target.value,
-                    })
-                  }
-                  placeholder="https://discord.com/api/webhooks/..."
-                  classNames={{
-                    input: "text-white",
-                    inputWrapper:
-                      "bg-zinc-800 border-zinc-700",
-                    label: "text-zinc-400",
-                  }}
-                />
+                <div className="space-y-3">
+                  <Input
+                    label="Discord webhook URL"
+                    value={w.discord_webhook}
+                    onChange={(e) => {
+                      update({
+                        discord_webhook: e.target.value,
+                      });
+                      setDiscordTestResult(null);
+                    }}
+                    placeholder="https://discord.com/api/webhooks/..."
+                    classNames={{
+                      input: "text-white",
+                      inputWrapper:
+                        "bg-zinc-800 border-zinc-700",
+                      label: "text-zinc-400",
+                    }}
+                  />
+
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <Button
+                      size="sm"
+                      variant="bordered"
+                      isLoading={discordTesting}
+                      isDisabled={
+                        !w.discord_webhook.trim()
+                        || discordTesting
+                      }
+                      onPress={testDiscordWebhook}
+                      className="border-zinc-700 text-zinc-300"
+                    >
+                      Test Connection
+                    </Button>
+
+                    {discordTestResult && (
+                      <p
+                        className={`text-xs ${
+                          discordTestResult.success
+                            ? "text-green-400"
+                            : "text-red-400"
+                        }`}
+                      >
+                        {discordTestResult.message}
+                      </p>
+                    )}
+                  </div>
+
+                  <p className="text-zinc-600 text-xs">
+                    Sends a one-time test message using this webhook.
+                    The webhook is not saved until you finish setup.
+                  </p>
+                </div>
               )}
             </div>
 

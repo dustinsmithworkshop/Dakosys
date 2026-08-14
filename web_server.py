@@ -1629,6 +1629,43 @@ def get_plex_libraries_for_setup(payload: PlexConnectionPayload):
         return {"libraries": [], "error": str(e)}
 
 
+class DiscordWebhookTestPayload(BaseModel):
+    webhook_url: str
+
+
+@app.post("/api/setup/notifications/discord/test")
+def test_discord_webhook_for_setup(
+    payload: DiscordWebhookTestPayload,
+):
+    """
+    Test an unsaved Discord webhook during setup.
+
+    The webhook is used only for this request and is never persisted.
+    """
+    webhook_url = str(payload.webhook_url or "").strip()
+
+    try:
+        from notifications import send_discord_test_notification
+
+        success, error = send_discord_test_notification(
+            webhook_url,
+        )
+
+        return {
+            "success": success,
+            "message": (
+                "Test notification sent successfully"
+                if success
+                else error or "Discord notification test failed"
+            ),
+        }
+    except Exception:
+        return {
+            "success": False,
+            "message": "Discord notification test failed",
+        }
+
+
 class SetupPayload(BaseModel):
     timezone: str
     date_format: str  # "DD/MM" or "MM/DD"

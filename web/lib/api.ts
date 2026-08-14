@@ -193,6 +193,16 @@ export const api = {
       body: JSON.stringify({ device_code: deviceCode, client_id: clientId, client_secret: clientSecret }),
     }),
 
+  testDiscordWebhook: (webhookUrl: string) =>
+    apiFetch<{ success: boolean; message: string }>(
+      "/api/setup/notifications/discord/test",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ webhook_url: webhookUrl }),
+      },
+    ),
+
   runSetup: (payload: object) =>
     apiFetch<SetupResponse>("/api/setup", {
       method: "POST",

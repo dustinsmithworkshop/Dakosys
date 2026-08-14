@@ -9,6 +9,7 @@ import requests
 import json
 import logging
 from datetime import datetime
+from urllib.parse import urlparse
 
 logging.basicConfig(
     level=logging.INFO,
@@ -19,6 +20,92 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("notifications")
+
+
+def _validate_discord_webhook_url(webhook_url):
+    """Validate a Discord webhook URL before making an outbound request."""
+    webhook_url = str(webhook_url or "").strip()
+
+    if not webhook_url:
+        return False, "Discord webhook URL is required"
+
+    try:
+        parsed = urlparse(webhook_url)
+        host = (parsed.hostname or "").lower()
+        port = parsed.port
+    except (TypeError, ValueError):
+        return False, "Enter a valid HTTPS Discord webhook URL"
+
+    allowed_host = (
+        host == "discord.com"
+        or host.endswith(".discord.com")
+        or host == "discordapp.com"
+        or host.endswith(".discordapp.com")
+    )
+
+    if (
+        parsed.scheme != "https"
+        or not allowed_host
+        or parsed.username
+        or parsed.password
+        or port is not None
+        or not parsed.path.startswith("/api/webhooks/")
+    ):
+        return False, "Enter a valid HTTPS Discord webhook URL"
+
+    return True, None
+
+
+def post_discord_webhook(webhook_url, payload, timeout=10):
+    """Post a Discord webhook payload without exposing the webhook in logs."""
+    valid, error = _validate_discord_webhook_url(webhook_url)
+
+    if not valid:
+        return False, error
+
+    try:
+        response = requests.post(
+            webhook_url,
+            json=payload,
+            timeout=timeout,
+        )
+    except requests.RequestException as exc:
+        logger.error(
+            "Discord webhook request failed: %s",
+            exc.__class__.__name__,
+        )
+        return False, "Unable to connect to Discord"
+
+    if response.status_code not in (200, 204):
+        logger.error(
+            "Discord webhook returned HTTP %s",
+            response.status_code,
+        )
+        return False, f"Discord returned HTTP {response.status_code}"
+
+    return True, None
+
+
+def send_discord_test_notification(webhook_url):
+    """Send a one-time setup test without saving the webhook to config."""
+    payload = {
+        "username": "DAKOSYS Monitor",
+        "embeds": [
+            {
+                "title": "DAKOSYS Notification Test",
+                "description": (
+                    "Your Discord webhook is configured correctly."
+                ),
+                "color": 5763719,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        ],
+    }
+
+    return post_discord_webhook(
+        webhook_url,
+        payload,
+    )
 
 def load_config():
     """Load configuration from YAML file."""
@@ -136,7 +223,11 @@ def send_discord_notification(title, message, failed_episodes=None, details=None
             if embed_fields:
                 current_embed["fields"] = embed_fields
 
-        if current_embed['fields']:
+        if len(all_embeds) < 10 and (
+            current_embed.get("title")
+            or current_embed.get("description")
+            or current_embed.get("fields")
+        ):
             all_embeds.append(current_embed)
 
         if not all_embeds:
@@ -158,14 +249,16 @@ def send_discord_notification(title, message, failed_episodes=None, details=None
                 "embeds": chunk
             }
 
-            response = requests.post(
+            success, error = post_discord_webhook(
                 webhook_url,
-                data=json.dumps(payload),
-                headers={"Content-Type": "application/json"}
+                payload,
             )
 
-            if response.status_code not in [200, 204]:
-                logger.error(f"Failed to send Discord notification chunk: {response.status_code} {response.text}")
+            if not success:
+                logger.error(
+                    "Failed to send Discord notification chunk: %s",
+                    error,
+                )
                 return False
         
         return True
