@@ -65,7 +65,7 @@ class TVStatusTracker:
 
         self.timezone = config['timezone']
 
-        self.trakt_config = config['trakt']
+        self.trakt_config = config.get('trakt', {})
 
         self.tv_status_config = config['services']['tv_status_tracker']
         self.colors = self.tv_status_config.get('colors', {})
