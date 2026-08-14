@@ -19,6 +19,10 @@ from plexapi.server import PlexServer
 from rich.console import Console
 
 from tv_metadata import build_show_identity
+from tv_metadata.next_airing import (
+    build_next_airing_entry,
+    write_next_airing_files,
+)
 from tv_metadata.presentation import present_show_status
 from tv_metadata.providers import (
     SonarrProvider,
@@ -1051,12 +1055,10 @@ collections:
             logging.error(f"Collections directory does not exist: {self.collections_dir}")
             return False
 
-        access_token = self.get_trakt_token()
-        if not access_token:
-            console.print("[red]Failed to get Trakt token[/red]")
+        if self.metadata_resolver is None:
+            console.print("[red]TV metadata resolver is not configured.[/red]")
+            logging.error("TV metadata resolver is not configured.")
             return False
-
-        headers = self.get_trakt_headers(access_token)
 
         changes = {
             'AIRING': [],
@@ -1086,16 +1088,44 @@ collections:
 
         total_shows_processed = 0
 
-        for library_name in self.libraries:
+        for library_name in dict.fromkeys(self.libraries):
             try:
                 plex = PlexServer(self.plex_url, self.plex_token)
                 library = plex.library.section(library_name)
                 yaml_data = {'overlays': {}}
+                next_airing_entries = []
 
                 for show in library.all():
                     total_shows_processed += 1
                     logging.debug(f"Processing {show.title}...")
-                    show_info = self.process_show(show, headers)
+                    status = self.resolve_show_status(
+                        show,
+                        library_name,
+                    )
+                    show_info = self.present_resolved_status(
+                        status
+                    )
+
+                    identity = build_show_identity(
+                        show,
+                        library_name,
+                        library_roles=(
+                            self._library_roles_for(
+                                library_name
+                            )
+                        ),
+                    )
+                    next_airing_entry = (
+                        build_next_airing_entry(
+                            identity,
+                            status,
+                        )
+                    )
+
+                    if next_airing_entry is not None:
+                        next_airing_entries.append(
+                            next_airing_entry
+                        )
 
                     if show_info:
                         text_parts = show_info['text_content'].split()
@@ -1262,21 +1292,35 @@ collections:
                 logging.info(f'YAML file created for {library_name}: {yaml_file_path}')
                 console.print(f"[green]YAML file created: {yaml_file_path}[/green]")
 
+                collection_path, text_path = (
+                    write_next_airing_files(
+                        self.collections_dir,
+                        library_name,
+                        next_airing_entries,
+                        self.timezone,
+                        # Dakosys writes through the mounted
+                        # /kometa/collections path, while Kometa
+                        # references the same directory from its
+                        # config root.
+                        kometa_collection_dir=(
+                            'config/collections'
+                        ),
+                    )
+                )
+                logging.info(
+                    "Next Airing files created for %s: %s, %s",
+                    library_name,
+                    collection_path,
+                    text_path,
+                )
+                console.print(
+                    f"[green]Next Airing files created: "
+                    f"{collection_path}, {text_path}[/green]"
+                )
+
             except Exception as e:
                 logging.error(f"Error processing library {library_name}: {str(e)}")
                 console.print(f"[red]Error processing library {library_name}: {str(e)}[/red]")
-
-        self.create_yaml_collections()
-
-        list_name = "Next Airing"
-        list_slug = self.get_or_create_trakt_list(list_name, headers)
-
-        if list_slug and self.airing_shows:
-            sorted_airing_shows = self.sort_airing_shows_by_date()
-            self.update_trakt_list(list_slug, sorted_airing_shows, headers)
-            console.print(f"[green]Updated '{list_name}' Trakt list with {len(sorted_airing_shows)} airing shows[/green]")
-        elif not self.airing_shows:
-            console.print("[yellow]No airing shows found to add to Trakt list[/yellow]")
 
         try:
             with open(status_cache_file, 'w') as f:

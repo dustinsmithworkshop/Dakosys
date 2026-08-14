@@ -99,3 +99,17 @@ class ShowStatus:
     warnings: tuple[str, ...] = field(
         default_factory=tuple
     )
+
+
+@dataclass(frozen=True)
+class NextAiringEntry:
+    """One Plex show with a provider-derived upcoming episode."""
+
+    title: str
+    year: int | None
+    library: str
+    plex_rating_key: str
+    next_episode: NextEpisode
+    tmdb_id: int | None = None
+    tvdb_id: int | None = None
+    imdb_id: str | None = None

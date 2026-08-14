@@ -4,6 +4,7 @@ from .identity import build_show_identity
 
 from .models import (
     EpisodeState,
+    NextAiringEntry,
     NextEpisode,
     ProviderResult,
     ShowIdentity,
@@ -14,6 +15,7 @@ from .models import (
 __all__ = [
     "build_show_identity",
     "EpisodeState",
+    "NextAiringEntry",
     "NextEpisode",
     "ProviderResult",
     "ShowIdentity",

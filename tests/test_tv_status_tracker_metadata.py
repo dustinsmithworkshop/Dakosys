@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
 from datetime import date
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from tv_metadata import (
     EpisodeState,
@@ -299,6 +301,99 @@ class TrackerMetadataTests(
         self.assertIsNone(
             resolver
         )
+
+    def test_run_uses_resolver_and_local_next_airing_files(
+        self,
+    ):
+        resolved_status = ShowStatus(
+            lifecycle=ShowLifecycle.RETURNING,
+            lifecycle_source="sonarr",
+            next_episode=NextEpisode(
+                source="tmdb",
+                season=2,
+                episode=1,
+                air_date=date(2026, 9, 27),
+                state=EpisodeState.SEASON_PREMIERE,
+            ),
+        )
+        resolver = CapturingResolver(
+            resolved_status
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tracker = make_tracker(resolver)
+            tracker.data_dir = str(root / "data")
+            tracker.yaml_output_dir = str(root / "overlays")
+            tracker.collections_dir = str(root / "collections")
+            tracker.libraries = ["TV"]
+            tracker.plex_url = "http://plex.example"
+            tracker.plex_token = "plex-token"
+            tracker.yaml_file_template = "overlay_tv_status_{library}.yml"
+            tracker.overlay_config = {}
+            tracker.overlay_style = "background_color"
+            tracker.apply_gradient_background = False
+            tracker.gradient_image_path_yaml = "gradient.png"
+
+            Path(tracker.data_dir).mkdir()
+            Path(tracker.yaml_output_dir).mkdir()
+            Path(tracker.collections_dir).mkdir()
+
+            library = MagicMock()
+            library.all.return_value = [FakeShow()]
+            plex = MagicMock()
+            plex.library.section.return_value = library
+
+            tracker.get_trakt_token = MagicMock(
+                side_effect=AssertionError(
+                    "normal run must not request a Trakt token"
+                )
+            )
+            tracker.process_show = MagicMock(
+                side_effect=AssertionError(
+                    "normal run must not use legacy metadata"
+                )
+            )
+            tracker.get_or_create_trakt_list = MagicMock()
+            tracker.update_trakt_list = MagicMock()
+
+            with (
+                patch(
+                    "tv_status_tracker.PlexServer",
+                    return_value=plex,
+                ),
+                patch.dict(
+                    os.environ,
+                    {"QUIET_MODE": "true"},
+                ),
+            ):
+                result = tracker.run()
+
+            self.assertTrue(result)
+            tracker.get_trakt_token.assert_not_called()
+            tracker.process_show.assert_not_called()
+            tracker.get_or_create_trakt_list.assert_not_called()
+            tracker.update_trakt_list.assert_not_called()
+
+            text_path = (
+                root
+                / "collections"
+                / "tv-next-airing.txt"
+            )
+            collection_path = (
+                root
+                / "collections"
+                / "tv-next-airing.yml"
+            )
+
+            self.assertEqual(
+                text_path.read_text(encoding="utf-8"),
+                "tvdb:200  # 2026-09-27 | Example Show\n",
+            )
+            self.assertIn(
+                "text_file: config/collections/tv-next-airing.txt",
+                collection_path.read_text(encoding="utf-8"),
+            )
 
 
 if __name__ == "__main__":
