@@ -1,5 +1,7 @@
 """Normalized TV metadata models used by Dakosys providers."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import Enum
