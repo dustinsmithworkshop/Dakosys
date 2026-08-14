@@ -281,6 +281,244 @@ class TrackerMetadataTests(
             ],
         )
 
+    def test_factory_uses_yaml_provider_config(
+        self,
+    ):
+        tracker = object.__new__(
+            TVStatusTracker
+        )
+
+        tracker.config = {
+            "tmdb_api_key": (
+                "yaml-tmdb-key"
+            ),
+            "services": {
+                "tv_status_tracker": {
+                    "metadata": {
+                        "sonarr": {
+                            "url": (
+                                "http://yaml-sonarr"
+                            ),
+                            "api_key": (
+                                "yaml-sonarr-key"
+                            ),
+                        },
+                    },
+                },
+            },
+        }
+
+        tracker.tv_status_config = (
+            tracker.config[
+                "services"
+            ][
+                "tv_status_tracker"
+            ]
+        )
+
+        with patch.dict(
+            os.environ,
+            {},
+            clear=True,
+        ):
+            resolver = (
+                tracker
+                ._build_metadata_resolver()
+            )
+
+        self.assertIsNotNone(
+            resolver
+        )
+
+        self.assertEqual(
+            [
+                provider.name
+                for provider
+                in resolver.providers
+            ],
+            [
+                "sonarr",
+                "tmdb",
+                "tvmaze",
+            ],
+        )
+
+        sonarr = resolver.providers[0]
+        tmdb = resolver.providers[1]
+
+        self.assertEqual(
+            sonarr.base_url,
+            "http://yaml-sonarr",
+        )
+
+        self.assertEqual(
+            sonarr.api_key,
+            "yaml-sonarr-key",
+        )
+
+        self.assertEqual(
+            tmdb.api_key,
+            "yaml-tmdb-key",
+        )
+
+    def test_factory_environment_overrides_yaml_credentials(
+        self,
+    ):
+        tracker = object.__new__(
+            TVStatusTracker
+        )
+
+        tracker.config = {
+            "tmdb_api_key": (
+                "yaml-tmdb-key"
+            ),
+            "services": {
+                "tv_status_tracker": {
+                    "metadata": {
+                        "sonarr": {
+                            "url": (
+                                "http://yaml-sonarr"
+                            ),
+                            "api_key": (
+                                "yaml-sonarr-key"
+                            ),
+                        },
+                    },
+                },
+            },
+        }
+
+        tracker.tv_status_config = (
+            tracker.config[
+                "services"
+            ][
+                "tv_status_tracker"
+            ]
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "SONARR_URL": (
+                    "http://env-sonarr"
+                ),
+                "SONARR_API_KEY": (
+                    "env-sonarr-key"
+                ),
+                "TMDB_TOKEN": (
+                    "env-tmdb-token"
+                ),
+            },
+            clear=True,
+        ):
+            resolver = (
+                tracker
+                ._build_metadata_resolver()
+            )
+
+        self.assertIsNotNone(
+            resolver
+        )
+
+        sonarr = resolver.providers[0]
+        tmdb = resolver.providers[1]
+
+        self.assertEqual(
+            sonarr.base_url,
+            "http://env-sonarr",
+        )
+
+        self.assertEqual(
+            sonarr.api_key,
+            "env-sonarr-key",
+        )
+
+        self.assertIsNone(
+            tmdb.api_key
+        )
+
+        self.assertEqual(
+            tmdb.session.headers.get(
+                "Authorization"
+            ),
+            "Bearer env-tmdb-token",
+        )
+
+    def test_factory_honors_disabled_provider(
+        self,
+    ):
+        tracker = object.__new__(
+            TVStatusTracker
+        )
+
+        tracker.config = {
+            "tmdb_api_key": (
+                "yaml-tmdb-key"
+            ),
+            "services": {
+                "tv_status_tracker": {
+                    "metadata": {
+                        "sonarr": {
+                            "enabled": False,
+                            "url": (
+                                "http://yaml-sonarr"
+                            ),
+                            "api_key": (
+                                "yaml-sonarr-key"
+                            ),
+                        },
+                        "tmdb": {
+                            "enabled": True,
+                        },
+                        "tvmaze": {
+                            "enabled": True,
+                        },
+                    },
+                },
+            },
+        }
+
+        tracker.tv_status_config = (
+            tracker.config[
+                "services"
+            ][
+                "tv_status_tracker"
+            ]
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "SONARR_URL": (
+                    "http://env-sonarr"
+                ),
+                "SONARR_API_KEY": (
+                    "env-sonarr-key"
+                ),
+            },
+            clear=True,
+        ):
+            resolver = (
+                tracker
+                ._build_metadata_resolver()
+            )
+
+        self.assertIsNotNone(
+            resolver
+        )
+
+        self.assertEqual(
+            [
+                provider.name
+                for provider
+                in resolver.providers
+            ],
+            [
+                "tmdb",
+                "tvmaze",
+            ],
+        )
+
     def test_factory_stays_disabled_without_primary_provider(
         self,
     ):

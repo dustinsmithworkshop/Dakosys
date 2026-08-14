@@ -171,14 +171,29 @@ class TMDBProvider:
 
     def __init__(
         self,
-        access_token: str,
+        access_token: str | None = None,
         *,
+        api_key: str | None = None,
         base_url: str = TMDB_BASE_URL,
         session: requests.Session | None = None,
         timeout: float = 30.0,
     ) -> None:
+        if not access_token and not api_key:
+            raise ValueError(
+                "TMDB access token or API key is required"
+            )
+
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+
+        # Bearer authentication takes precedence when both are
+        # supplied. The existing Dakosys tmdb_api_key setting
+        # remains supported through the v3 api_key query parameter.
+        self.api_key = (
+            None
+            if access_token
+            else api_key
+        )
 
         self.session = (
             session
@@ -188,12 +203,14 @@ class TMDBProvider:
 
         self.session.headers.update(
             {
-                "Authorization": (
-                    f"Bearer {access_token}"
-                ),
                 "Accept": "application/json",
             }
         )
+
+        if access_token:
+            self.session.headers[
+                "Authorization"
+            ] = f"Bearer {access_token}"
 
     def _get(
         self,
@@ -201,9 +218,21 @@ class TMDBProvider:
         *,
         params: dict[str, Any] | None = None,
     ) -> requests.Response:
+        request_params = dict(
+            params or {}
+        )
+
+        if self.api_key:
+            request_params[
+                "api_key"
+            ] = self.api_key
+
         return self.session.get(
             f"{self.base_url}{path}",
-            params=params,
+            params=(
+                request_params
+                or None
+            ),
             timeout=self.timeout,
         )
 

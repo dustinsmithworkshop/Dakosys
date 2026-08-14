@@ -244,12 +244,12 @@ def setup_tv_status_tracker(config):
     """Setup for TV/Anime Status Tracker service."""
     console.print("\n[bold cyan]TV/Anime Status Tracker[/bold cyan]")
     console.print(
-        "[yellow]Creates Kometa status overlays and maintains the single "
-        "Next Airing Trakt personal list.[/yellow]"
+        "[yellow]Creates Kometa status overlays and local Next Airing "
+        "collections from Sonarr, TMDB, and TVmaze metadata.[/yellow]"
     )
     console.print(
-        "[yellow]It can work with both anime and regular TV shows and "
-        "requires Trakt.[/yellow]"
+        "[green]Trakt is not required for TV Status or Next Airing."
+        "[/green]"
     )
 
     enable_service = click.confirm("Enable TV/Anime Status Tracker service?",
@@ -286,19 +286,30 @@ def setup_tv_status_tracker(config):
 
     config['services']['tv_status_tracker']['enabled'] = enable_service
 
+    metadata_config = (
+        config['services']['tv_status_tracker']
+        .setdefault('metadata', {})
+    )
+
+    metadata_config.setdefault(
+        'sonarr',
+        {'enabled': True},
+    )
+    metadata_config.setdefault(
+        'tmdb',
+        {'enabled': True},
+    )
+    metadata_config.setdefault(
+        'tvmaze',
+        {'enabled': True},
+    )
+
     if not enable_service:
         console.print(
             "[yellow]Service disabled. "
             "No further configuration needed.[/yellow]"
         )
         return
-
-    # TV Status Tracker uses Trakt metadata and maintains the single
-    # Next Airing personal list.
-    ensure_trakt_configuration(
-        config,
-        require_list_settings=True,
-    )
 
     apply_gradient = click.confirm(
         "Apply gradient background for TV/Anime Status Tracker overlays?",
@@ -719,6 +730,17 @@ def run_setup():
             },
             'tv_status_tracker': {
                 'enabled': False,
+                'metadata': {
+                    'sonarr': {
+                        'enabled': True,
+                    },
+                    'tmdb': {
+                        'enabled': True,
+                    },
+                    'tvmaze': {
+                        'enabled': True,
+                    },
+                },
                 'colors': {
                     'AIRING': '#006580',
                     'ENDED': '#000000',
@@ -905,12 +927,12 @@ def run_setup():
 
     console.print("\n[bold cyan]TV/Anime Status Tracker[/bold cyan]")
     console.print(
-        "[yellow]Creates Kometa status overlays and maintains the single "
-        "Next Airing Trakt personal list.[/yellow]"
+        "[yellow]Creates Kometa status overlays and local Next Airing "
+        "collections from Sonarr, TMDB, and TVmaze metadata.[/yellow]"
     )
     console.print(
-        "[yellow]It can work with both anime and regular TV shows and "
-        "requires Trakt.[/yellow]"
+        "[green]Trakt is not required for TV Status or Next Airing."
+        "[/green]"
     )
     tv_status_service = click.confirm(
         "Enable TV/Anime Status Tracker service?",
@@ -1054,8 +1076,7 @@ def run_setup():
         # The user can manually edit config.yaml to change services.tv_status_tracker.overlay.font_name.
 
     trakt_required = (
-        tv_status_service
-        or auto_schedule_enabled
+        auto_schedule_enabled
         or legacy_episode_publishing
     )
 

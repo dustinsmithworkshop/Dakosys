@@ -56,6 +56,13 @@ def _expand_status(data: Dict[str, Any]) -> str:
 
 SECRETS_PATHS = [
     ["tmdb_api_key"],
+    [
+        "services",
+        "tv_status_tracker",
+        "metadata",
+        "sonarr",
+        "api_key",
+    ],
     ["plex", "token"],
     ["trakt", "client_id"],
     ["trakt", "client_secret"],
@@ -1527,14 +1534,12 @@ def run_setup_api(payload: SetupPayload):
             )
 
         trakt_required = (
-            tv_status_enabled
-            or auto_schedule_enabled
+            auto_schedule_enabled
             or legacy_episode_publishing
         )
 
         list_settings_required = (
-            tv_status_enabled
-            or legacy_episode_publishing
+            legacy_episode_publishing
         )
 
         trakt_cfg = payload.trakt or {}
@@ -1611,6 +1616,76 @@ def run_setup_api(payload: SetupPayload):
                 "tv_status_tracker": {
                     "enabled": bool(tst.get("enabled", False)),
                     "libraries": tst.get("libraries", []),
+                    "metadata": {
+                        "sonarr": {
+                            "enabled": bool(
+                                tst.get(
+                                    "metadata",
+                                    {},
+                                ).get(
+                                    "sonarr",
+                                    {},
+                                ).get(
+                                    "enabled",
+                                    True,
+                                )
+                            ),
+                            "url": str(
+                                tst.get(
+                                    "metadata",
+                                    {},
+                                ).get(
+                                    "sonarr",
+                                    {},
+                                ).get(
+                                    "url",
+                                    "",
+                                )
+                                or ""
+                            ).strip(),
+                            "api_key": str(
+                                tst.get(
+                                    "metadata",
+                                    {},
+                                ).get(
+                                    "sonarr",
+                                    {},
+                                ).get(
+                                    "api_key",
+                                    "",
+                                )
+                                or ""
+                            ).strip(),
+                        },
+                        "tmdb": {
+                            "enabled": bool(
+                                tst.get(
+                                    "metadata",
+                                    {},
+                                ).get(
+                                    "tmdb",
+                                    {},
+                                ).get(
+                                    "enabled",
+                                    True,
+                                )
+                            ),
+                        },
+                        "tvmaze": {
+                            "enabled": bool(
+                                tst.get(
+                                    "metadata",
+                                    {},
+                                ).get(
+                                    "tvmaze",
+                                    {},
+                                ).get(
+                                    "enabled",
+                                    True,
+                                )
+                            ),
+                        },
+                    },
                     "colors": {
                         "AIRING": "#006580", "ENDED": "#000000", "CANCELLED": "#FF0000",
                         "RETURNING": "#008000", "SEASON_FINALE": "#9932CC",

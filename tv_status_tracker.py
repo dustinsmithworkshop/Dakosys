@@ -136,64 +136,199 @@ class TVStatusTracker:
         self.yaml_file_template = "overlay_tv_status_{library}.yml"
 
     def _build_metadata_resolver(self):
-        """Build the provider resolver from currently available env vars.
+        """Build the TV metadata resolver from config and environment.
 
-        This is intentionally configuration-schema neutral for now.
-        Sonarr and TMDB are enabled only when their existing environment
-        variables are available. TVmaze is appended as the credential-free
-        fallback when at least one primary provider is configured.
+        Provider credentials prefer environment variables when present,
+        then fall back to the persistent Dakosys configuration.
+
+        Provider enable/disable settings remain authoritative even when
+        environment credentials are present.
         """
         providers = []
 
-        sonarr_url = os.environ.get(
-            "SONARR_URL"
-        )
-        sonarr_api_key = os.environ.get(
-            "SONARR_API_KEY"
+        config = (
+            getattr(
+                self,
+                "config",
+                {},
+            )
+            or {}
         )
 
-        if sonarr_url and sonarr_api_key:
-            providers.append(
-                SonarrProvider(
-                    sonarr_url,
-                    sonarr_api_key,
+        tv_status_config = getattr(
+            self,
+            "tv_status_config",
+            None,
+        )
+
+        if tv_status_config is None:
+            tv_status_config = (
+                config.get(
+                    "services",
+                    {},
+                ).get(
+                    "tv_status_tracker",
+                    {},
                 )
             )
-        elif sonarr_url or sonarr_api_key:
-            logging.warning(
-                "Sonarr TV metadata provider disabled: "
-                "both SONARR_URL and SONARR_API_KEY "
-                "are required."
-            )
 
-        tmdb_token = os.environ.get(
-            "TMDB_TOKEN"
+        metadata_config = (
+            tv_status_config.get(
+                "metadata",
+                {},
+            )
+            or {}
         )
 
-        if tmdb_token:
-            providers.append(
-                TMDBProvider(
-                    tmdb_token
+        sonarr_config = (
+            metadata_config.get(
+                "sonarr",
+                {},
+            )
+            or {}
+        )
+
+        tmdb_config = (
+            metadata_config.get(
+                "tmdb",
+                {},
+            )
+            or {}
+        )
+
+        tvmaze_config = (
+            metadata_config.get(
+                "tvmaze",
+                {},
+            )
+            or {}
+        )
+
+        def clean(value):
+            if value is None:
+                return None
+
+            value = str(value).strip()
+
+            return value or None
+
+        sonarr_enabled = bool(
+            sonarr_config.get(
+                "enabled",
+                True,
+            )
+        )
+
+        tmdb_enabled = bool(
+            tmdb_config.get(
+                "enabled",
+                True,
+            )
+        )
+
+        tvmaze_enabled = bool(
+            tvmaze_config.get(
+                "enabled",
+                True,
+            )
+        )
+
+        if sonarr_enabled:
+            sonarr_url = (
+                clean(
+                    os.environ.get(
+                        "SONARR_URL"
+                    )
+                )
+                or clean(
+                    sonarr_config.get(
+                        "url"
+                    )
                 )
             )
+
+            sonarr_api_key = (
+                clean(
+                    os.environ.get(
+                        "SONARR_API_KEY"
+                    )
+                )
+                or clean(
+                    sonarr_config.get(
+                        "api_key"
+                    )
+                )
+            )
+
+            if (
+                sonarr_url
+                and sonarr_api_key
+            ):
+                providers.append(
+                    SonarrProvider(
+                        sonarr_url,
+                        sonarr_api_key,
+                    )
+                )
+            elif (
+                sonarr_url
+                or sonarr_api_key
+            ):
+                logging.warning(
+                    "Sonarr TV metadata provider "
+                    "disabled: both URL and API key "
+                    "are required."
+                )
+
+        if tmdb_enabled:
+            tmdb_token = clean(
+                os.environ.get(
+                    "TMDB_TOKEN"
+                )
+            )
+
+            tmdb_api_key = clean(
+                config.get(
+                    "tmdb_api_key"
+                )
+            )
+
+            if tmdb_token:
+                providers.append(
+                    TMDBProvider(
+                        access_token=(
+                            tmdb_token
+                        )
+                    )
+                )
+            elif tmdb_api_key:
+                providers.append(
+                    TMDBProvider(
+                        api_key=(
+                            tmdb_api_key
+                        )
+                    )
+                )
 
         if not providers:
             logging.info(
-                "TV metadata resolver not auto-enabled: "
-                "no Sonarr or TMDB provider credentials "
-                "were found."
+                "TV metadata resolver not "
+                "auto-enabled: no Sonarr or TMDB "
+                "provider credentials were found."
             )
             return None
 
-        providers.append(
-            TVmazeProvider()
-        )
+        if tvmaze_enabled:
+            providers.append(
+                TVmazeProvider()
+            )
 
         logging.info(
             "TV metadata resolver providers: %s",
             " -> ".join(
                 provider.name
-                for provider in providers
+                for provider
+                in providers
             ),
         )
 

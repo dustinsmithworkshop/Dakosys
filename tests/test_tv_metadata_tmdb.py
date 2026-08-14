@@ -212,6 +212,61 @@ class TMDBProviderTests(
 
         return provider, session
 
+    def test_api_key_auth_uses_query_parameter(
+        self,
+    ) -> None:
+        session = FakeSession(
+            shows={
+                100: show_record()
+            }
+        )
+
+        provider = TMDBProvider(
+            api_key="test-api-key",
+            base_url=(
+                "https://tmdb.example/3"
+            ),
+            session=session,
+        )
+
+        result = provider.get_metadata(
+            identity()
+        )
+
+        self.assertTrue(
+            result.matched
+        )
+
+        self.assertNotIn(
+            "Authorization",
+            session.headers,
+        )
+
+        self.assertEqual(
+            session.headers.get("Accept"),
+            "application/json",
+        )
+
+        self.assertEqual(
+            session.calls[0][1],
+            {
+                "api_key": "test-api-key",
+            },
+        )
+
+    def test_authentication_is_required(
+        self,
+    ) -> None:
+        with self.assertRaises(
+            ValueError
+        ):
+            TMDBProvider(
+                base_url=(
+                    "https://tmdb.example/3"
+                ),
+                session=FakeSession(),
+            )
+
     def test_direct_tmdb_id_bypasses_find(
         self,
     ) -> None:

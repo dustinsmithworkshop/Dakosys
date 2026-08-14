@@ -3,7 +3,7 @@
 #
 # IMPORTANT:
 # - Replace all example values before use.
-# - Do not commit your real Plex token, Trakt credentials, or Discord webhook.
+# - Do not commit real Plex, Sonarr, TMDB, Trakt, or Discord credentials.
 # - Automatic anime scheduling generates config/scheduled-anime.yaml.
 #   A manually maintained anime schedule list is not used when
 #   scheduler.auto_schedule.enabled is true.
@@ -19,12 +19,17 @@ plex:
     tv:
       - TV
 
+# TMDB v3 API key.
+# Used by TV Status metadata and by the web UI for artwork.
+# TMDB_TOKEN may be supplied as an advanced environment-variable
+# bearer-token override.
+tmdb_api_key: REPLACE_WITH_TMDB_API_KEY
+
 trakt:
   # Trakt is NOT required for services.anime_episode_type.
   #
   # It IS required when using:
   # - scheduler.auto_schedule
-  # - services.tv_status_tracker
   # - optional legacy episode-list publishing
   username: REPLACE_WITH_TRAKT_USERNAME
   client_id: REPLACE_WITH_TRAKT_CLIENT_ID
@@ -50,10 +55,32 @@ services:
   anime_episode_type:
     enabled: true
 
-  # Uses Trakt metadata and maintains one personal "Next Airing" list.
+  # Resolves TV lifecycle and upcoming episodes locally.
+  #
+  # Lifecycle precedence:
+  #   TMDB -> Sonarr -> TVmaze
+  #
+  # Next episode precedence:
+  #   Sonarr -> TMDB -> TVmaze
+  #
+  # Trakt is not required for TV Status or Next Airing.
   tv_status_tracker:
     enabled: true
     collections_dir: /kometa/collections
+
+    metadata:
+      sonarr:
+        enabled: true
+        url: http://192.168.1.100:8989
+        api_key: REPLACE_WITH_SONARR_API_KEY
+
+      # Uses the top-level tmdb_api_key.
+      tmdb:
+        enabled: true
+
+      # Public credential-free fallback.
+      tvmaze:
+        enabled: true
 
   size_overlay:
     enabled: false
