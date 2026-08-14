@@ -22,6 +22,7 @@ from tv_metadata import build_show_identity
 from tv_metadata.next_airing import (
     build_next_airing_entry,
     write_next_airing_files,
+    write_next_airing_snapshot,
 )
 from tv_metadata.presentation import present_show_status
 from tv_metadata.providers import (
@@ -1222,6 +1223,7 @@ collections:
         current_status = {}
 
         total_shows_processed = 0
+        all_next_airing_entries = []
 
         for library_name in dict.fromkeys(self.libraries):
             try:
@@ -1259,6 +1261,9 @@ collections:
 
                     if next_airing_entry is not None:
                         next_airing_entries.append(
+                            next_airing_entry
+                        )
+                        all_next_airing_entries.append(
                             next_airing_entry
                         )
 
@@ -1456,6 +1461,28 @@ collections:
             except Exception as e:
                 logging.error(f"Error processing library {library_name}: {str(e)}")
                 console.print(f"[red]Error processing library {library_name}: {str(e)}[/red]")
+
+        try:
+            next_airing_snapshot_path = (
+                write_next_airing_snapshot(
+                    os.path.join(
+                        self.data_dir,
+                        "next_airing.json",
+                    ),
+                    all_next_airing_entries,
+                    self.timezone,
+                )
+            )
+
+            logging.info(
+                "Next Airing snapshot created: %s",
+                next_airing_snapshot_path,
+            )
+        except Exception as e:
+            logging.error(
+                "Error saving Next Airing snapshot: %s",
+                str(e),
+            )
 
         try:
             with open(status_cache_file, 'w') as f:

@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
+from datetime import (
+    date,
+    datetime,
+    timezone,
+)
 from pathlib import Path
 from typing import Iterable
 from zoneinfo import ZoneInfo
+
+import json
 
 import yaml
 
@@ -255,6 +261,131 @@ def write_kometa_collection(
         ),
         encoding="utf-8",
     )
+
+    return path
+
+
+def build_next_airing_snapshot(
+    entries: Iterable[NextAiringEntry],
+    timezone_name: str,
+    *,
+    generated_at: datetime | None = None,
+) -> dict:
+    """Build the provider-independent Dakosys Next Airing snapshot."""
+    ordered = sort_next_airing(
+        entries,
+        timezone_name,
+    )
+
+    if generated_at is None:
+        generated_at = datetime.now(
+            timezone.utc
+        )
+
+    shows = []
+
+    for rank, entry in enumerate(
+        ordered,
+        start=1,
+    ):
+        episode = entry.next_episode
+
+        display_date = next_airing_date(
+            entry,
+            timezone_name,
+        )
+
+        shows.append(
+            {
+                "rank": rank,
+                "title": entry.title,
+                "year": entry.year,
+                "library": entry.library,
+                "plex_rating_key": (
+                    entry.plex_rating_key
+                ),
+                "ids": {
+                    "tmdb": entry.tmdb_id,
+                    "tvdb": entry.tvdb_id,
+                    "imdb": entry.imdb_id,
+                },
+                "next_episode": {
+                    "source": episode.source,
+                    "season": episode.season,
+                    "episode": episode.episode,
+                    "title": episode.title,
+                    "state": episode.state.value,
+                    "air_date": (
+                        episode.air_date.isoformat()
+                        if episode.air_date
+                        is not None
+                        else None
+                    ),
+                    "air_datetime": (
+                        episode.air_datetime.isoformat()
+                        if episode.air_datetime
+                        is not None
+                        else None
+                    ),
+                    "display_date": (
+                        display_date.isoformat()
+                        if display_date
+                        is not None
+                        else None
+                    ),
+                    "provider_episode_id": (
+                        episode.provider_episode_id
+                    ),
+                    "raw_episode_type": (
+                        episode.raw_episode_type
+                    ),
+                },
+            }
+        )
+
+    return {
+        "generated_at": (
+            generated_at.isoformat()
+        ),
+        "timezone": timezone_name,
+        "count": len(shows),
+        "shows": shows,
+    }
+
+
+def write_next_airing_snapshot(
+    output_path: str | Path,
+    entries: Iterable[NextAiringEntry],
+    timezone_name: str,
+) -> Path:
+    """Atomically write the Dakosys Next Airing JSON snapshot."""
+    path = Path(output_path)
+
+    path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    data = build_next_airing_snapshot(
+        entries,
+        timezone_name,
+    )
+
+    temporary_path = path.with_suffix(
+        path.suffix + ".tmp"
+    )
+
+    temporary_path.write_text(
+        json.dumps(
+            data,
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    temporary_path.replace(path)
 
     return path
 

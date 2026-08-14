@@ -33,6 +33,7 @@ else:
 
 LOG_FILE = os.path.join(DATA_DIR, "anime_trakt_manager.log")
 TV_STATUS_CACHE = os.path.join(DATA_DIR, "tv_status_cache.json")
+NEXT_AIRING_SNAPSHOT = os.path.join(DATA_DIR, "next_airing.json")
 PREVIOUS_SIZES_FILE = os.path.join(DATA_DIR, "previous_sizes.json")
 
 
@@ -696,106 +697,278 @@ def _fetch_tmdb_poster(tmdb_id: int, api_key: str) -> Optional[str]:
     return None
 
 
-@app.get("/api/tv-status/next-airing")
-def get_next_airing():
-    """Fetch the Trakt 'Next Airing' list in order with TMDB posters and status info."""
-    config = load_config()
-    if not config:
-        return {"shows": [], "count": 0, "error": "Config file not found"}
+def _next_airing_status(
+    episode_state: str,
+) -> str:
+    """Map normalized episode state to the dashboard status vocabulary."""
+    states = {
+        "season_premiere": "SEASON_PREMIERE",
+        "season_finale": "SEASON_FINALE",
+        "mid_season_finale": "MID_SEASON_FINALE",
+        "series_finale": "FINAL_EPISODE",
+        "airing": "AIRING",
+        "unknown": "AIRING",
+    }
 
-    tmdb_api_key = config.get("tmdb_api_key", "").strip()
-    if not tmdb_api_key:
-        return {"shows": [], "count": 0, "tmdb_key_missing": True}
+    return states.get(
+        str(episode_state or "").lower(),
+        "AIRING",
+    )
 
-    username = config.get("trakt", {}).get("username")
-    if not username:
-        return {"shows": [], "count": 0, "error": "Trakt username not configured"}
+
+def _format_next_airing_date(
+    value: str,
+    date_format: str,
+) -> str:
+    """Format an ISO local-air-date for the dashboard."""
+    if not value:
+        return ""
 
     try:
-        import trakt_auth as _ta
-        import concurrent.futures as _cf
+        local_date = datetime.strptime(
+            value,
+            "%Y-%m-%d",
+        )
 
-        import requests as _req2
-        _headers = _ta.get_trakt_headers()
-        _r = _req2.get("https://api.trakt.tv/users/me/lists/next-airing/items",
-                       headers=_headers, params={"limit": 1000}, timeout=15)
-        if _r.status_code == 404:
-            return {"shows": [], "count": 0, "error": "Next Airing list not found on Trakt — run the TV Status Tracker to create it"}
-        if _r.status_code != 200:
-            return {"shows": [], "count": 0, "error": f"Trakt API error {_r.status_code} — check Trakt auth"}
-        items = _r.json()
+        if str(date_format).upper() == "MM/DD":
+            return local_date.strftime("%m/%d")
 
-        import re as _re
+        return local_date.strftime("%d/%m")
+    except (TypeError, ValueError):
+        return value
 
-        def _norm_title(t: str) -> str:
-            t = t.lower().strip()
-            t = _re.sub(r"\s*\(\d{4}\)\s*$", "", t)
-            t = _re.sub(r"\s*\([a-z]{2,4}\)\s*$", "", t)
-            return t.strip()
 
-        status_map: Dict[str, Any] = {}
-        norm_status_map: Dict[str, Any] = {}
-        if os.path.exists(TV_STATUS_CACHE):
-            try:
-                with open(TV_STATUS_CACHE, "r") as f:
-                    cache = json.load(f)
-                for title, data in cache.items():
-                    status_map[title.lower()] = data
-                    norm_key = _norm_title(title)
-                    if norm_key not in norm_status_map:
-                        norm_status_map[norm_key] = data
-            except Exception:
-                pass
+@app.get("/api/tv-status/next-airing")
+def get_next_airing():
+    """Return provider-derived local Next Airing data."""
+    config = load_config()
 
-        def _find_status(trakt_title: str, year: int = None) -> Dict[str, Any]:
-            if year:
-                year_key = f"{trakt_title.lower()} ({year})"
-                if year_key in status_map:
-                    return status_map[year_key]
-            key = trakt_title.lower()
-            if key in status_map:
-                return status_map[key]
-            norm = _norm_title(trakt_title)
-            if norm in norm_status_map:
-                return norm_status_map[norm]
-            if norm in status_map:
-                return status_map[norm]
-            return {}
+    if not config:
+        return {
+            "shows": [],
+            "count": 0,
+            "error": "Config file not found",
+        }
 
-        show_items = [i for i in items if i.get("type") == "show"]
-        tmdb_ids_to_fetch = [
-            i["show"]["ids"]["tmdb"]
-            for i in show_items
-            if i["show"]["ids"].get("tmdb") and i["show"]["ids"]["tmdb"] not in _tmdb_poster_cache
-        ]
+    if not os.path.exists(
+        NEXT_AIRING_SNAPSHOT
+    ):
+        return {
+            "shows": [],
+            "count": 0,
+            "error": (
+                "Next Airing data not found — "
+                "run the TV Status Tracker"
+            ),
+        }
 
-        if tmdb_ids_to_fetch:
-            with _cf.ThreadPoolExecutor(max_workers=10) as pool:
-                list(pool.map(lambda tid: _fetch_tmdb_poster(tid, tmdb_api_key), tmdb_ids_to_fetch))
+    try:
+        with open(
+            NEXT_AIRING_SNAPSHOT,
+            "r",
+            encoding="utf-8",
+        ) as file:
+            snapshot = json.load(file)
+    except Exception as exc:
+        return {
+            "shows": [],
+            "count": 0,
+            "error": (
+                "Failed to read Next Airing data: "
+                f"{exc}"
+            ),
+        }
 
-        shows = []
-        for item in show_items:
-            show_data = item.get("show", {})
-            title = show_data.get("title", "")
-            year = show_data.get("year")
-            tmdb_id = show_data.get("ids", {}).get("tmdb")
-            status_data = _find_status(title, year)
-            shows.append({
-                "rank": item.get("rank", 0),
-                "title": title,
-                "trakt_slug": show_data.get("ids", {}).get("slug", ""),
-                "trakt_id": show_data.get("ids", {}).get("trakt"),
-                "poster_url": _tmdb_poster_cache.get(tmdb_id) if tmdb_id else None,
-                "status": _expand_status(status_data) if status_data else "UNKNOWN",
-                "date": status_data.get("date", ""),
-                "text": status_data.get("text", ""),
-            })
+    snapshot_shows = snapshot.get(
+        "shows",
+        [],
+    )
 
-        shows.sort(key=lambda s: s["rank"])
-        return {"shows": shows, "count": len(shows)}
+    if not isinstance(
+        snapshot_shows,
+        list,
+    ):
+        return {
+            "shows": [],
+            "count": 0,
+            "error": "Invalid Next Airing snapshot",
+        }
 
-    except Exception as e:
-        return {"shows": [], "count": 0, "error": str(e)}
+    tmdb_api_key = str(
+        config.get(
+            "tmdb_api_key",
+            "",
+        )
+        or ""
+    ).strip()
+
+    # Posters are optional enrichment. Missing TMDB credentials must
+    # never prevent provider-derived Next Airing data from displaying.
+    tmdb_ids = []
+
+    if tmdb_api_key:
+        for show in snapshot_shows:
+            ids = show.get(
+                "ids",
+                {},
+            ) or {}
+
+            tmdb_id = ids.get(
+                "tmdb"
+            )
+
+            if (
+                tmdb_id
+                and tmdb_id
+                not in _tmdb_poster_cache
+            ):
+                tmdb_ids.append(
+                    tmdb_id
+                )
+
+    if tmdb_ids:
+        try:
+            import concurrent.futures as _cf
+
+            unique_tmdb_ids = list(
+                dict.fromkeys(
+                    tmdb_ids
+                )
+            )
+
+            with _cf.ThreadPoolExecutor(
+                max_workers=10
+            ) as pool:
+                list(
+                    pool.map(
+                        lambda tmdb_id: (
+                            _fetch_tmdb_poster(
+                                tmdb_id,
+                                tmdb_api_key,
+                            )
+                        ),
+                        unique_tmdb_ids,
+                    )
+                )
+        except Exception:
+            # Poster enrichment is non-critical.
+            pass
+
+    date_format = config.get(
+        "date_format",
+        "DD/MM",
+    )
+
+    shows = []
+
+    for position, item in enumerate(
+        snapshot_shows,
+        start=1,
+    ):
+        ids = item.get(
+            "ids",
+            {},
+        ) or {}
+
+        episode = item.get(
+            "next_episode",
+            {},
+        ) or {}
+
+        tmdb_id = ids.get(
+            "tmdb"
+        )
+
+        display_date = (
+            episode.get(
+                "display_date"
+            )
+            or episode.get(
+                "air_date"
+            )
+            or ""
+        )
+
+        shows.append(
+            {
+                "rank": item.get(
+                    "rank",
+                    position,
+                ),
+                "title": item.get(
+                    "title",
+                    "",
+                ),
+                "year": item.get(
+                    "year"
+                ),
+                "library": item.get(
+                    "library",
+                    "",
+                ),
+                "plex_rating_key": item.get(
+                    "plex_rating_key",
+                    "",
+                ),
+                "tmdb_id": tmdb_id,
+                "tvdb_id": ids.get(
+                    "tvdb"
+                ),
+                "imdb_id": ids.get(
+                    "imdb"
+                ),
+                "external_url": (
+                    f"https://www.themoviedb.org/tv/{tmdb_id}"
+                    if tmdb_id
+                    else None
+                ),
+                "poster_url": (
+                    _tmdb_poster_cache.get(
+                        tmdb_id
+                    )
+                    if tmdb_id
+                    else None
+                ),
+                "status": (
+                    _next_airing_status(
+                        episode.get(
+                            "state",
+                            "",
+                        )
+                    )
+                ),
+                "date": (
+                    _format_next_airing_date(
+                        display_date,
+                        date_format,
+                    )
+                ),
+                "source": episode.get(
+                    "source",
+                    "",
+                ),
+                "season": episode.get(
+                    "season"
+                ),
+                "episode": episode.get(
+                    "episode"
+                ),
+                "episode_title": episode.get(
+                    "title"
+                ),
+            }
+        )
+
+    return {
+        "shows": shows,
+        "count": len(shows),
+        "generated_at": snapshot.get(
+            "generated_at"
+        ),
+        "timezone": snapshot.get(
+            "timezone"
+        ),
+    }
 
 
 @app.get("/api/trakt/test")

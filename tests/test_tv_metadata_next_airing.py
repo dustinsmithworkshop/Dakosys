@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from datetime import (
@@ -21,11 +22,13 @@ from tv_metadata import (
 from tv_metadata.next_airing import (
     build_kometa_collection,
     build_next_airing_entry,
+    build_next_airing_snapshot,
     build_text_file_lines,
     next_airing_date,
     sort_next_airing,
     text_file_identifier,
     write_next_airing_files,
+    write_next_airing_snapshot,
 )
 
 
@@ -309,6 +312,176 @@ class NextAiringTests(
         self.assertNotIn(
             "plex_search",
             collection,
+        )
+
+    def test_snapshot_is_sorted_and_structured(
+        self,
+    ):
+        late = build_next_airing_entry(
+            identity(
+                title="Late",
+                rating_key="2",
+                tmdb_id=102,
+                tvdb_id=202,
+            ),
+            status(
+                air_date=date(
+                    2026,
+                    9,
+                    10,
+                ),
+                source="tmdb",
+            ),
+        )
+
+        early = build_next_airing_entry(
+            identity(
+                title="Early",
+                rating_key="1",
+                tmdb_id=101,
+                tvdb_id=201,
+            ),
+            status(
+                air_date=date(
+                    2026,
+                    9,
+                    3,
+                ),
+                air_datetime=datetime(
+                    2026,
+                    9,
+                    3,
+                    2,
+                    0,
+                    tzinfo=timezone.utc,
+                ),
+                source="sonarr",
+            ),
+        )
+
+        snapshot = (
+            build_next_airing_snapshot(
+                [late, early],
+                "America/Chicago",
+                generated_at=datetime(
+                    2026,
+                    8,
+                    14,
+                    8,
+                    0,
+                    tzinfo=timezone.utc,
+                ),
+            )
+        )
+
+        self.assertEqual(
+            snapshot["generated_at"],
+            "2026-08-14T08:00:00+00:00",
+        )
+        self.assertEqual(
+            snapshot["timezone"],
+            "America/Chicago",
+        )
+        self.assertEqual(
+            snapshot["count"],
+            2,
+        )
+        self.assertEqual(
+            [
+                show["title"]
+                for show
+                in snapshot["shows"]
+            ],
+            [
+                "Early",
+                "Late",
+            ],
+        )
+
+        first = snapshot["shows"][0]
+
+        self.assertEqual(
+            first["rank"],
+            1,
+        )
+        self.assertEqual(
+            first["plex_rating_key"],
+            "1",
+        )
+        self.assertEqual(
+            first["ids"]["tmdb"],
+            101,
+        )
+        self.assertEqual(
+            first["ids"]["tvdb"],
+            201,
+        )
+        self.assertEqual(
+            first["next_episode"]["source"],
+            "sonarr",
+        )
+        self.assertEqual(
+            first["next_episode"]["state"],
+            "season_premiere",
+        )
+        self.assertEqual(
+            first[
+                "next_episode"
+            ][
+                "display_date"
+            ],
+            "2026-09-02",
+        )
+
+    def test_snapshot_writer_creates_json(
+        self,
+    ):
+        entry = build_next_airing_entry(
+            identity(),
+            status(
+                air_date=date(
+                    2026,
+                    9,
+                    1,
+                )
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = (
+                Path(tmp)
+                / "next_airing.json"
+            )
+
+            result = (
+                write_next_airing_snapshot(
+                    output,
+                    [entry],
+                    "America/Chicago",
+                )
+            )
+
+            data = json.loads(
+                result.read_text(
+                    encoding="utf-8"
+                )
+            )
+
+            temporary = output.with_suffix(
+                ".json.tmp"
+            )
+
+            self.assertFalse(
+                temporary.exists()
+            )
+
+        self.assertEqual(
+            data["count"],
+            1,
+        )
+        self.assertEqual(
+            data["shows"][0]["title"],
+            "Example Show",
         )
 
     def test_written_text_file_preserves_date_order(

@@ -30,7 +30,7 @@ function PosterCard({ show }: { show: NextAiringShow }) {
 
   return (
     <a
-      href={`https://trakt.tv/shows/${show.trakt_slug}`}
+      href={show.external_url ?? undefined}
       target="_blank"
       rel="noopener noreferrer"
       className="group block rounded-xl overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-violet-600/50 transition-all hover:shadow-lg hover:shadow-violet-900/20"
@@ -71,51 +71,15 @@ function PosterCard({ show }: { show: NextAiringShow }) {
   );
 }
 
-function TmdbKeyMissing() {
-  return (
-    <Card className="bg-zinc-900 border border-amber-800/50">
-      <CardBody className="p-6">
-        <div className="flex items-start gap-3">
-          <span className="text-amber-400 text-xl shrink-0">⚠</span>
-          <div>
-            <p className="text-amber-300 font-semibold mb-1">TMDB API key required</p>
-            <p className="text-zinc-400 text-sm mb-4">
-              Poster images are fetched from The Movie Database. Add your free API key to{" "}
-              <code className="text-violet-300 bg-zinc-800 px-1 rounded">config.yaml</code>:
-            </p>
-            <pre className="bg-zinc-800 rounded-lg p-3 text-sm text-green-300 font-mono mb-4 overflow-x-auto">
-              {"tmdb_api_key: \"your_api_key_here\""}
-            </pre>
-            <p className="text-zinc-500 text-sm">
-              Get a free API key at{" "}
-              <a
-                href="https://www.themoviedb.org/settings/api"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-violet-400 hover:text-violet-300 underline"
-              >
-                themoviedb.org/settings/api
-              </a>
-              {" "}→ Request an API Key → Developer (free).
-            </p>
-          </div>
-        </div>
-      </CardBody>
-    </Card>
-  );
-}
-
 export default function NextAiringPage() {
   const [shows, setShows] = useState<NextAiringShow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tmdbKeyMissing, setTmdbKeyMissing] = useState(false);
 
   useEffect(() => {
     api.getNextAiring()
       .then((r) => {
         setShows(r.shows);
-        setTmdbKeyMissing(!!r.tmdb_key_missing);
         if (r.error) setError(r.error);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to load"))
@@ -127,7 +91,7 @@ export default function NextAiringPage() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-white">Next Airing</h1>
         <p className="text-zinc-400 mt-1">
-          Your Trakt &ldquo;Next Airing&rdquo; watchlist in air-date order
+          Provider-resolved upcoming episodes in air-date order
         </p>
       </div>
 
@@ -137,16 +101,16 @@ export default function NextAiringPage() {
         </div>
       )}
 
-      {!loading && tmdbKeyMissing && <TmdbKeyMissing />}
-
       {error && (
         <div className="bg-red-950/50 border border-red-800 rounded-lg p-4 mb-4">
           <p className="text-red-400 text-sm">{error}</p>
         </div>
       )}
 
-      {!loading && !tmdbKeyMissing && shows.length === 0 && !error && (
-        <p className="text-zinc-500 text-sm">No shows in the Next Airing list yet.</p>
+      {!loading && shows.length === 0 && !error && (
+        <p className="text-zinc-500 text-sm">
+          No provider-derived upcoming episodes are available yet.
+        </p>
       )}
 
       {shows.length > 0 && (
@@ -154,7 +118,10 @@ export default function NextAiringPage() {
           <p className="text-zinc-500 text-xs mb-4">{shows.length} shows</p>
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3">
             {shows.map((show) => (
-              <PosterCard key={show.trakt_id ?? show.title} show={show} />
+              <PosterCard
+                key={show.plex_rating_key || show.title}
+                show={show}
+              />
             ))}
           </div>
         </>

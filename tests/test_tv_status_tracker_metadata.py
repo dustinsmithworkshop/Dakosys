@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -631,6 +632,61 @@ class TrackerMetadataTests(
             self.assertIn(
                 "text_file: config/collections/tv-next-airing.txt",
                 collection_path.read_text(encoding="utf-8"),
+            )
+
+
+            snapshot_path = (
+                root
+                / "data"
+                / "next_airing.json"
+            )
+
+            snapshot = json.loads(
+                snapshot_path.read_text(
+                    encoding="utf-8"
+                )
+            )
+
+            self.assertEqual(
+                snapshot["count"],
+                1,
+            )
+
+            snapshot_show = (
+                snapshot["shows"][0]
+            )
+
+            self.assertEqual(
+                snapshot_show["title"],
+                "Example Show",
+            )
+
+            self.assertEqual(
+                snapshot_show["ids"]["tmdb"],
+                100,
+            )
+
+            self.assertEqual(
+                snapshot_show["ids"]["tvdb"],
+                200,
+            )
+
+            self.assertEqual(
+                snapshot_show[
+                    "next_episode"
+                ][
+                    "source"
+                ],
+                "tmdb",
+            )
+
+            self.assertEqual(
+                snapshot_show[
+                    "next_episode"
+                ][
+                    "state"
+                ],
+                "season_premiere",
             )
 
 

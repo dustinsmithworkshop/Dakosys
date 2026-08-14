@@ -190,18 +190,27 @@ export interface TitleMappingsResponse {
 export interface NextAiringShow {
   rank: number;
   title: string;
-  trakt_slug: string;
-  trakt_id: number | null;
+  year: number | null;
+  library: string;
+  plex_rating_key: string;
+  tmdb_id: number | null;
+  tvdb_id: number | null;
+  imdb_id: string | null;
+  external_url: string | null;
   poster_url: string | null;
   status: string;
   date: string;
-  text: string;
+  source: string;
+  season: number | null;
+  episode: number | null;
+  episode_title: string | null;
 }
 
 export interface NextAiringResponse {
   shows: NextAiringShow[];
   count: number;
-  tmdb_key_missing?: boolean;
+  generated_at?: string | null;
+  timezone?: string | null;
   error?: string;
 }
 
