@@ -240,6 +240,261 @@ def setup_anime_episode_type(config):
 
     setup_service_scheduler(config, 'anime_episode_type')
 
+def setup_tv_metadata_providers(config):
+    """Configure TV metadata providers without requiring Trakt."""
+    console.print(
+        "\n[bold]TV Metadata Providers[/bold]"
+    )
+    console.print(
+        "[yellow]Lifecycle precedence: "
+        "TMDB -> Sonarr -> TVmaze[/yellow]"
+    )
+    console.print(
+        "[yellow]Next episode precedence: "
+        "Sonarr -> TMDB -> TVmaze[/yellow]"
+    )
+
+    tv_status = (
+        config
+        .setdefault("services", {})
+        .setdefault(
+            "tv_status_tracker",
+            {},
+        )
+    )
+
+    metadata = tv_status.setdefault(
+        "metadata",
+        {},
+    )
+
+    sonarr = metadata.setdefault(
+        "sonarr",
+        {},
+    )
+    tmdb = metadata.setdefault(
+        "tmdb",
+        {},
+    )
+    tvmaze = metadata.setdefault(
+        "tvmaze",
+        {},
+    )
+
+    sonarr_enabled = click.confirm(
+        "Enable Sonarr metadata provider?",
+        default=sonarr.get(
+            "enabled",
+            True,
+        ),
+    )
+    sonarr["enabled"] = sonarr_enabled
+
+    if sonarr_enabled:
+        env_url = str(
+            os.environ.get(
+                "SONARR_URL",
+                "",
+            )
+            or ""
+        ).strip()
+
+        env_key = str(
+            os.environ.get(
+                "SONARR_API_KEY",
+                "",
+            )
+            or ""
+        ).strip()
+
+        existing_url = str(
+            sonarr.get("url", "")
+            or ""
+        ).strip()
+
+        existing_key = str(
+            sonarr.get("api_key", "")
+            or ""
+        ).strip()
+
+        if env_url:
+            console.print(
+                "[green]SONARR_URL environment "
+                "override detected.[/green]"
+            )
+        else:
+            sonarr["url"] = click.prompt(
+                "Sonarr URL",
+                default=existing_url,
+                show_default=bool(
+                    existing_url
+                ),
+            ).strip()
+
+        if env_key:
+            console.print(
+                "[green]SONARR_API_KEY environment "
+                "override detected.[/green]"
+            )
+        elif existing_key:
+            keep_key = click.confirm(
+                "Keep existing Sonarr API key?",
+                default=True,
+            )
+
+            if not keep_key:
+                sonarr["api_key"] = (
+                    click.prompt(
+                        "Sonarr API key",
+                        hide_input=True,
+                    ).strip()
+                )
+        else:
+            sonarr["api_key"] = (
+                click.prompt(
+                    "Sonarr API key "
+                    "(leave blank if configuring later)",
+                    default="",
+                    show_default=False,
+                    hide_input=True,
+                ).strip()
+            )
+
+    tmdb_enabled = click.confirm(
+        "Enable TMDB metadata provider?",
+        default=tmdb.get(
+            "enabled",
+            True,
+        ),
+    )
+    tmdb["enabled"] = tmdb_enabled
+
+    if tmdb_enabled:
+        env_token = str(
+            os.environ.get(
+                "TMDB_TOKEN",
+                "",
+            )
+            or ""
+        ).strip()
+
+        existing_tmdb_key = str(
+            config.get(
+                "tmdb_api_key",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if env_token:
+            console.print(
+                "[green]TMDB_TOKEN environment "
+                "override detected.[/green]"
+            )
+        elif existing_tmdb_key:
+            keep_key = click.confirm(
+                "Keep existing TMDB API key?",
+                default=True,
+            )
+
+            if not keep_key:
+                config["tmdb_api_key"] = (
+                    click.prompt(
+                        "TMDB v3 API key",
+                        hide_input=True,
+                    ).strip()
+                )
+        else:
+            config["tmdb_api_key"] = (
+                click.prompt(
+                    "TMDB v3 API key "
+                    "(leave blank if configuring later)",
+                    default="",
+                    show_default=False,
+                    hide_input=True,
+                ).strip()
+            )
+
+    tvmaze_enabled = click.confirm(
+        "Enable TVmaze fallback provider?",
+        default=tvmaze.get(
+            "enabled",
+            True,
+        ),
+    )
+    tvmaze["enabled"] = tvmaze_enabled
+
+    sonarr_ready = bool(
+        sonarr_enabled
+        and (
+            (
+                str(
+                    os.environ.get(
+                        "SONARR_URL",
+                        "",
+                    )
+                    or ""
+                ).strip()
+                or str(
+                    sonarr.get(
+                        "url",
+                        "",
+                    )
+                    or ""
+                ).strip()
+            )
+            and (
+                str(
+                    os.environ.get(
+                        "SONARR_API_KEY",
+                        "",
+                    )
+                    or ""
+                ).strip()
+                or str(
+                    sonarr.get(
+                        "api_key",
+                        "",
+                    )
+                    or ""
+                ).strip()
+            )
+        )
+    )
+
+    tmdb_ready = bool(
+        tmdb_enabled
+        and (
+            str(
+                os.environ.get(
+                    "TMDB_TOKEN",
+                    "",
+                )
+                or ""
+            ).strip()
+            or str(
+                config.get(
+                    "tmdb_api_key",
+                    "",
+                )
+                or ""
+            ).strip()
+        )
+    )
+
+    if not (
+        sonarr_ready
+        or tmdb_ready
+    ):
+        console.print(
+            "[bold yellow]Warning: TV Status needs "
+            "a configured Sonarr or TMDB provider. "
+            "You can supply credentials later in "
+            "config.yaml or container environment "
+            "variables.[/bold yellow]"
+        )
+
+
 def setup_tv_status_tracker(config):
     """Setup for TV/Anime Status Tracker service."""
     console.print("\n[bold cyan]TV/Anime Status Tracker[/bold cyan]")
@@ -310,6 +565,10 @@ def setup_tv_status_tracker(config):
             "No further configuration needed.[/yellow]"
         )
         return
+
+    setup_tv_metadata_providers(
+        config
+    )
 
     apply_gradient = click.confirm(
         "Apply gradient background for TV/Anime Status Tracker overlays?",
@@ -801,6 +1060,56 @@ def run_setup():
         }
     }
 
+    # Preserve existing TV metadata credentials/settings when
+    # rerunning the full setup wizard.
+    if existing_config.get(
+        "tmdb_api_key"
+    ):
+        config["tmdb_api_key"] = (
+            existing_config[
+                "tmdb_api_key"
+            ]
+        )
+
+    existing_tv_metadata = (
+        existing_config
+        .get("services", {})
+        .get(
+            "tv_status_tracker",
+            {},
+        )
+        .get(
+            "metadata",
+            {},
+        )
+        or {}
+    )
+
+    for provider_name in (
+        "sonarr",
+        "tmdb",
+        "tvmaze",
+    ):
+        existing_provider = (
+            existing_tv_metadata.get(
+                provider_name,
+                {},
+            )
+            or {}
+        )
+
+        config[
+            "services"
+        ][
+            "tv_status_tracker"
+        ][
+            "metadata"
+        ][
+            provider_name
+        ].update(
+            existing_provider
+        )
+
     console.print("\n[bold]Plex Configuration[/bold]")
     console.print("[yellow]You'll need your Plex server URL and an authentication token.[/yellow]")
     console.print("[yellow]To get your token, see: https://support.plex.tv/articles/204059436-finding-an-authentication-token/[/yellow]")
@@ -941,6 +1250,11 @@ def run_setup():
     config['services']['tv_status_tracker']['enabled'] = (
         tv_status_service
     )
+
+    if tv_status_service:
+        setup_tv_metadata_providers(
+            config
+        )
 
     console.print("\n[bold cyan]Size Overlay Service[/bold cyan]")
     console.print("[yellow]This service creates Kometa overlays displaying file sizes for movies and TV shows.[/yellow]")
@@ -1134,7 +1448,7 @@ def run_setup():
             "enabled features require Trakt.[/green]"
         )
 
-    if tv_status_service or legacy_episode_publishing:
+    if legacy_episode_publishing:
         console.print("\n[bold]Trakt List Settings[/bold]")
         config['lists']['default_privacy'] = click.prompt(
             "Default privacy for created lists",
@@ -1320,14 +1634,40 @@ def run_setup():
             console.print(f"[yellow]Warning: Could not setup assets: {str(e)}[/yellow]")
             console.print("[yellow]You may need to manually copy collection posters and fonts.[/yellow]")
 
-    console.print("\n[bold]Now authenticating with Trakt.tv...[/bold]")
-    import trakt_auth
-    auth_success = trakt_auth.ensure_auth_during_setup(config)
+    if trakt_required:
+        console.print(
+            "\n[bold]Now authenticating with "
+            "Trakt.tv...[/bold]"
+        )
 
-    if auth_success:
-        console.print("\n[bold green]Setup complete! Authentication successful![/bold green]")
+        import trakt_auth
+
+        auth_success = (
+            trakt_auth
+            .ensure_auth_during_setup(
+                config
+            )
+        )
+
+        if auth_success:
+            console.print(
+                "\n[bold green]Setup complete! "
+                "Trakt authentication successful!"
+                "[/bold green]"
+            )
+        else:
+            console.print(
+                "\n[bold yellow]Setup complete, but "
+                "Trakt authentication will be needed "
+                "by the enabled Trakt-backed feature."
+                "[/bold yellow]"
+            )
     else:
-        console.print("\n[bold yellow]Setup complete, but Trakt authentication will be needed when you run commands.[/bold yellow]")
+        console.print(
+            "\n[bold green]Setup complete! "
+            "No Trakt authentication is required."
+            "[/bold green]"
+        )
 
     if os.environ.get('RUNNING_IN_DOCKER') == 'true':
         console.print("\n[bold]Setting up assets and overlay files...[/bold]")
