@@ -19,6 +19,7 @@ COPY assets/gradient_bottom.png /app/assets/
 COPY fonts/Juventus-Fans-Bold.ttf /app/fonts/
 
 COPY *.py ./
+COPY tv_metadata/ ./tv_metadata/
 
 COPY --from=frontend-builder /frontend/out /app/web/out
 
