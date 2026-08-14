@@ -1,0 +1,26 @@
+metadata:
+  301824: # TVDB id for 11.22.63. Set by MediuxKing79 on MediUX. https://mediux.pro/sets/10146
+    url_poster: https://api.mediux.pro/assets/example-show-poster
+    url_background: https://api.mediux.pro/assets/example-show-background
+    seasons:
+      1:
+        url_poster: https://api.mediux.pro/assets/example-season-poster
+        episodes:
+          1:
+            url_poster: https://api.mediux.pro/assets/example-s01e01
+          2:
+            url_poster: https://api.mediux.pro/assets/example-s01e02
+
+  999999: # TVDB id for Example Partial Show. Set by ExampleArtist on MediUX. https://mediux.pro/sets/22222
+    url_poster: https://api.mediux.pro/assets/example-partial-poster
+    seasons:
+      0:
+        episodes:
+          1:
+            url_poster: https://api.mediux.pro/assets/example-special
+      1:
+        episodes:
+          1:
+            url_poster: https://api.mediux.pro/assets/example-partial-s01e01
+          3:
+            url_poster: https://api.mediux.pro/assets/example-partial-s01e03
