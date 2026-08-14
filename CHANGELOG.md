@@ -2,11 +2,70 @@
 
 All notable changes to this fork are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Hybrid TV metadata provider architecture using stable Plex external IDs with Sonarr, TMDB, and TVmaze providers.
+- Provider-independent normalization for TV lifecycle state and upcoming episodes.
+- Field-specific provider precedence:
+  - lifecycle: TMDB -> Sonarr -> TVmaze;
+  - next episode: Sonarr -> TMDB -> TVmaze.
+- Provider provenance and warning reporting for conflicting or suspicious metadata.
+- Conservative validation for future episodes reported by providers that also consider a series ended.
+- Local provider-derived Next Airing generation for Kometa using ordered `text_file` collections.
+- Provider-independent `data/next_airing.json` snapshot used by the DAKOSYS web dashboard.
+- TV metadata provider configuration in both web and CLI setup.
+- Sonarr credential support through `services.tv_status_tracker.metadata.sonarr` or `SONARR_URL` / `SONARR_API_KEY`.
+- TMDB v3 API-key support through the existing top-level `tmdb_api_key`, with `TMDB_TOKEN` bearer authentication available as an environment override.
+- Credential-free TVmaze fallback provider.
+- Regression coverage for provider identity, Sonarr, TMDB, TVmaze, resolver behavior, presentation, shadow comparison, local Next Airing, web Next Airing, Trakt dependency reporting, TV Status integration, and CLI provider setup.
+
+### Changed
+
+- TV / Anime Status Tracker now resolves normal metadata locally instead of requiring Trakt.
+- TV Status uses stable Plex external IDs rather than fuzzy title matching between providers.
+- Lifecycle and upcoming-episode resolution are independent so a concrete future episode can remain valid even when lifecycle metadata disagrees.
+- Next Airing membership now comes directly from the normalized TV metadata resolver.
+- Kometa Next Airing collections and the DAKOSYS Next Airing dashboard now consume the same provider-derived data model.
+- Next Airing dashboard data is read from `data/next_airing.json` instead of retrieving a personal Trakt list and matching titles back to the TV Status cache.
+- TMDB poster artwork on the Next Airing dashboard is optional enrichment and no longer blocks the page when a TMDB key is absent.
+- Trakt is now required only for Automatic Active/Future Schedule and optional legacy episode-list publishing.
+- The main dashboard and Trakt page now report only features that actually depend on Trakt.
+- The Trakt dashboard no longer treats TV Status or Next Airing as Trakt-backed features.
+- CLI setup can configure Sonarr, TMDB, and TVmaze for TV Status.
+- CLI setup no longer requests Trakt list settings or starts Trakt authentication when TV Status is the only enabled feature.
+- Web setup exposes TV metadata provider configuration and no longer presents TV Status / Next Airing as Trakt-dependent.
+- TV Status can initialize and run without a `trakt:` configuration section when no Trakt-backed feature is enabled.
+- Next Airing air dates retain provider broadcast/calendar semantics while exact timestamps are converted to the configured DAKOSYS timezone for display.
+
+### Removed
+
+- Normal TV Status dependence on Trakt metadata.
+- Normal TV Status creation and maintenance of a personal Trakt `Next Airing` list.
+- Next Airing dashboard dependence on Trakt list retrieval.
+- Next Airing title matching against the local TV Status cache.
+- User-visible claims that TV Status or Next Airing require Trakt.
+
+### Validation
+
+- Full TV metadata regression suite passes with 102 Python tests.
+- Next.js production build passes after provider setup and Next Airing UI migration.
+- Full no-Trakt TV Status staging run completed against the feature implementation.
+- Local Next Airing staging output returned to the expected 81 entries after rejecting an uncorroborated bogus future TMDB episode.
+- Staged library totals were:
+  - Anime: 42;
+  - Cartoons: 4;
+  - TV: 35.
+- No normal Next Airing Trakt references remain in the web API, page, or TypeScript contract.
+- CLI setup regression confirms a TV Status-only installation does not prompt for or authenticate with Trakt.
+- Python compilation and `git diff --check` pass for the migrated provider paths.
+
+---
+
 ## [2.0.0] - 2026-08-13
 
-DAKOSYS 2.0 is an intentional architecture change.
-
-The release remains **unreleased** until the exact candidate Docker image has passed validation inside the real container environment and the Trakt-backed paths have also been verified using a fresh non-VIP/free-tier Trakt account.
+DAKOSYS 2.0 is an intentional architecture change that moved core Anime Episode Type generation away from Trakt personal lists while retaining Trakt-backed automatic scheduling and the then-existing TV Status implementation.
 
 ### Added
 
@@ -18,7 +77,7 @@ The release remains **unreleased** until the exact candidate Docker image has pa
 - `prune-legacy-lists` dry-run/apply workflow for removing old DAKOSYS filler/canon personal lists while protecting `Next Airing` and unrelated lists.
 - Feature-aware web setup for optional Trakt configuration.
 - Automatic schedule management and include/exclude overrides in the web UI.
-- Trakt dashboard focused on connection state, enabled Trakt-backed features, live account limits, and Next Airing usage.
+- In 2.0, the Trakt dashboard focused on connection state, enabled Trakt-backed features, live account limits, and Next Airing usage.
 
 ### Changed
 
@@ -26,7 +85,7 @@ The release remains **unreleased** until the exact candidate Docker image has pa
 - `sync-collections`, scheduled Anime Episode Type execution, immediate Anime Episode Type execution, and mapping-fix regeneration now use the local backend.
 - Automatic active/future scheduling remains Trakt-backed but is independent of core Anime Episode Type generation.
 - Generated `config/scheduled-anime.yaml` is now the authoritative automatic schedule source.
-- TV Status continues to use Trakt metadata and maintains a single `Next Airing` personal list.
+- In 2.0, TV Status continued to use Trakt metadata and maintained a single `Next Airing` personal list.
 - Trakt credentials are requested only when an enabled feature actually requires Trakt.
 - Legacy filler/canon personal-list publishing is an explicit compatibility mode and is disabled by default.
 - Legacy publishing capacity decisions use account limits reported by Trakt at runtime instead of hard-coded VIP/free assumptions.
@@ -51,34 +110,27 @@ The release remains **unreleased** until the exact candidate Docker image has pa
 - Automatic schedule discovery preserves the previous generated schedule on fatal discovery failure.
 - A Trakt scheduling failure cannot block local Anime Episode Type generation.
 - Runtime Trakt limits are treated as the source of truth rather than assuming limits from VIP/non-VIP labels.
-- `Next Airing` remains independent from legacy Anime Episode Type personal-list publishing.
+- In 2.0, `Next Airing` was independent from legacy Anime Episode Type personal-list publishing.
 
-### Validation Completed Before Docker Release Testing
+### Validation
 
-- Real no-Trakt Anime Episode Type regression reached the production local synchronization path successfully.
-- Core Anime Episode Type functions passed direct source assertions for absence of Trakt publishing/OAuth dependencies.
-- Generated schedule authority regression confirmed that the retired hard-coded schedule is ignored.
-- Legacy publishing disabled-state regression confirmed OAuth is unreachable.
-- Mapping-fix regeneration was verified to use the local Anime Episode Type backend.
-- Python compilation and `git diff --check` passed during development.
-- TypeScript type checking and the Next.js production build passed during development.
-- Source-wide 1.x architecture and stale web API sweeps passed.
+Before the v2.0.0 release, validation included:
 
-### Validation Required Before Release
-
-- Build the exact 2.0 candidate Docker image from the final candidate commit.
-- Run the candidate with the real Docker mounts and Plex/Kometa environment.
-- Verify container startup and runtime paths.
-- Run core Anime Episode Type generation from inside the container with no Trakt dependency.
-- Verify Kometa collection/overlay output generation from inside Docker.
-- Exercise automatic schedule refresh, failure preservation, and include/exclude overrides.
-- Exercise TV Status and the single `Next Airing` list from inside Docker.
-- Verify legacy publishing remains disabled before OAuth when opt-in is false.
-- Verify explicit legacy publishing opt-in and runtime account-capacity enforcement.
-- Exercise the migrated web UI against the same candidate container.
-- Exercise scheduler jobs from inside the candidate container.
-- Validate Trakt-backed behavior with a fresh non-VIP/free-tier Trakt account.
-- Do not tag `v2.0.0` until these gates pass.
+- real no-Trakt Anime Episode Type regression reaching the production local synchronization path successfully;
+- direct source assertions confirming core Anime Episode Type functions did not depend on Trakt publishing/OAuth;
+- generated schedule authority regression confirming that the retired hard-coded schedule was ignored;
+- legacy publishing disabled-state regression confirming OAuth was unreachable;
+- mapping-fix regeneration using the local Anime Episode Type backend;
+- Python compilation and `git diff --check`;
+- TypeScript type checking and the Next.js production build;
+- source-wide 1.x architecture and stale web API sweeps;
+- candidate Docker image startup with the real Plex/Kometa mounts;
+- core Anime Episode Type generation inside Docker without Trakt;
+- Kometa collection/overlay generation;
+- automatic schedule refresh, failure preservation, and include/exclude overrides;
+- TV Status and the 2.0 Trakt-backed Next Airing workflow;
+- scheduler execution inside Docker;
+- explicit legacy publishing opt-in and runtime account-capacity checks.
 
 ---
 

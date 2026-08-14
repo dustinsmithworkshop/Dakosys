@@ -1,8 +1,8 @@
 # DAKOSYS — Docker App Kometa Overlay System
 
-DAKOSYS is a Docker-based companion for **Plex**, **AnimeFillerList**, and **Kometa**, with optional **Trakt** integration for features that require current show metadata or personal Trakt lists.
+DAKOSYS is a Docker-based companion for **Plex**, **AnimeFillerList**, and **Kometa**, with optional **Trakt** integration for automatic anime scheduling and legacy episode-list publishing.
 
-DAKOSYS 2.0 separates core Anime Episode Type generation from Trakt personal-list publishing.
+The current architecture keeps core Anime Episode Type, TV / Anime Status, and Next Airing generation independent of Trakt.
 
 ```text
 Anime Episode Type
@@ -18,9 +18,15 @@ Plex + AnimeFillerList + Trakt show metadata
 config/scheduled-anime.yaml
 
 TV / Anime Status Tracker
-Plex + Trakt metadata
+Plex show IDs
         ↓
-Status overlays + one Next Airing list
+Sonarr + TMDB + TVmaze
+        ↓
+normalized TV metadata
+        ↓
+Status overlays + local Next Airing data
+        ├── Kometa collections
+        └── DAKOSYS dashboard
 
 Legacy Episode-List Publishing
 Anime classifications + Trakt personal lists
@@ -32,7 +38,7 @@ Explicit opt-in compatibility mode
 >
 > This repository is a maintained fork of [sahara101/Dakosys](https://github.com/sahara101/Dakosys). The upstream project provides the original DAKOSYS architecture, dashboard, Anime Episode Type Tracker, TV/Anime Status Tracker, Size Overlay, scheduler, notifications, and management tools.
 >
-> This fork extends that foundation with Plex-aware episode mapping, conservative AnimeFillerList validation, automatic active/future scheduling, local Anime Episode Type generation, Trakt capability-aware behavior, safer batch processing, and additional management and diagnostic tools.
+> This fork extends that foundation with Plex-aware episode mapping, conservative AnimeFillerList validation, automatic active/future scheduling, local Anime Episode Type generation, hybrid TV metadata providers, provider-derived Next Airing data, Trakt capability-aware behavior, safer batch processing, and additional management and diagnostic tools.
 
 ![DAKOSYS dashboard](https://github.com/user-attachments/assets/03af3c98-39f2-4121-99e2-74390d90f87b)
 
@@ -44,13 +50,13 @@ Explicit opt-in compatibility mode
 |---|---:|---:|---|
 | Anime Episode Type Tracker | **No** | No | Local Kometa episode collections/overlays |
 | Automatic Active/Future Schedule | Yes | No | Generated `scheduled-anime.yaml` |
-| TV / Anime Status Tracker | Yes | One `Next Airing` list | Status overlays + Next Airing |
+| TV / Anime Status Tracker | **No** | No | Status overlays + local Next Airing |
 | Legacy Episode-List Publishing | Yes | Yes | Filler/canon Trakt lists |
 | Size Overlay | No | No | Kometa size overlays |
 | Web Dashboard | Depends on enabled features | No by itself | Browser-based management UI |
 | Discord Notifications | No | No | Service/update notifications |
 
-Trakt account limits are discovered from the authenticated Trakt API response at runtime. DAKOSYS does not assume personal-list capacity from account labels such as VIP or non-VIP.
+Trakt account limits are discovered from the authenticated Trakt API response at runtime for features that actually use Trakt. DAKOSYS does not assume personal-list capacity from account labels such as VIP or non-VIP.
 
 ---
 
@@ -233,7 +239,23 @@ cat config/scheduled-anime.yaml
 
 ## TV / Anime Status Tracker
 
-The TV / Anime Status Tracker requires Trakt metadata.
+> **Trakt is not required for TV Status or Next Airing.**
+
+The TV / Anime Status Tracker resolves Plex shows through a provider-independent metadata layer using stable external IDs from Plex.
+
+Lifecycle precedence is:
+
+```text
+TMDB -> Sonarr -> TVmaze
+```
+
+Upcoming-episode precedence is:
+
+```text
+Sonarr -> TMDB -> TVmaze
+```
+
+Sonarr is especially useful for concrete upcoming episodes already known to the local automation stack. TMDB is the primary lifecycle source. TVmaze provides a credential-free fallback when a supported external ID is available.
 
 It creates Kometa overlays showing TV and anime state, including:
 
@@ -247,11 +269,16 @@ It creates Kometa overlays showing TV and anime state, including:
 - Final episode
 - Upcoming air dates
 
-It also maintains **one** personal Trakt list named `Next Airing` for shows with upcoming episodes.
+Next Airing is generated locally from the same resolved metadata. DAKOSYS writes ordered Kometa collection files and a provider-independent `data/next_airing.json` snapshot used by the web dashboard.
 
-That single Next Airing list is separate from legacy Anime Episode Type episode-list publishing.
+The normal path does **not** create, update, fetch, or title-match against a personal Trakt `Next Airing` list.
 
-DAKOSYS uses Trakt's reported account capabilities and limits at runtime instead of assuming that a particular account tier is required.
+At least one primary TV metadata provider must be usable:
+
+- **Sonarr** with URL + API key; or
+- **TMDB** with the top-level v3 API key or the advanced `TMDB_TOKEN` environment override.
+
+TVmaze does not require credentials, but it is used as a fallback rather than as the only primary provider.
 
 ![TV status example](https://github.com/user-attachments/assets/ce2e31fe-aeee-467f-b498-6ea36ac0139b)
 
@@ -275,7 +302,7 @@ The DAKOSYS web UI is normally available at:
 http://your-host:3000
 ```
 
-The 2.0 dashboard provides:
+The dashboard provides:
 
 - service status and next scheduled runs;
 - local Anime Episode Type management;
@@ -285,14 +312,16 @@ The 2.0 dashboard provides:
 - built-in configuration reference;
 - service log viewing;
 - anime identity and episode-title mapping tools;
-- TV status and Next Airing views;
-- Trakt connection, feature, capability, and list-usage status;
+- TV status and provider-derived Next Airing views;
+- Trakt connection, feature, capability, and list-capacity status;
 - library-size browsing;
 - first-run setup.
 
-The dashboard does not require a live Trakt request simply to render the main status page.
+The main dashboard does not perform a live Trakt request simply to render normal status.
 
-The Trakt page is capability-focused rather than a bulk personal-list manager.
+The Next Airing dashboard reads local provider-derived data and does not require Trakt.
+
+The Trakt page is capability-focused rather than a bulk personal-list manager and reports only features that actually depend on Trakt.
 
 ---
 
@@ -334,11 +363,14 @@ This feature reads show metadata and does not require Anime Episode Type persona
 
 ### TV / Anime Status Tracker
 
-Additionally requires:
+Additionally requires at least one usable primary TV metadata provider:
 
-- Trakt account
-- Trakt API application / authentication
-- capacity for the single `Next Airing` personal list
+- Sonarr URL + API key; or
+- TMDB v3 API key / `TMDB_TOKEN`.
+
+TVmaze is an optional credential-free fallback.
+
+Trakt is **not** required for TV Status or Next Airing.
 
 ### Legacy Episode-List Publishing
 
@@ -352,7 +384,9 @@ Legacy publishing is disabled by default.
 
 ### Other
 
-- TMDB API configuration is used by dashboard features that display TMDB artwork/metadata.
+- TMDB configuration is used by TV Status when the TMDB provider is enabled.
+- The top-level `tmdb_api_key` can also enrich dashboard poster artwork.
+- Missing TMDB poster credentials do not prevent local Next Airing data from displaying.
 
 ---
 
@@ -395,7 +429,9 @@ The interactive setup wizard is the recommended way to complete service configur
 docker compose run --rm dakosys setup
 ```
 
-Trakt authentication is requested only when an enabled feature requires it.
+When TV Status is enabled, setup can configure Sonarr, TMDB, and TVmaze metadata providers.
+
+Trakt authentication is requested only when Automatic Active/Future Schedule or legacy episode-list publishing is enabled.
 
 Start the updater/web service:
 
@@ -419,10 +455,10 @@ This fork publishes images to GitHub Container Registry:
 ghcr.io/dustinsmithworkshop/dakosys
 ```
 
-For a 2.0 release, semantic tags use:
+Semantic 2.x tags include:
 
 ```text
-ghcr.io/dustinsmithworkshop/dakosys:2.0.0   # exact release
+ghcr.io/dustinsmithworkshop/dakosys:2.0.0   # exact 2.0.0 release
 ghcr.io/dustinsmithworkshop/dakosys:2.0     # latest 2.0.x
 ghcr.io/dustinsmithworkshop/dakosys:2       # latest compatible 2.x
 ghcr.io/dustinsmithworkshop/dakosys:latest  # default latest release/build
@@ -431,8 +467,6 @@ ghcr.io/dustinsmithworkshop/dakosys:latest  # default latest release/build
 For the most reproducible installation, pin the exact version.
 
 Use `:2` only if you want compatible 2.x updates without manually changing the image tag for each release.
-
-> DAKOSYS 2.0 remains unreleased until the candidate Docker image passes the release validation gate documented below.
 
 ---
 
@@ -480,9 +514,9 @@ config/collections/anime_episode_type.yml
 
 ---
 
-# Upgrading from 1.x to 2.0
+# Upgrading from 1.x
 
-DAKOSYS 2.0 intentionally changes the Anime Episode Type and scheduling architecture.
+DAKOSYS 2.x intentionally changes the Anime Episode Type, scheduling, TV Status, and Next Airing architecture.
 
 Before upgrading, back up:
 
@@ -496,7 +530,7 @@ data/
 
 In 1.x, Anime Episode Type classifications were commonly published to many personal Trakt lists and Kometa consumed that workflow.
 
-In 2.0, the normal path is local:
+In 2.x, the normal path is local:
 
 ```text
 Plex + AnimeFillerList
@@ -545,28 +579,77 @@ trakt:
     enabled: false
 ```
 
-Leave it disabled for normal 2.0 Anime Episode Type operation.
+Leave it disabled for normal local Anime Episode Type operation.
 
 Enable it only if you intentionally want DAKOSYS to continue creating/updating personal Trakt filler/canon lists.
 
 ## 4. Trakt configuration is feature-dependent
 
-You may omit Trakt credentials when using only features that do not require Trakt, such as core Anime Episode Type and Size Overlay.
+You may omit Trakt credentials when using:
 
-Trakt is still required for:
-
-- Automatic Active/Future Schedule;
+- core Anime Episode Type;
 - TV / Anime Status Tracker;
 - Next Airing;
+- Size Overlay.
+
+Trakt is required only for:
+
+- Automatic Active/Future Schedule;
 - legacy episode-list publishing.
 
-## 5. Next Airing is separate from legacy publishing
+## 5. TV Status uses local metadata providers
 
-TV Status maintains one `Next Airing` list.
+TV Status no longer requires Trakt metadata.
 
-Disabling legacy Anime Episode Type list publishing does not disable Next Airing.
+A typical provider configuration is:
 
-## 6. Remove old episode-type lists if desired
+```yaml
+tmdb_api_key: REPLACE_WITH_TMDB_API_KEY
+
+services:
+  tv_status_tracker:
+    enabled: true
+
+    metadata:
+      sonarr:
+        enabled: true
+        url: http://192.168.1.100:8989
+        api_key: REPLACE_WITH_SONARR_API_KEY
+
+      tmdb:
+        enabled: true
+
+      tvmaze:
+        enabled: true
+```
+
+Environment overrides are also supported:
+
+```text
+SONARR_URL
+SONARR_API_KEY
+TMDB_TOKEN
+```
+
+Environment values take precedence over their YAML credential equivalents.
+
+## 6. Next Airing is local
+
+TV Status resolves upcoming episodes through Sonarr, TMDB, and TVmaze and generates Next Airing locally.
+
+The normal workflow writes:
+
+```text
+data/next_airing.json
+<collections_dir>/*-next-airing.txt
+<collections_dir>/*-next-airing.yml
+```
+
+Kometa consumes the ordered local text files, while the DAKOSYS dashboard consumes `data/next_airing.json`.
+
+A personal Trakt `Next Airing` list is no longer part of the normal TV Status workflow.
+
+## 7. Remove old episode-type lists if desired
 
 Preview legacy DAKOSYS episode lists:
 
@@ -580,15 +663,19 @@ Apply the cleanup:
 docker compose run --rm dakosys prune-legacy-lists --apply
 ```
 
-The cleanup classifier protects `Next Airing` and unrelated personal lists.
+The cleanup classifier protects `Next Airing` and unrelated personal lists. This protection is useful for installations that still have an old Next Airing list from a previous DAKOSYS version.
 
 Always review the dry run before using `--apply`.
 
-## 7. Re-run setup when changing enabled features
+## 8. Re-run setup when changing enabled features
 
-The setup wizard is feature-aware in 2.0.
+The setup wizard is feature-aware.
 
-For example, Anime Episode Type by itself will not request Trakt credentials, while enabling Automatic Schedule or TV Status will.
+Anime Episode Type, TV Status, Next Airing, and Size Overlay do not require Trakt credentials.
+
+Enabling Automatic Active/Future Schedule or legacy episode-list publishing does.
+
+When TV Status is enabled, setup can configure Sonarr, TMDB, and TVmaze metadata providers instead.
 
 ---
 
@@ -622,6 +709,8 @@ Anime:
 
 Library names and generated filenames can vary with configuration. Use the files produced by your installation.
 
+Next Airing collection YAML uses Kometa `text_file` membership with `collection_order: custom`, so provider-derived air-date order is preserved.
+
 ---
 
 # Configuration Files
@@ -633,6 +722,8 @@ Contains service and deployment configuration such as:
 - Plex URL and token
 - Plex library names
 - optional Trakt configuration for Trakt-backed features
+- Sonarr/TMDB/TVmaze TV metadata provider configuration
+- top-level TMDB API key
 - Kometa output paths
 - enabled services
 - scheduler configuration
@@ -643,6 +734,48 @@ Starter:
 ```text
 config.example.yaml
 ```
+
+### TV metadata provider example
+
+```yaml
+tmdb_api_key: REPLACE_WITH_TMDB_API_KEY
+
+services:
+  tv_status_tracker:
+    enabled: true
+    collections_dir: /kometa/collections
+
+    metadata:
+      sonarr:
+        enabled: true
+        url: http://192.168.1.100:8989
+        api_key: REPLACE_WITH_SONARR_API_KEY
+
+      # Uses the top-level tmdb_api_key.
+      tmdb:
+        enabled: true
+
+      # Public credential-free fallback.
+      tvmaze:
+        enabled: true
+```
+
+Provider precedence is intentionally internal rather than normally user-configurable:
+
+```text
+Lifecycle:     TMDB -> Sonarr -> TVmaze
+Next episode:  Sonarr -> TMDB -> TVmaze
+```
+
+Advanced/container credential overrides:
+
+```text
+SONARR_URL
+SONARR_API_KEY
+TMDB_TOKEN
+```
+
+Explicit `enabled: false` still disables a provider even when its credentials are present.
 
 ## `config/mappings.yaml`
 
@@ -664,6 +797,7 @@ These should remain local/runtime files and should not be committed:
 config/config.yaml
 config/mappings.yaml
 config/scheduled-anime.yaml
+data/next_airing.json
 ```
 
 ---
@@ -948,6 +1082,8 @@ docker compose run --rm dakosys run-update size_overlay
 
 ## Trakt Account Diagnostics
 
+These commands are relevant only when using a Trakt-backed feature or inspecting existing legacy Trakt state.
+
 Display normalized Trakt account capabilities:
 
 ```bash
@@ -966,7 +1102,7 @@ Inspect list-capacity information:
 docker compose run --rm dakosys trakt-list-capacity --json
 ```
 
-Inspect current list usage and the `Next Airing` list:
+Inspect current personal-list usage:
 
 ```bash
 docker compose run --rm dakosys trakt-list-usage --json
@@ -1051,7 +1187,10 @@ docker compose logs -f dakosys-updater
 
 ## Trakt authentication
 
-Trakt authentication is only required when at least one Trakt-backed feature is enabled.
+Trakt authentication is only required when at least one Trakt-backed feature is enabled:
+
+- Automatic Active/Future Schedule;
+- legacy episode-list publishing.
 
 Run:
 
@@ -1068,7 +1207,70 @@ docker compose run --rm dakosys trakt-list-usage --json
 
 If no valid token is available, run setup again or reconnect through the web UI.
 
-If you use only core Anime Episode Type and other non-Trakt services, missing Trakt credentials should not prevent those services from running.
+Missing Trakt credentials should not prevent Anime Episode Type, TV Status, Next Airing, Size Overlay, or other non-Trakt services from running.
+
+---
+
+## TV metadata providers
+
+If TV Status reports that no metadata resolver is configured, verify that at least one primary provider is usable.
+
+For Sonarr:
+
+```yaml
+services:
+  tv_status_tracker:
+    metadata:
+      sonarr:
+        enabled: true
+        url: http://sonarr:8989
+        api_key: YOUR_SONARR_API_KEY
+```
+
+Or configure:
+
+```text
+SONARR_URL
+SONARR_API_KEY
+```
+
+For TMDB:
+
+```yaml
+tmdb_api_key: YOUR_TMDB_API_KEY
+
+services:
+  tv_status_tracker:
+    metadata:
+      tmdb:
+        enabled: true
+```
+
+Or use the advanced bearer override:
+
+```text
+TMDB_TOKEN
+```
+
+TVmaze is a credential-free fallback and does not replace the requirement for at least one usable Sonarr or TMDB primary provider.
+
+---
+
+## Next Airing
+
+Next Airing is generated when the TV Status Tracker runs.
+
+DAKOSYS writes:
+
+```text
+data/next_airing.json
+<collections_dir>/*-next-airing.txt
+<collections_dir>/*-next-airing.yml
+```
+
+If the web page reports that Next Airing data is missing, run the TV Status Tracker and verify that `data/next_airing.json` is created.
+
+Poster artwork is optional enrichment. Missing TMDB artwork credentials do not prevent the underlying Next Airing entries from displaying.
 
 ---
 
@@ -1150,7 +1352,7 @@ docker compose run --rm dakosys setup size_overlay
 
 # Development Validation
 
-For source changes to the Anime Episode Type, scheduler, or web path:
+For source changes to the Anime Episode Type, scheduler, TV metadata, or web path:
 
 ```bash
 python3 -m py_compile \
@@ -1162,16 +1364,22 @@ python3 -m py_compile \
   scheduler.py \
   setup.py \
   shared_utils.py \
+  tv_status_tracker.py \
   web_server.py
 
 git diff --check
+```
+
+Run the Python tests:
+
+```bash
+python -m unittest discover -s tests -v
 ```
 
 Frontend validation:
 
 ```bash
 cd web
-npx tsc --noEmit --pretty false
 npm run build
 cd ..
 ```
@@ -1180,24 +1388,25 @@ cd ..
 
 A release should also be tested using the exact Docker image intended for publication.
 
-The DAKOSYS 2.0 release gate includes:
+For changes that touch the TV metadata architecture, validate at minimum:
 
-- container startup;
-- Anime Episode Type with no Trakt configuration;
-- real Plex + AnimeFillerList local generation;
-- Kometa output generation;
-- automatic schedule refresh and failure preservation;
-- `always_include` / `always_exclude`;
-- TV Status and its single Next Airing list;
-- legacy publishing disabled before OAuth;
-- explicit legacy publishing opt-in and account-capacity checks;
-- scheduler execution inside Docker;
-- web setup/dashboard/anime/Trakt/mappings/config-reference pages;
-- a fresh non-VIP/free-tier Trakt account before final release.
+- container startup under the supported Python runtime;
+- TV Status initialization without a `trakt:` section when no Trakt-backed feature is enabled;
+- Sonarr/TMDB/TVmaze provider configuration and resolver startup;
+- a full provider-backed TV Status run against real Plex libraries;
+- provider-derived status overlays;
+- local Next Airing `.txt` / `.yml` Kometa outputs;
+- `data/next_airing.json`;
+- Next Airing dashboard operation without Trakt;
+- actual Kometa ingestion of the generated Next Airing collection files;
+- preservation of expected provider conflict behavior and warnings;
+- Automatic Active/Future Schedule when that Trakt-backed path is changed;
+- legacy episode-list publishing and Trakt capacity checks when that path is changed;
+- CLI and web setup behavior;
+- Python test suite;
+- frontend production build.
 
 Do not infer Docker correctness solely from local Python/TypeScript tests.
-
-**Do not tag `v2.0.0` until the Docker and fresh free-tier Trakt validation gates pass.**
 
 ---
 
@@ -1209,7 +1418,7 @@ Upstream repository:
 
 [https://github.com/sahara101/Dakosys](https://github.com/sahara101/Dakosys)
 
-This fork preserves the upstream project's major service concepts while substantially reworking the anime/Plex mapping, scheduling, Trakt integration, and dashboard paths.
+This fork preserves the upstream project's major service concepts while substantially reworking the anime/Plex mapping, scheduling, TV metadata, Next Airing, Trakt integration, and dashboard paths.
 
 ---
 
