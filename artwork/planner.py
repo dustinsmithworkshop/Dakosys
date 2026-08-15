@@ -10,6 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from artwork.inventory import SeasonInventory
+from artwork.models import (
+    ArtworkSource,
+    SelectionMode,
+)
 from artwork.reconciliation import TargetReconciliation
 from artwork.targets import ArtworkTarget
 
@@ -46,12 +51,17 @@ class ArtworkPlanItem:
 
     plex_rating_keys: tuple[str, ...] = ()
 
+    year: int | None = None
     tvdb_id: int | None = None
     tmdb_id: int | None = None
     imdb_id: str | None = None
 
+    seasons: tuple[SeasonInventory, ...] = ()
+
     selected_set_id: str | None = None
+    selected_set_source: ArtworkSource | None = None
     selected_creator: str | None = None
+    selection_mode: SelectionMode = SelectionMode.AUTO
 
     expected_episode_count: int | None = None
     managed_card_count: int | None = None
@@ -150,11 +160,17 @@ def build_target_plan(
                 plex_rating_keys=(
                     identity.plex_rating_key,
                 ),
+                year=identity.year,
                 tvdb_id=identity.tvdb_id,
                 tmdb_id=identity.tmdb_id,
                 imdb_id=identity.imdb_id,
+                seasons=inventory.seasons,
                 selected_set_id=artwork.selected_set_id,
+                selected_set_source=(
+                    artwork.selected_set_source
+                ),
                 selected_creator=artwork.selected_creator,
+                selection_mode=artwork.selection_mode,
                 expected_episode_count=(
                     coverage.expected_episode_count
                 ),
@@ -182,9 +198,11 @@ def build_target_plan(
                 plex_rating_keys=(
                     identity.plex_rating_key,
                 ),
+                year=identity.year,
                 tvdb_id=identity.tvdb_id,
                 tmdb_id=identity.tmdb_id,
                 imdb_id=identity.imdb_id,
+                seasons=inventory.seasons,
                 expected_episode_count=expected,
                 managed_card_count=0,
                 missing_managed_card_count=expected,
@@ -203,9 +221,11 @@ def build_target_plan(
                 plex_rating_keys=(
                     identity.plex_rating_key,
                 ),
+                year=identity.year,
                 tvdb_id=identity.tvdb_id,
                 tmdb_id=identity.tmdb_id,
                 imdb_id=identity.imdb_id,
+                seasons=inventory.seasons,
                 expected_episode_count=(
                     _inventory_episode_count(
                         inventory
@@ -235,8 +255,14 @@ def build_target_plan(
                 selected_set_id=(
                     ambiguous.artwork.selected_set_id
                 ),
+                selected_set_source=(
+                    ambiguous.artwork.selected_set_source
+                ),
                 selected_creator=(
                     ambiguous.artwork.selected_creator
+                ),
+                selection_mode=(
+                    ambiguous.artwork.selection_mode
                 ),
             )
         )
@@ -256,9 +282,13 @@ def build_target_plan(
                 selected_set_id=(
                     artwork.selected_set_id
                 ),
+                selected_set_source=(
+                    artwork.selected_set_source
+                ),
                 selected_creator=(
                     artwork.selected_creator
                 ),
+                selection_mode=artwork.selection_mode,
             )
         )
 

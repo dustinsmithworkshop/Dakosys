@@ -1,21 +1,26 @@
-"""Common contract for Artwork Manager providers."""
+"""Artwork provider protocol."""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import (
+    Protocol,
+    runtime_checkable,
+)
 
-from artwork.models import ArtworkSet, ShowArtworkState
+from artwork.models import ArtworkSet
+from artwork.search import ArtworkSearchRequest
 
 
 @runtime_checkable
 class ArtworkProvider(Protocol):
-    """Contract implemented by external artwork providers."""
+    """Provider capable of discovering cohesive artwork sets."""
 
     name: str
 
     def find_sets(
         self,
-        show: ShowArtworkState,
+        request: ArtworkSearchRequest,
     ) -> list[ArtworkSet]:
-        """Return artwork sets matching the supplied show."""
+        """Return candidate artwork sets for one Plex item."""
+
         ...
