@@ -50,6 +50,35 @@ kometa_config:
   yaml_output_dir: /kometa/overlays
 
 services:
+  # Discovers supported Plex libraries automatically and generates one
+  # independent Kometa artwork metadata file per Plex library.
+  #
+  # Plex library names are not predefined by Dakosys. A library named
+  # "Series", "Films", "Kids & Family", or anything else works the same.
+  #
+  # By default, generated files use kometa_config.yaml_output_dir:
+  #
+  #   artwork-<plex-library>.yaml
+  #
+  # An optional output_dir may be supplied here to use a different
+  # directory specifically for Artwork Manager.
+  artwork_manager:
+    enabled: false
+    # output_dir: /kometa/metadata
+    #
+    # Optional library filtering and overrides:
+    #
+    # libraries:
+    #   include:
+    #     - Series
+    #
+    #   exclude:
+    #     - Home Videos
+    #
+    #   overrides:
+    #     Kids & Family:
+    #       output: /kometa/metadata/kids-artwork.yaml
+
   # Plex + AnimeFillerList -> local episode mapper -> Kometa.
   # No Trakt account or Trakt personal lists are required.
   anime_episode_type:

@@ -189,6 +189,46 @@ def _library_overrides(
     return overrides
 
 
+def _artwork_output_dir(
+    config: dict,
+    service: dict,
+) -> Path:
+    """Resolve the directory used for generated artwork metadata.
+
+    Artwork Manager may define its own output directory. When omitted,
+    Dakosys reuses the existing Kometa YAML output directory.
+    """
+
+    raw_output_dir = service.get(
+        "output_dir"
+    )
+
+    if not raw_output_dir:
+        raw_output_dir = (
+            (config.get("kometa_config") or {})
+            .get("yaml_output_dir")
+        )
+
+    if not raw_output_dir:
+        raise ValueError(
+            "Artwork Manager requires either "
+            "services.artwork_manager.output_dir "
+            "or kometa_config.yaml_output_dir"
+        )
+
+    value = str(
+        raw_output_dir
+    ).strip()
+
+    if not value:
+        raise ValueError(
+            "Artwork Manager output directory "
+            "cannot be empty"
+        )
+
+    return Path(value)
+
+
 def discover_artwork_targets(
     plex,
     config: dict,
@@ -219,18 +259,9 @@ def discover_artwork_targets(
     if not service.get("enabled", False):
         return ()
 
-    raw_output_dir = service.get(
-        "output_dir"
-    )
-
-    if not raw_output_dir:
-        raise ValueError(
-            "services.artwork_manager.output_dir "
-            "is required when Artwork Manager is enabled"
-        )
-
-    output_dir = Path(
-        str(raw_output_dir)
+    output_dir = _artwork_output_dir(
+        config,
+        service,
     )
 
     library_config = (

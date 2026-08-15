@@ -533,3 +533,90 @@ def test_libraries_configuration_must_be_mapping():
             plex,
             config,
         )
+
+
+def test_uses_kometa_yaml_output_dir_by_default():
+    plex = FakePlex(
+        FakeSection(
+            "Series Collection",
+            "show",
+        ),
+    )
+
+    config = {
+        "kometa_config": {
+            "yaml_output_dir": "/kometa/generated",
+        },
+        "services": {
+            "artwork_manager": {
+                "enabled": True,
+            },
+        },
+    }
+
+    targets = discover_artwork_targets(
+        plex,
+        config,
+    )
+
+    assert targets[0].output_path == Path(
+        "/kometa/generated/"
+        "artwork-series-collection.yaml"
+    )
+
+
+def test_artwork_output_dir_overrides_kometa_default():
+    plex = FakePlex(
+        FakeSection(
+            "Feature Films",
+            "movie",
+        ),
+    )
+
+    config = {
+        "kometa_config": {
+            "yaml_output_dir": "/kometa/generated",
+        },
+        "services": {
+            "artwork_manager": {
+                "enabled": True,
+                "output_dir": "/custom/artwork",
+            },
+        },
+    }
+
+    targets = discover_artwork_targets(
+        plex,
+        config,
+    )
+
+    assert targets[0].output_path == Path(
+        "/custom/artwork/"
+        "artwork-feature-films.yaml"
+    )
+
+
+def test_requires_some_output_directory():
+    plex = FakePlex(
+        FakeSection(
+            "Series Collection",
+            "show",
+        ),
+    )
+
+    config = {
+        "services": {
+            "artwork_manager": {
+                "enabled": True,
+            },
+        },
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="requires either",
+    ):
+        discover_artwork_targets(
+            plex,
+            config,
+        )
