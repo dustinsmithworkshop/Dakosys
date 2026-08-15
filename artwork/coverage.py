@@ -127,7 +127,7 @@ def _available_episode_numbers(
         in season.episodes.items()
         if (
             episode.card is not None
-            and episode.card.url
+            and episode.card.available
         )
     )
 

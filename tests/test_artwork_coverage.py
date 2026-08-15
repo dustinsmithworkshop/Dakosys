@@ -240,3 +240,36 @@ def test_empty_expected_inventory_is_not_complete():
     assert coverage.expected_episode_count == 0
     assert coverage.coverage_ratio == 0.0
     assert coverage.complete is False
+
+
+def test_provider_asset_id_counts_as_available_without_url():
+    artwork_set = ArtworkSet(
+        provider=ArtworkSource.MEDIUX,
+        set_id="provider-set",
+        seasons={
+            1: SeasonArtwork(
+                season_number=1,
+                episodes={
+                    1: EpisodeArtwork(
+                        episode_number=1,
+                        card=ArtworkAsset(
+                            kind=ArtworkKind.EPISODE_CARD,
+                            source=ArtworkSource.MEDIUX,
+                            provider_asset_id="card-1",
+                        ),
+                    ),
+                },
+            ),
+        },
+    )
+
+    coverage = analyze_set_coverage(
+        artwork_set,
+        {
+            1: frozenset({1}),
+        },
+    )
+
+    assert coverage.available_episode_count == 1
+    assert coverage.missing_episode_count == 0
+    assert coverage.complete is True

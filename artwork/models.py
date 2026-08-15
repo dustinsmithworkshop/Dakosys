@@ -45,6 +45,22 @@ class ArtworkAsset:
     provider_asset_id: Optional[str] = None
     quality: Optional[ArtworkQuality] = None
 
+    @property
+    def available(self) -> bool:
+        """Whether the asset has a usable source reference.
+
+        Provider candidates may have a stable provider asset ID before
+        Dakosys has materialized a final image delivery URL.
+        """
+
+        return bool(
+            (self.url or "").strip()
+            or (
+                self.provider_asset_id
+                or ""
+            ).strip()
+        )
+
 
 @dataclass
 class EpisodeArtwork:

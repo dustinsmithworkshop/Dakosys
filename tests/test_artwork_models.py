@@ -41,3 +41,32 @@ def test_show_artwork_state_can_hold_episode_card():
         .card.source
         is ArtworkSource.MEDIUX
     )
+
+
+def test_artwork_asset_with_url_is_available():
+    asset = ArtworkAsset(
+        kind=ArtworkKind.EPISODE_CARD,
+        source=ArtworkSource.MEDIUX,
+        url="https://example.test/card.jpg",
+    )
+
+    assert asset.available is True
+
+
+def test_artwork_asset_with_provider_id_is_available():
+    asset = ArtworkAsset(
+        kind=ArtworkKind.EPISODE_CARD,
+        source=ArtworkSource.MEDIUX,
+        provider_asset_id="asset-123",
+    )
+
+    assert asset.available is True
+
+
+def test_artwork_asset_without_source_reference_is_unavailable():
+    asset = ArtworkAsset(
+        kind=ArtworkKind.EPISODE_CARD,
+        source=ArtworkSource.MEDIUX,
+    )
+
+    assert asset.available is False
