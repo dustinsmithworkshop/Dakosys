@@ -361,7 +361,7 @@ def test_client_sends_bearer_graphql_request():
     }
 
     assert body[
-        "query_name"
+        "operationName"
     ] == "getShowItemSetsByTMDBID"
 
 

@@ -186,7 +186,7 @@ class MediuxClient:
             {
                 "query": query,
                 "variables": variables,
-                "query_name": query_name,
+                "operationName": query_name,
             }
         ).encode("utf-8")
 
