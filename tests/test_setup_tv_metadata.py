@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import yaml
 
-import setup as setup_module
+import setup as setup_app
 
 
 class TVMetadataSetupTests(unittest.TestCase):
@@ -42,7 +42,7 @@ class TVMetadataSetupTests(unittest.TestCase):
                 clear=True,
             ),
             patch.object(
-                setup_module.click,
+                setup_app.click,
                 "confirm",
                 side_effect=[
                     True,
@@ -51,11 +51,11 @@ class TVMetadataSetupTests(unittest.TestCase):
                 ],
             ),
             patch.object(
-                setup_module.click,
+                setup_app.click,
                 "prompt",
             ) as prompt,
         ):
-            setup_module.setup_tv_metadata_providers(
+            setup_app.setup_tv_metadata_providers(
                 config
             )
 
@@ -110,7 +110,7 @@ class TVMetadataSetupTests(unittest.TestCase):
                 clear=True,
             ),
             patch.object(
-                setup_module.click,
+                setup_app.click,
                 "confirm",
                 side_effect=[
                     True,
@@ -119,7 +119,7 @@ class TVMetadataSetupTests(unittest.TestCase):
                 ],
             ),
             patch.object(
-                setup_module.click,
+                setup_app.click,
                 "prompt",
                 side_effect=[
                     "http://yaml-sonarr:8989",
@@ -128,7 +128,7 @@ class TVMetadataSetupTests(unittest.TestCase):
                 ],
             ),
         ):
-            setup_module.setup_tv_metadata_providers(
+            setup_app.setup_tv_metadata_providers(
                 config
             )
 
@@ -311,17 +311,17 @@ class TVMetadataSetupTests(unittest.TestCase):
                         },
                     ),
                     patch.object(
-                        setup_module.click,
+                        setup_app.click,
                         "confirm",
                         side_effect=fake_confirm,
                     ),
                     patch.object(
-                        setup_module.click,
+                        setup_app.click,
                         "prompt",
                         side_effect=fake_prompt,
                     ),
                 ):
-                    setup_module.run_setup()
+                    setup_app.run_setup()
 
                 config_path = (
                     Path(tmp)
