@@ -1,0 +1,86 @@
+{
+  "data": {
+    "shows_by_id": {
+      "id": "549",
+      "title": "Example Show",
+      "tvdb_id": "72368",
+      "imdb_id": "tt0098844",
+      "show_sets": [
+        {
+          "id": "17571",
+          "set_title": "Example Complete Set",
+          "user_created": {
+            "username": "example_artist"
+          },
+          "show_poster": [
+            {
+              "id": "poster-1",
+              "src": "poster-source",
+              "modified_on": "2026-01-01T00:00:00Z"
+            }
+          ],
+          "show_backdrop": [
+            {
+              "id": "backdrop-1",
+              "src": "backdrop-source",
+              "modified_on": "2026-01-01T00:00:00Z"
+            }
+          ],
+          "season_posters": [
+            {
+              "id": "season-0-poster",
+              "src": "season-0-source",
+              "modified_on": "2026-01-01T00:00:00Z",
+              "season": {
+                "season_number": 0
+              }
+            },
+            {
+              "id": "season-1-poster",
+              "src": "season-1-source",
+              "modified_on": "2026-01-01T00:00:00Z",
+              "season": {
+                "season_number": 1
+              }
+            }
+          ],
+          "titlecards": [
+            {
+              "id": "special-1-card",
+              "src": "special-1-source",
+              "modified_on": "2026-01-01T00:00:00Z",
+              "episode": {
+                "episode_number": 1,
+                "season_id": {
+                  "season_number": 0
+                }
+              }
+            },
+            {
+              "id": "s1e1-card",
+              "src": "s1e1-source",
+              "modified_on": "2026-01-01T00:00:00Z",
+              "episode": {
+                "episode_number": 1,
+                "season_id": {
+                  "season_number": 1
+                }
+              }
+            },
+            {
+              "id": "s1e2-card",
+              "src": "s1e2-source",
+              "modified_on": "2026-01-01T00:00:00Z",
+              "episode": {
+                "episode_number": 2,
+                "season_id": {
+                  "season_number": 1
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

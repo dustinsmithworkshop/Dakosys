@@ -61,10 +61,19 @@ class SeasonArtwork:
 
 @dataclass
 class ArtworkSet:
+    """One cohesive artwork set from a provider."""
+
     provider: ArtworkSource
     set_id: str
     creator: Optional[str] = None
-    seasons: dict[int, SeasonArtwork] = field(default_factory=dict)
+    seasons: dict[int, SeasonArtwork] = field(
+        default_factory=dict
+    )
+
+    # Provider metadata and show-level artwork.
+    title: Optional[str] = None
+    poster: Optional[ArtworkAsset] = None
+    background: Optional[ArtworkAsset] = None
 
 
 @dataclass
