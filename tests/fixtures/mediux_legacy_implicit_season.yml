@@ -1,0 +1,9 @@
+metadata:
+  888888: # TVDB id for Legacy Example. Set by LegacyArtist on MediUX. https://mediux.pro/sets/33333
+    url_poster: https://api.mediux.pro/assets/legacy-show-poster
+    seasons:
+      episodes:
+        1:
+          url_poster: https://api.mediux.pro/assets/legacy-s01e01
+        2:
+          url_poster: https://api.mediux.pro/assets/legacy-s01e02

@@ -88,10 +88,55 @@ def _extract_comment_metadata(
     return title, set_id, creator
 
 
+def _import_episodes(
+    raw_episodes: dict,
+) -> dict[int, EpisodeArtwork]:
+    """Normalize an episode mapping into EpisodeArtwork objects."""
+
+    episodes: dict[int, EpisodeArtwork] = {}
+
+    for raw_episode_number, raw_episode in raw_episodes.items():
+        try:
+            episode_number = int(raw_episode_number)
+        except (TypeError, ValueError):
+            continue
+
+        episode_data = raw_episode or {}
+
+        episodes[episode_number] = EpisodeArtwork(
+            episode_number=episode_number,
+            card=_mediux_asset(
+                kind=ArtworkKind.EPISODE_CARD,
+                url=episode_data.get("url_poster"),
+            ),
+        )
+
+    return episodes
+
+
+def _has_numeric_season_keys(
+    raw_seasons: dict,
+) -> bool:
+    for key in raw_seasons:
+        try:
+            int(key)
+        except (TypeError, ValueError):
+            continue
+        else:
+            return True
+
+    return False
+
+
 def import_mediux_metadata(
     path: str | Path,
 ) -> list[ShowArtworkState]:
-    """Import Kometa metadata containing MediUX artwork."""
+    """Import Kometa metadata containing MediUX artwork.
+
+    Legacy files sometimes place ``episodes`` directly below ``seasons``
+    without a numeric season key. When that is the only season structure,
+    normalize those episodes into Season 1.
+    """
 
     path = Path(path)
 
@@ -117,9 +162,27 @@ def import_mediux_metadata(
 
         seasons: dict[int, SeasonArtwork] = {}
 
-        for raw_season_number, raw_season in (
-            show_data.get("seasons") or {}
-        ).items():
+        raw_seasons = show_data.get("seasons") or {}
+
+        # Normalize legacy structure:
+        #
+        # seasons:
+        #   episodes:
+        #     1: ...
+        #
+        # into Season 1, but only when no numeric season keys coexist.
+        if (
+            "episodes" in raw_seasons
+            and not _has_numeric_season_keys(raw_seasons)
+        ):
+            seasons[1] = SeasonArtwork(
+                season_number=1,
+                episodes=_import_episodes(
+                    raw_seasons.get("episodes") or {}
+                ),
+            )
+
+        for raw_season_number, raw_season in raw_seasons.items():
             try:
                 season_number = int(raw_season_number)
             except (TypeError, ValueError):
@@ -127,33 +190,15 @@ def import_mediux_metadata(
 
             season_data = raw_season or {}
 
-            episodes: dict[int, EpisodeArtwork] = {}
-
-            for raw_episode_number, raw_episode in (
-                season_data.get("episodes") or {}
-            ).items():
-                try:
-                    episode_number = int(raw_episode_number)
-                except (TypeError, ValueError):
-                    continue
-
-                episode_data = raw_episode or {}
-
-                episodes[episode_number] = EpisodeArtwork(
-                    episode_number=episode_number,
-                    card=_mediux_asset(
-                        kind=ArtworkKind.EPISODE_CARD,
-                        url=episode_data.get("url_poster"),
-                    ),
-                )
-
             seasons[season_number] = SeasonArtwork(
                 season_number=season_number,
                 poster=_mediux_asset(
                     kind=ArtworkKind.SEASON_POSTER,
                     url=season_data.get("url_poster"),
                 ),
-                episodes=episodes,
+                episodes=_import_episodes(
+                    season_data.get("episodes") or {}
+                ),
             )
 
         shows.append(

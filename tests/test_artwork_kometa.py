@@ -107,3 +107,18 @@ def test_writes_valid_yaml(tmp_path):
         parsed
         == build_kometa_metadata(shows)
     )
+
+
+def test_generates_canonical_season_for_legacy_input():
+    legacy = Path(
+        "tests/fixtures/mediux_legacy_implicit_season.yml"
+    )
+
+    shows = import_mediux_metadata(legacy)
+    generated = build_kometa_metadata(shows)
+
+    show = generated["metadata"][888888]
+
+    assert set(show["seasons"]) == {1}
+    assert "episodes" in show["seasons"][1]
+    assert set(show["seasons"][1]["episodes"]) == {1, 2}

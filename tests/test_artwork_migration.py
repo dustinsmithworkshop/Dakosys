@@ -62,3 +62,21 @@ def test_preserves_partial_episode_coverage():
     show = _show(999999)
 
     assert set(show.seasons[1].episodes) == {1, 3}
+
+
+LEGACY_FIXTURE = Path(
+    "tests/fixtures/mediux_legacy_implicit_season.yml"
+)
+
+
+def test_normalizes_legacy_implicit_season_to_season_one():
+    shows = import_mediux_metadata(LEGACY_FIXTURE)
+
+    assert len(shows) == 1
+
+    show = shows[0]
+
+    assert show.tvdb_id == 888888
+    assert show.title == "Legacy Example"
+    assert set(show.seasons) == {1}
+    assert set(show.seasons[1].episodes) == {1, 2}
