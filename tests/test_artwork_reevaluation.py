@@ -399,3 +399,91 @@ def test_rejects_current_selection_mismatch():
             current_set_id="B",
             candidates=[],
         )
+
+
+def test_partial_same_set_gain_still_checks_complete_challenger():
+    current = _coverage(
+        "A",
+        4,
+    )
+
+    live_current = _assessment(
+        "A",
+        5,
+    )
+
+    complete = _assessment(
+        "B",
+        8,
+    )
+
+    result = reevaluate_artwork_selection(
+        current=current,
+        current_provider=ArtworkSource.MEDIUX,
+        current_set_id="A",
+        candidates=[
+            live_current,
+            complete,
+        ],
+    )
+
+    assert (
+        result.path
+        is ReevaluationPath.CHALLENGER
+    )
+
+    assert (
+        result.action
+        is SetAction.SET_MIGRATION
+    )
+
+    assert (
+        result.evaluated_candidate
+        is complete
+    )
+
+
+def test_partial_same_set_gain_refreshes_when_challenger_is_not_better_enough():
+    current = _coverage(
+        "A",
+        4,
+    )
+
+    live_current = _assessment(
+        "A",
+        5,
+    )
+
+    challenger = _assessment(
+        "B",
+        6,
+    )
+
+    result = reevaluate_artwork_selection(
+        current=current,
+        current_provider=ArtworkSource.MEDIUX,
+        current_set_id="A",
+        candidates=[
+            live_current,
+            challenger,
+        ],
+    )
+
+    assert (
+        result.path
+        is ReevaluationPath.CURRENT_SET
+    )
+
+    assert (
+        result.action
+        is SetAction.SET_REFRESH
+    )
+
+    assert (
+        result.evaluated_candidate
+        is live_current
+    )
+
+    assert len(
+        result.ranked_challengers
+    ) == 1

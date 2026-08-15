@@ -104,6 +104,14 @@ def reevaluate_artwork_selection(
     )
 
     current_decision: SetDecision | None = None
+    refresh_decision: SetDecision | None = None
+
+    # Challenger policy should compare against the strongest state of
+    # the currently selected set that Dakosys can actually preserve.
+    #
+    # If the live same set gained cards, use that improved coverage.
+    # If the provider regressed, retain the stored managed baseline.
+    comparison_current = current
 
     if live_current is not None:
         current_decision = decide_set_action(
@@ -117,30 +125,48 @@ def reevaluate_artwork_selection(
             ),
         )
 
-        # Same-set growth always wins immediately.
         if (
             current_decision.action
             is SetAction.SET_REFRESH
         ):
-            return ReevaluationResult(
-                path=ReevaluationPath.CURRENT_SET,
-                decision=current_decision,
-                live_current=live_current,
-                evaluated_candidate=live_current,
-                reason=current_decision.reason,
+            refresh_decision = current_decision
+            comparison_current = (
+                live_current.episode_coverage
             )
+
+            # Once the selected cohesive set becomes complete there is
+            # no reason to churn to an equally complete challenger.
+            if (
+                live_current
+                .episode_coverage
+                .complete
+            ):
+                return ReevaluationResult(
+                    path=ReevaluationPath.CURRENT_SET,
+                    decision=current_decision,
+                    live_current=live_current,
+                    evaluated_candidate=live_current,
+                    reason=current_decision.reason,
+                )
 
         # Locked selections may refresh the same set, but never migrate.
         if selection_mode is SelectionMode.LOCKED:
             return ReevaluationResult(
                 path=ReevaluationPath.CURRENT_SET,
-                decision=current_decision,
+                decision=(
+                    refresh_decision
+                    or current_decision
+                ),
                 live_current=live_current,
                 evaluated_candidate=live_current,
-                reason=current_decision.reason,
+                reason=(
+                    refresh_decision.reason
+                    if refresh_decision
+                    else current_decision.reason
+                ),
             )
 
-        # A complete managed current set is stable.
+        # A complete stored current set is stable.
         if current.complete:
             return ReevaluationResult(
                 path=ReevaluationPath.CURRENT_SET,
@@ -173,6 +199,15 @@ def reevaluate_artwork_selection(
         )
 
     if not challengers:
+        if refresh_decision is not None:
+            return ReevaluationResult(
+                path=ReevaluationPath.CURRENT_SET,
+                decision=refresh_decision,
+                live_current=live_current,
+                evaluated_candidate=live_current,
+                reason=refresh_decision.reason,
+            )
+
         if current_decision is not None:
             return ReevaluationResult(
                 path=ReevaluationPath.CURRENT_SET,
@@ -193,7 +228,7 @@ def reevaluate_artwork_selection(
     best_challenger = challengers[0]
 
     challenger_decision = decide_set_action(
-        current=current,
+        current=comparison_current,
         candidate=(
             best_challenger.episode_coverage
         ),
@@ -202,6 +237,31 @@ def reevaluate_artwork_selection(
             incomplete_migration_threshold
         ),
     )
+
+    if (
+        challenger_decision.action
+        is SetAction.SET_MIGRATION
+    ):
+        return ReevaluationResult(
+            path=ReevaluationPath.CHALLENGER,
+            decision=challenger_decision,
+            live_current=live_current,
+            evaluated_candidate=best_challenger,
+            ranked_challengers=challengers,
+            reason=challenger_decision.reason,
+        )
+
+    # The current set may have improved without becoming complete. If
+    # no challenger justifies migration, preserve that same-set gain.
+    if refresh_decision is not None:
+        return ReevaluationResult(
+            path=ReevaluationPath.CURRENT_SET,
+            decision=refresh_decision,
+            live_current=live_current,
+            evaluated_candidate=live_current,
+            ranked_challengers=challengers,
+            reason=refresh_decision.reason,
+        )
 
     return ReevaluationResult(
         path=ReevaluationPath.CHALLENGER,
