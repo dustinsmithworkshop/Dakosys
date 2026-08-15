@@ -535,7 +535,8 @@ def test_libraries_configuration_must_be_mapping():
         )
 
 
-def test_uses_kometa_yaml_output_dir_by_default():
+
+def test_enabled_manager_requires_artwork_output_dir():
     plex = FakePlex(
         FakeSection(
             "Series Collection",
@@ -545,66 +546,8 @@ def test_uses_kometa_yaml_output_dir_by_default():
 
     config = {
         "kometa_config": {
-            "yaml_output_dir": "/kometa/generated",
+            "yaml_output_dir": "/kometa/overlays",
         },
-        "services": {
-            "artwork_manager": {
-                "enabled": True,
-            },
-        },
-    }
-
-    targets = discover_artwork_targets(
-        plex,
-        config,
-    )
-
-    assert targets[0].output_path == Path(
-        "/kometa/generated/"
-        "artwork-series-collection.yaml"
-    )
-
-
-def test_artwork_output_dir_overrides_kometa_default():
-    plex = FakePlex(
-        FakeSection(
-            "Feature Films",
-            "movie",
-        ),
-    )
-
-    config = {
-        "kometa_config": {
-            "yaml_output_dir": "/kometa/generated",
-        },
-        "services": {
-            "artwork_manager": {
-                "enabled": True,
-                "output_dir": "/custom/artwork",
-            },
-        },
-    }
-
-    targets = discover_artwork_targets(
-        plex,
-        config,
-    )
-
-    assert targets[0].output_path == Path(
-        "/custom/artwork/"
-        "artwork-feature-films.yaml"
-    )
-
-
-def test_requires_some_output_directory():
-    plex = FakePlex(
-        FakeSection(
-            "Series Collection",
-            "show",
-        ),
-    )
-
-    config = {
         "services": {
             "artwork_manager": {
                 "enabled": True,
@@ -614,9 +557,40 @@ def test_requires_some_output_directory():
 
     with pytest.raises(
         ValueError,
-        match="requires either",
+        match="artwork_manager.output_dir",
     ):
         discover_artwork_targets(
             plex,
             config,
         )
+
+
+def test_artwork_output_dir_is_independent_of_overlay_output():
+    plex = FakePlex(
+        FakeSection(
+            "Feature Films",
+            "movie",
+        ),
+    )
+
+    config = {
+        "kometa_config": {
+            "yaml_output_dir": "/kometa/overlays",
+        },
+        "services": {
+            "artwork_manager": {
+                "enabled": True,
+                "output_dir": "/kometa/metadata",
+            },
+        },
+    }
+
+    targets = discover_artwork_targets(
+        plex,
+        config,
+    )
+
+    assert targets[0].output_path == Path(
+        "/kometa/metadata/"
+        "artwork-feature-films.yaml"
+    )

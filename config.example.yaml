@@ -56,15 +56,15 @@ services:
   # Plex library names are not predefined by Dakosys. A library named
   # "Series", "Films", "Kids & Family", or anything else works the same.
   #
-  # By default, generated files use kometa_config.yaml_output_dir:
+  # Artwork Manager writes Kometa metadata, not overlays, so its
+  # output directory is configured independently from yaml_output_dir.
+  #
+  # Generated files are named:
   #
   #   artwork-<plex-library>.yaml
-  #
-  # An optional output_dir may be supplied here to use a different
-  # directory specifically for Artwork Manager.
   artwork_manager:
     enabled: false
-    # output_dir: /kometa/metadata
+    output_dir: /kometa/metadata
     #
     # Optional library filtering and overrides:
     #
