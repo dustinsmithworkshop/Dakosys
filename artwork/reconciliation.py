@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -31,6 +32,15 @@ class ReconciledShow:
 
 
 @dataclass(frozen=True)
+class AmbiguousManagedMatch:
+    """Legacy artwork that matches multiple Plex items."""
+
+    tvdb_id: int
+    artwork: ShowArtworkState
+    inventories: tuple[ShowInventory, ...]
+
+
+@dataclass(frozen=True)
 class TargetReconciliation:
     """Read-only reconciliation result for one Plex library."""
 
@@ -39,7 +49,23 @@ class TargetReconciliation:
     matched: tuple[ReconciledShow, ...]
     unmanaged: tuple[ShowInventory, ...]
     missing_identity: tuple[ShowInventory, ...]
+    ambiguous: tuple[AmbiguousManagedMatch, ...]
     orphaned: tuple[ShowArtworkState, ...]
+
+    @property
+    def ambiguous_match_count(self) -> int:
+        """Number of managed records with ambiguous Plex matches."""
+
+        return len(self.ambiguous)
+
+    @property
+    def ambiguous_plex_show_count(self) -> int:
+        """Number of Plex items involved in ambiguous matches."""
+
+        return sum(
+            len(item.inventories)
+            for item in self.ambiguous
+        )
 
     @property
     def plex_show_count(self) -> int:
@@ -47,6 +73,7 @@ class TargetReconciliation:
             len(self.matched)
             + len(self.unmanaged)
             + len(self.missing_identity)
+            + self.ambiguous_plex_show_count
         )
 
     @property
@@ -142,6 +169,15 @@ def _artwork_set_from_state(
     )
 
 
+def _inventory_sort_key(
+    inventory: ShowInventory,
+) -> tuple[str, str]:
+    return (
+        inventory.identity.title.casefold(),
+        inventory.identity.plex_rating_key,
+    )
+
+
 def reconcile_show_target(
     *,
     target: ArtworkTarget,
@@ -150,8 +186,13 @@ def reconcile_show_target(
 ) -> TargetReconciliation:
     """Reconcile one show-type Plex library.
 
-    Plex library membership determines routing. TVDB IDs are used here
-    only to join existing legacy managed state to Plex during migration.
+    Plex library + Plex rating key identifies the actual Plex item.
+
+    TVDB is used only as a migration/matching signal for legacy managed
+    artwork. Multiple Plex items may legitimately expose the same TVDB
+    ID. Such duplicates are harmless unless a managed legacy record must
+    be assigned to one of them; that case is reported as ambiguous rather
+    than guessed.
     """
 
     if target.media_type is not MediaType.SHOW:
@@ -168,14 +209,14 @@ def reconcile_show_target(
         )
     ]
 
-    plex_by_tvdb: dict[
-        int,
-        ShowInventory,
-    ] = {}
-
     missing_identity: list[
         ShowInventory
     ] = []
+
+    plex_by_tvdb: dict[
+        int,
+        list[ShowInventory],
+    ] = defaultdict(list)
 
     for inventory in target_inventories:
         tvdb_id = inventory.identity.tvdb_id
@@ -186,14 +227,9 @@ def reconcile_show_target(
             )
             continue
 
-        if tvdb_id in plex_by_tvdb:
-            raise ValueError(
-                "duplicate TVDB ID "
-                f"{tvdb_id} in Plex library "
-                f"{target.library!r}"
-            )
-
-        plex_by_tvdb[tvdb_id] = inventory
+        plex_by_tvdb[tvdb_id].append(
+            inventory
+        )
 
     managed_list = list(
         managed_shows
@@ -204,8 +240,15 @@ def reconcile_show_target(
         ShowArtworkState,
     ] = {}
 
+    managed_without_identity: list[
+        ShowArtworkState
+    ] = []
+
     for state in managed_list:
         if state.tvdb_id is None:
+            managed_without_identity.append(
+                state
+            )
             continue
 
         if state.tvdb_id in managed_by_tvdb:
@@ -222,15 +265,52 @@ def reconcile_show_target(
         ReconciledShow
     ] = []
 
-    matched_tvdb_ids: set[int] = set()
+    ambiguous: list[
+        AmbiguousManagedMatch
+    ] = []
 
-    for tvdb_id, inventory in plex_by_tvdb.items():
-        state = managed_by_tvdb.get(
-            tvdb_id
+    orphaned: list[
+        ShowArtworkState
+    ] = list(managed_without_identity)
+
+    consumed_rating_keys: set[str] = set()
+
+    for tvdb_id, state in managed_by_tvdb.items():
+        candidates = plex_by_tvdb.get(
+            tvdb_id,
+            [],
         )
 
-        if state is None:
+        if not candidates:
+            orphaned.append(
+                state
+            )
             continue
+
+        if len(candidates) > 1:
+            ordered = tuple(
+                sorted(
+                    candidates,
+                    key=_inventory_sort_key,
+                )
+            )
+
+            ambiguous.append(
+                AmbiguousManagedMatch(
+                    tvdb_id=tvdb_id,
+                    artwork=state,
+                    inventories=ordered,
+                )
+            )
+
+            for inventory in ordered:
+                consumed_rating_keys.add(
+                    inventory.identity.plex_rating_key
+                )
+
+            continue
+
+        inventory = candidates[0]
 
         coverage = analyze_set_coverage(
             _artwork_set_from_state(
@@ -247,43 +327,39 @@ def reconcile_show_target(
             )
         )
 
-        matched_tvdb_ids.add(
-            tvdb_id
+        consumed_rating_keys.add(
+            inventory.identity.plex_rating_key
         )
 
     unmanaged = [
         inventory
-        for tvdb_id, inventory
-        in plex_by_tvdb.items()
-        if tvdb_id not in matched_tvdb_ids
-    ]
-
-    orphaned = [
-        state
-        for state in managed_list
+        for inventory in target_inventories
         if (
-            state.tvdb_id is None
-            or state.tvdb_id
-            not in matched_tvdb_ids
+            inventory.identity.tvdb_id is not None
+            and inventory.identity.plex_rating_key
+            not in consumed_rating_keys
         )
     ]
 
     matched.sort(
         key=lambda item: (
-            item.inventory.identity.title.casefold()
+            item.inventory.identity.title.casefold(),
+            item.inventory.identity.plex_rating_key,
         )
     )
 
     unmanaged.sort(
-        key=lambda item: (
-            item.identity.title.casefold()
-        )
+        key=_inventory_sort_key
     )
 
     missing_identity.sort(
+        key=_inventory_sort_key
+    )
+
+    ambiguous.sort(
         key=lambda item: (
-            item.identity.title.casefold()
-        )
+            item.artwork.title or ""
+        ).casefold()
     )
 
     orphaned.sort(
@@ -299,5 +375,6 @@ def reconcile_show_target(
         missing_identity=tuple(
             missing_identity
         ),
+        ambiguous=tuple(ambiguous),
         orphaned=tuple(orphaned),
     )

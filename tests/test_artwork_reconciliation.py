@@ -246,3 +246,130 @@ def test_movie_target_is_rejected_by_show_reconciliation():
             inventories=[],
             managed_shows=[],
         )
+
+
+def test_duplicate_unmanaged_tvdb_ids_are_independent_plex_items():
+    first = _inventory(
+        title="Duplicate Show",
+        tvdb_id=100,
+        library="Anime",
+    )
+
+    second = ShowInventory(
+        identity=ShowIdentity(
+            title="Duplicate Show",
+            year=2026,
+            library="Anime",
+            plex_rating_key="Anime-Duplicate-2",
+            tvdb_id=100,
+        ),
+        seasons=first.seasons,
+    )
+
+    result = reconcile_show_target(
+        target=_target("Anime"),
+        inventories=[
+            first,
+            second,
+        ],
+        managed_shows=[],
+    )
+
+    assert result.plex_show_count == 2
+    assert result.unmanaged_show_count == 2
+    assert result.ambiguous_match_count == 0
+
+
+def test_managed_tvdb_with_multiple_plex_items_is_ambiguous():
+    first = _inventory(
+        title="Duplicate Show",
+        tvdb_id=100,
+        library="Anime",
+    )
+
+    second = ShowInventory(
+        identity=ShowIdentity(
+            title="Duplicate Show",
+            year=2026,
+            library="Anime",
+            plex_rating_key="Anime-Duplicate-2",
+            tvdb_id=100,
+        ),
+        seasons=first.seasons,
+    )
+
+    result = reconcile_show_target(
+        target=_target("Anime"),
+        inventories=[
+            first,
+            second,
+        ],
+        managed_shows=[
+            _managed(
+                title="Duplicate Show",
+                tvdb_id=100,
+            ),
+        ],
+    )
+
+    assert result.plex_show_count == 2
+    assert result.managed_show_count == 0
+    assert result.unmanaged_show_count == 0
+    assert result.orphaned_show_count == 0
+
+    assert result.ambiguous_match_count == 1
+    assert result.ambiguous_plex_show_count == 2
+
+    ambiguity = result.ambiguous[0]
+
+    assert ambiguity.tvdb_id == 100
+    assert len(ambiguity.inventories) == 2
+
+
+def test_ambiguous_match_does_not_affect_other_managed_shows():
+    duplicate_one = _inventory(
+        title="Duplicate",
+        tvdb_id=100,
+        library="Anime",
+    )
+
+    duplicate_two = ShowInventory(
+        identity=ShowIdentity(
+            title="Duplicate",
+            year=2026,
+            library="Anime",
+            plex_rating_key="Anime-Duplicate-2",
+            tvdb_id=100,
+        ),
+        seasons=duplicate_one.seasons,
+    )
+
+    normal = _inventory(
+        title="Normal",
+        tvdb_id=200,
+        library="Anime",
+    )
+
+    result = reconcile_show_target(
+        target=_target("Anime"),
+        inventories=[
+            duplicate_one,
+            duplicate_two,
+            normal,
+        ],
+        managed_shows=[
+            _managed(
+                title="Duplicate",
+                tvdb_id=100,
+            ),
+            _managed(
+                title="Normal",
+                tvdb_id=200,
+            ),
+        ],
+    )
+
+    assert result.plex_show_count == 3
+    assert result.managed_show_count == 1
+    assert result.ambiguous_match_count == 1
+    assert result.complete_show_count == 1
