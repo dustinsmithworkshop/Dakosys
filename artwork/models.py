@@ -182,3 +182,53 @@ class ShowArtworkState:
             self.presentation_selection
             or self.legacy_selection
         )
+
+    # New v3 provenance model. These may independently identify the
+    # cohesive set used for episode cards and the cohesive set used for
+    # show/season presentation artwork.
+    #
+    # Legacy single-set state remains supported through the effective
+    # selection properties below.
+    episode_selection: Optional[ArtworkSetSelection] = None
+    presentation_selection: Optional[ArtworkSetSelection] = None
+
+    @property
+    def legacy_selection(
+        self,
+    ) -> Optional[ArtworkSetSelection]:
+        """Translate legacy single-set provenance when complete."""
+
+        if (
+            self.selected_set_id is None
+            or self.selected_set_source is None
+        ):
+            return None
+
+        return ArtworkSetSelection(
+            provider=self.selected_set_source,
+            set_id=self.selected_set_id,
+            creator=self.selected_creator,
+            mode=self.selection_mode,
+        )
+
+    @property
+    def effective_episode_selection(
+        self,
+    ) -> Optional[ArtworkSetSelection]:
+        """Episode-card selection with legacy fallback."""
+
+        return (
+            self.episode_selection
+            or self.legacy_selection
+        )
+
+    @property
+    def effective_presentation_selection(
+        self,
+    ) -> Optional[ArtworkSetSelection]:
+        """Show/season selection with legacy fallback."""
+
+        return (
+            self.presentation_selection
+            or self.legacy_selection
+        )
