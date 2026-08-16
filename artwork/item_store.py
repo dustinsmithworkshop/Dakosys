@@ -329,32 +329,6 @@ class ItemStorePlan:
         )
 
 
-def item_store_directory_for_target(
-    target: ArtworkTarget,
-) -> Path:
-    """Return the per-item directory corresponding to a YAML target."""
-
-    path = Path(
-        target.output_path
-    )
-
-    if (
-        path.suffix.casefold()
-        not in {
-            ".yaml",
-            ".yml",
-        }
-    ):
-        raise ValueError(
-            "Artwork item-store target must "
-            "derive from a YAML output path"
-        )
-
-    return path.with_suffix(
-        ""
-    )
-
-
 def _sha256_bytes(
     value: bytes,
 ) -> str:
@@ -632,11 +606,10 @@ def build_show_item_store_plan(
 
     if directory is None:
         directory = (
-            item_store_directory_for_target(
-                execution
-                .reconciliation
-                .target
-            )
+            execution
+            .reconciliation
+            .target
+            .output_path
         )
 
     directory = Path(

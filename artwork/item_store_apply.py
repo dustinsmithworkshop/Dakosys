@@ -26,7 +26,6 @@ from artwork.item_store import (
     MANIFEST_NAME,
     ItemStorePlan,
     build_show_item_store_plan,
-    item_store_directory_for_target,
 )
 from artwork.preview import (
     ArtworkTargetPreview,
@@ -416,11 +415,10 @@ def apply_show_item_store(
     # --------------------------------------------------------------
 
     expected_directory = (
-        item_store_directory_for_target(
-            execution
-            .reconciliation
-            .target
-        )
+        execution
+        .reconciliation
+        .target
+        .output_path
     )
 
     if (

@@ -110,7 +110,7 @@ def _execution(
         media_type=MediaType.SHOW,
         output_path=(
             tmp_path
-            / "artwork-tv.yaml"
+            / "artwork-tv"
         ),
     )
 

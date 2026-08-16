@@ -31,7 +31,7 @@ def _target(
         name=library,
         library=library,
         media_type=media_type,
-        output_path=f"artwork-{library.lower()}.yaml",
+        output_path=f"artwork-{library.lower()}",
     )
 
 

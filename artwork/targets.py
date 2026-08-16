@@ -51,12 +51,13 @@ class ArtworkTarget:
                 "Artwork target library cannot be empty"
             )
 
-        if output_path.suffix.casefold() not in {
+        if output_path.suffix.casefold() in {
             ".yaml",
             ".yml",
         }:
             raise ValueError(
-                "Artwork target output must be a YAML file"
+                "Artwork target output must be an item-store "
+                "directory, not a YAML file"
             )
 
         object.__setattr__(
@@ -437,12 +438,12 @@ def discover_artwork_targets(
                 raise ValueError(
                     f"Plex library {library!r} "
                     "cannot produce a valid "
-                    "artwork output filename"
+                    "artwork output directory"
                 )
 
             output_path = (
                 output_dir
-                / f"artwork-{slug}.yaml"
+                / f"artwork-{slug}"
             )
 
         target = ArtworkTarget(

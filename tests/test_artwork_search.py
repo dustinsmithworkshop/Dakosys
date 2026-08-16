@@ -28,7 +28,7 @@ def _target():
         media_type=MediaType.SHOW,
         output_path=(
             "/metadata/"
-            "artwork-series-vault.yaml"
+            "artwork-series-vault"
         ),
     )
 

@@ -70,14 +70,14 @@ def test_target_represents_one_plex_library():
         name="Television",
         library="Television",
         media_type=MediaType.SHOW,
-        output_path="metadata/artwork-television.yaml",
+        output_path="metadata/artwork-television",
     )
 
     assert target.name == "Television"
     assert target.library == "Television"
     assert target.media_type is MediaType.SHOW
     assert target.output_path == Path(
-        "metadata/artwork-television.yaml"
+        "metadata/artwork-television"
     )
 
 
@@ -86,23 +86,23 @@ def test_target_normalizes_string_values():
         name="  Series  ",
         library="  Series  ",
         media_type=MediaType.SHOW,
-        output_path="artwork-series.yml",
+        output_path="artwork-series",
     )
 
     assert target.name == "Series"
     assert target.library == "Series"
 
 
-def test_target_requires_yaml_output():
+def test_target_rejects_yaml_file_output():
     with pytest.raises(
         ValueError,
-        match="must be a YAML file",
+        match="item-store directory",
     ):
         ArtworkTarget(
             name="Series",
             library="Series",
             media_type=MediaType.SHOW,
-            output_path="artwork-series.txt",
+            output_path="artwork-series.yaml",
         )
 
 
@@ -183,13 +183,13 @@ def test_discovers_arbitrary_supported_plex_libraries():
         for target in targets
     ] == [
         Path(
-            "/kometa/metadata/artwork-films.yaml"
+            "/kometa/metadata/artwork-films"
         ),
         Path(
-            "/kometa/metadata/artwork-television.yaml"
+            "/kometa/metadata/artwork-television"
         ),
         Path(
-            "/kometa/metadata/artwork-kids-family.yaml"
+            "/kometa/metadata/artwork-kids-family"
         ),
     ]
 
@@ -310,7 +310,7 @@ def test_library_can_override_output_path():
                     "My Series": {
                         "output": (
                             "/custom/"
-                            "series-artwork.yml"
+                            "series-artwork"
                         ),
                     },
                 },
@@ -321,7 +321,7 @@ def test_library_can_override_output_path():
     assert targets[
         0
     ].output_path == Path(
-        "/custom/series-artwork.yml"
+        "/custom/series-artwork"
     )
 
 
@@ -342,7 +342,7 @@ def test_unicode_library_name_gets_valid_default_output():
         0
     ].output_path == Path(
         "/kometa/metadata/"
-        "artwork-日本のアニメ.yaml"
+        "artwork-日本のアニメ"
     )
 
 
@@ -491,12 +491,12 @@ def test_output_override_collision_is_rejected():
                     "overrides": {
                         "Films": {
                             "output": (
-                                "/shared/artwork.yaml"
+                                "/shared/artwork"
                             ),
                         },
                         "Series": {
                             "output": (
-                                "/shared/artwork.yaml"
+                                "/shared/artwork"
                             ),
                         },
                     },
@@ -592,5 +592,30 @@ def test_artwork_output_dir_is_independent_of_overlay_output():
 
     assert targets[0].output_path == Path(
         "/kometa/metadata/"
-        "artwork-feature-films.yaml"
+        "artwork-feature-films"
     )
+
+
+def test_default_target_is_canonical_item_store_directory():
+    plex = FakePlex(
+        FakeSection(
+            "My Television",
+            "show",
+        ),
+    )
+
+    targets = discover_artwork_targets(
+        plex,
+        _config(),
+    )
+
+    assert len(targets) == 1
+
+    target = targets[0]
+
+    assert target.output_path == Path(
+        "/kometa/metadata/"
+        "artwork-my-television"
+    )
+
+    assert target.output_path.suffix == ""

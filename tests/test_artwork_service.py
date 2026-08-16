@@ -94,7 +94,7 @@ def _target(
         library=library,
         media_type=media_type,
         output_path=(
-            f"/metadata/artwork-{slug}.yaml"
+            f"/metadata/artwork-{slug}"
         ),
     )
 
@@ -454,7 +454,7 @@ def test_duplicate_target_library_is_rejected(
                     media_type=MediaType.SHOW,
                     output_path=(
                         "/metadata/"
-                        "different.yaml"
+                        "different"
                     ),
                 ),
             ],

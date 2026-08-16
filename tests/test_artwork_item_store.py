@@ -15,7 +15,6 @@ from artwork.item_store import (
     ItemStoreCollisionError,
     build_show_item_store_plan,
     format_item_store_plan,
-    item_store_directory_for_target,
     show_item_filename,
 )
 from artwork.models import (
@@ -104,7 +103,7 @@ def _target():
         media_type=MediaType.SHOW,
         output_path=Path(
             "/kometa/metadata/"
-            "artwork-tv.yaml"
+            "artwork-tv"
         ),
     )
 
@@ -185,18 +184,6 @@ def _write_plan(
     ).write_text(
         plan.manifest.to_json(),
         encoding="utf-8",
-    )
-
-
-def test_item_store_directory_derives_from_target_yaml():
-    assert (
-        item_store_directory_for_target(
-            _target()
-        )
-        == Path(
-            "/kometa/metadata/"
-            "artwork-tv"
-        )
     )
 
 

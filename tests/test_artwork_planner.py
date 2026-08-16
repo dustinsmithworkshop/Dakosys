@@ -35,7 +35,7 @@ def _target():
         name="Series Collection",
         library="Series Collection",
         media_type=MediaType.SHOW,
-        output_path="artwork-series-collection.yaml",
+        output_path="artwork-series-collection",
     )
 
 

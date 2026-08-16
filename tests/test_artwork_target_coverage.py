@@ -171,7 +171,7 @@ def _target():
         library="TV",
         media_type=MediaType.SHOW,
         output_path=Path(
-            "/tmp/artwork-tv.yaml"
+            "/tmp/artwork-tv"
         ),
     )
 
