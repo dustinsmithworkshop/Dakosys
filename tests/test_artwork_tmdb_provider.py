@@ -178,3 +178,60 @@ def test_tmdb_artwork_client_returns_empty_for_missing_season():
     )
 
     assert cards == {}
+
+
+def test_tmdb_artwork_client_publicly_resolves_tvdb_identity():
+    from types import SimpleNamespace
+
+    session = FakeSession(
+        [
+            FakeResponse(
+                payload={
+                    "tv_results": [
+                        {
+                            "id": 456,
+                        },
+                    ],
+                }
+            ),
+        ]
+    )
+
+    client = TMDBArtworkClient(
+        api_key="test-key",
+        base_url=(
+            "https://tmdb.example/3"
+        ),
+        session=session,
+    )
+
+    identity = SimpleNamespace(
+        tmdb_id=None,
+        tvdb_id=71663,
+        imdb_id=None,
+    )
+
+    tmdb_id, source = (
+        client.resolve_tmdb_id(
+            identity
+        )
+    )
+
+    assert tmdb_id == 456
+    assert source == "tvdb"
+
+    assert session.calls == [
+        {
+            "url": (
+                "https://tmdb.example/3"
+                "/find/71663"
+            ),
+            "params": {
+                "external_source": (
+                    "tvdb_id"
+                ),
+                "api_key": "test-key",
+            },
+            "timeout": 30.0,
+        }
+    ]

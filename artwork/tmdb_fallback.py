@@ -202,6 +202,17 @@ def fill_tmdb_episode_gaps(
         else plex_tmdb_id
     )
 
+    # Artwork inventories may have a stable TVDB or IMDb identity even
+    # when Plex supplied no direct TMDB GUID. Reuse Dakosys's existing
+    # exact external-ID resolver rather than falling back to title
+    # search or fuzzy matching.
+    if tmdb_id is None:
+        tmdb_id, _resolution_source = (
+            client.resolve_tmdb_id(
+                inventory.identity
+            )
+        )
+
     if tmdb_id is None:
         return TMDBFallbackResult(
             state=state,
@@ -217,6 +228,11 @@ def fill_tmdb_episode_gaps(
     resolved = deepcopy(
         state
     )
+
+    # Preserve successfully resolved identity in durable output when
+    # the input state did not already know its TMDB ID.
+    if resolved.tmdb_id is None:
+        resolved.tmdb_id = tmdb_id
 
     filled = 0
     requests = 0

@@ -300,10 +300,18 @@ class TMDBProvider:
 
         return tmdb_id, None
 
-    def _resolve_tmdb_id(
+    def resolve_tmdb_id(
         self,
         identity: ShowIdentity,
     ) -> tuple[int | None, str | None]:
+        """Resolve a show to TMDB without title or fuzzy matching.
+
+        Resolution order:
+        1. Direct TMDB ID.
+        2. Exact TVDB external-ID lookup.
+        3. Exact IMDb external-ID lookup.
+        """
+
         if identity.tmdb_id is not None:
             return (
                 identity.tmdb_id,
@@ -345,6 +353,16 @@ class TMDBProvider:
                 return tmdb_id, source
 
         return None, "external_lookup_failed"
+
+    def _resolve_tmdb_id(
+        self,
+        identity: ShowIdentity,
+    ) -> tuple[int | None, str | None]:
+        """Backward-compatible wrapper for resolve_tmdb_id()."""
+
+        return self.resolve_tmdb_id(
+            identity
+        )
 
     def _normalize_next_episode(
         self,
@@ -389,7 +407,7 @@ class TMDBProvider:
         identity: ShowIdentity,
     ) -> ProviderResult:
         tmdb_id, resolution = (
-            self._resolve_tmdb_id(
+            self.resolve_tmdb_id(
                 identity
             )
         )

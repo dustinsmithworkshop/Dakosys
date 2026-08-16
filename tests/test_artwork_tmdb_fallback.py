@@ -127,12 +127,37 @@ class FakeClient:
     def __init__(
         self,
         responses=None,
+        *,
+        resolved_tmdb_id=None,
+        resolution_source=None,
     ):
         self.responses = (
             responses or {}
         )
 
+        self.resolved_tmdb_id = (
+            resolved_tmdb_id
+        )
+
+        self.resolution_source = (
+            resolution_source
+        )
+
         self.calls = []
+        self.resolve_calls = []
+
+    def resolve_tmdb_id(
+        self,
+        identity,
+    ):
+        self.resolve_calls.append(
+            identity
+        )
+
+        return (
+            self.resolved_tmdb_id,
+            self.resolution_source,
+        )
 
     def get_season_episode_cards(
         self,
@@ -478,4 +503,125 @@ def test_tmdb_fallback_preserves_state_on_provider_failure():
         .card
         .provider_asset_id
         == "existing"
+    )
+
+
+def test_tmdb_fallback_resolves_missing_tmdb_id_from_external_identity():
+    inventory = _inventory(
+        tmdb_id=None
+    )
+
+    state = _state(
+        tmdb_id=None
+    )
+
+    client = FakeClient(
+        {
+            1: {
+                1: _tmdb("resolved-1"),
+                2: _tmdb("resolved-2"),
+                3: _tmdb("resolved-3"),
+            },
+        },
+        resolved_tmdb_id=321,
+        resolution_source="tvdb",
+    )
+
+    result = fill_tmdb_episode_gaps(
+        inventory=inventory,
+        state=state,
+        client=client,
+    )
+
+    assert (
+        result.path
+        is TMDBFallbackPath.FILLED_ALL
+    )
+
+    assert len(
+        client.resolve_calls
+    ) == 1
+
+    assert client.calls == [
+        (321, 1),
+    ]
+
+    assert (
+        result.state.tmdb_id
+        == 321
+    )
+
+    assert (
+        result.gaps_filled
+        == 3
+    )
+
+
+def test_tmdb_fallback_does_not_resolve_when_direct_tmdb_id_exists():
+    client = FakeClient(
+        resolved_tmdb_id=999,
+        resolution_source="tvdb",
+    )
+
+    result = fill_tmdb_episode_gaps(
+        inventory=_inventory(
+            tmdb_id=100,
+        ),
+        state=_state(
+            tmdb_id=100,
+        ),
+        client=client,
+    )
+
+    assert (
+        client.resolve_calls
+        == []
+    )
+
+    assert client.calls == [
+        (100, 1),
+    ]
+
+    assert (
+        result.state.tmdb_id
+        == 100
+    )
+
+
+def test_tmdb_fallback_external_resolution_failure_remains_normal_gap():
+    inventory = _inventory(
+        tmdb_id=None
+    )
+
+    state = _state(
+        tmdb_id=None
+    )
+
+    client = FakeClient(
+        resolved_tmdb_id=None,
+        resolution_source=(
+            "external_lookup_failed"
+        ),
+    )
+
+    result = fill_tmdb_episode_gaps(
+        inventory=inventory,
+        state=state,
+        client=client,
+    )
+
+    assert (
+        result.path
+        is TMDBFallbackPath.NO_TMDB_ID
+    )
+
+    assert len(
+        client.resolve_calls
+    ) == 1
+
+    assert client.calls == []
+
+    assert (
+        result.gaps_remaining
+        == 3
     )
