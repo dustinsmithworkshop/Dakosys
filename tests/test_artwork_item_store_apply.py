@@ -293,8 +293,8 @@ def test_applies_new_complete_item_store_snapshot(
         for path
         in directory.iterdir()
     ) == {
-        "tvdb-100.yaml",
-        "tvdb-200.yaml",
+        "show-1--tvdb-100.yaml",
+        "show-2--tvdb-200.yaml",
         MANIFEST_NAME,
     }
 
@@ -507,7 +507,7 @@ def test_removes_only_previous_manifest_owned_file(
     )
 
     assert plan.removed == (
-        "tvdb-200.yaml",
+        "show-2--tvdb-200.yaml",
     )
 
     apply_show_item_store(
@@ -518,12 +518,12 @@ def test_removes_only_previous_manifest_owned_file(
 
     assert (
         directory
-        / "tvdb-100.yaml"
+        / "show-1--tvdb-100.yaml"
     ).exists()
 
     assert not (
         directory
-        / "tvdb-200.yaml"
+        / "show-2--tvdb-200.yaml"
     ).exists()
 
     assert manual.read_text(
@@ -583,7 +583,7 @@ def test_stale_plan_is_rejected_before_generated_write(
 
     assert not (
         directory
-        / "tvdb-100.yaml"
+        / "show-1--tvdb-100.yaml"
     ).exists()
 
 
@@ -671,7 +671,7 @@ def test_staging_failure_preserves_existing_live_snapshot(
     live_file = (
         tmp_path
         / "artwork-tv"
-        / "tvdb-100.yaml"
+        / "show-1--tvdb-100.yaml"
     )
 
     before = live_file.read_bytes()
@@ -770,7 +770,7 @@ def test_activation_failure_rolls_back_original_directory(
     live_file = (
         tmp_path
         / "artwork-tv"
-        / "tvdb-100.yaml"
+        / "show-1--tvdb-100.yaml"
     )
 
     before = live_file.read_bytes()
@@ -888,7 +888,7 @@ def test_successful_update_replaces_snapshot_and_cleans_transaction_dirs(
     live_file = (
         tmp_path
         / "artwork-tv"
-        / "tvdb-100.yaml"
+        / "show-1--tvdb-100.yaml"
     )
 
     before = live_file.read_bytes()
@@ -918,7 +918,7 @@ def test_successful_update_replaces_snapshot_and_cleans_transaction_dirs(
     )
 
     assert plan.updated == (
-        "tvdb-100.yaml",
+        "show-1--tvdb-100.yaml",
     )
 
     result = apply_show_item_store(

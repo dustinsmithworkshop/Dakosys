@@ -16,6 +16,7 @@ from artwork.item_store import (
     build_show_item_store_plan,
     format_item_store_plan,
     item_store_directory_for_target,
+    show_item_filename,
 )
 from artwork.models import (
     ArtworkAsset,
@@ -220,8 +221,8 @@ def test_new_store_plans_one_file_per_show(
     assert set(
         plan.added
     ) == {
-        "tvdb-100.yaml",
-        "tvdb-200.yaml",
+        "show-1--tvdb-100.yaml",
+        "show-2--tvdb-200.yaml",
     }
 
     assert plan.updated == ()
@@ -232,8 +233,8 @@ def test_new_store_plans_one_file_per_show(
         item.filename
         for item in plan.files
     } == {
-        "tvdb-100.yaml",
-        "tvdb-200.yaml",
+        "show-1--tvdb-100.yaml",
+        "show-2--tvdb-200.yaml",
     }
 
     for item in plan.files:
@@ -293,7 +294,7 @@ def test_manifest_is_deterministic_and_keyed_by_plex_identity(
         document[
             "items"
         ]["1"]["file"]
-        == "tvdb-100.yaml"
+        == "show-1--tvdb-100.yaml"
     )
 
 
@@ -330,8 +331,8 @@ def test_existing_identical_store_is_unchanged(
     assert set(
         second.unchanged
     ) == {
-        "tvdb-100.yaml",
-        "tvdb-200.yaml",
+        "show-1--tvdb-100.yaml",
+        "show-2--tvdb-200.yaml",
     }
 
 
@@ -356,7 +357,7 @@ def test_changed_owned_file_is_planned_as_update(
 
     (
         directory
-        / "tvdb-100.yaml"
+        / "show-1--tvdb-100.yaml"
     ).write_text(
         "tampered\n",
         encoding="utf-8",
@@ -370,11 +371,11 @@ def test_changed_owned_file_is_planned_as_update(
     )
 
     assert second.updated == (
-        "tvdb-100.yaml",
+        "show-1--tvdb-100.yaml",
     )
 
     assert second.unchanged == (
-        "tvdb-200.yaml",
+        "show-2--tvdb-200.yaml",
     )
 
 
@@ -420,7 +421,7 @@ def test_previous_owned_file_missing_from_execution_is_removed(
     )
 
     assert second.removed == (
-        "tvdb-200.yaml",
+        "show-2--tvdb-200.yaml",
     )
 
 
@@ -474,7 +475,7 @@ def test_unowned_desired_filename_collision_is_blocked(
 
     (
         directory
-        / "tvdb-100.yaml"
+        / "show-1--tvdb-100.yaml"
     ).write_text(
         "manual: true\n",
         encoding="utf-8",
@@ -556,4 +557,171 @@ def test_formatted_item_store_plan_is_read_only(
     assert (
         "WRITE: disabled"
         in text
+    )
+
+
+def test_show_item_filename_is_human_readable():
+    assert (
+        show_item_filename(
+            title=(
+                "Star Trek: "
+                "Strange New Worlds"
+            ),
+            tvdb_id=371572,
+        )
+        == (
+            "star-trek-strange-new-worlds"
+            "--tvdb-371572.yaml"
+        )
+    )
+
+    assert (
+        show_item_filename(
+            title="Bob's Burgers",
+            tvdb_id=194031,
+        )
+        == (
+            "bobs-burgers"
+            "--tvdb-194031.yaml"
+        )
+    )
+
+
+def test_same_title_remains_unique_by_tvdb_identity():
+    first = show_item_filename(
+        title="Example",
+        tvdb_id=100,
+    )
+
+    second = show_item_filename(
+        title="Example",
+        tvdb_id=200,
+    )
+
+    assert first == (
+        "example--tvdb-100.yaml"
+    )
+
+    assert second == (
+        "example--tvdb-200.yaml"
+    )
+
+    assert first != second
+
+
+def test_title_change_plans_owned_filename_replacement(
+    tmp_path,
+):
+    directory = (
+        tmp_path
+        / "artwork-tv"
+    )
+
+    original_inventory = (
+        _inventory(
+            "1",
+            100,
+        )
+    )
+
+    original_inventory.identity.title = (
+        "Stranger Things"
+    )
+
+    original = _execution(
+        (
+            (
+                original_inventory,
+                _state(
+                    100,
+                    "one",
+                ),
+            ),
+        )
+    )
+
+    first = (
+        build_show_item_store_plan(
+            original,
+            directory=directory,
+        )
+    )
+
+    assert first.added == (
+        "stranger-things"
+        "--tvdb-100.yaml",
+    )
+
+    _write_plan(
+        first
+    )
+
+    renamed_inventory = (
+        _inventory(
+            "1",
+            100,
+        )
+    )
+
+    renamed_inventory.identity.title = (
+        "Stranger Things (2016)"
+    )
+
+    renamed = _execution(
+        (
+            (
+                renamed_inventory,
+                _state(
+                    100,
+                    "one",
+                ),
+            ),
+        )
+    )
+
+    second = (
+        build_show_item_store_plan(
+            renamed,
+            directory=directory,
+        )
+    )
+
+    assert second.added == (
+        "stranger-things-2016"
+        "--tvdb-100.yaml",
+    )
+
+    assert second.removed == (
+        "stranger-things"
+        "--tvdb-100.yaml",
+    )
+
+
+def test_show_item_filename_handles_empty_and_long_titles():
+    assert (
+        show_item_filename(
+            title=" !!! ",
+            tvdb_id=123,
+        )
+        == "show--tvdb-123.yaml"
+    )
+
+    long_name = (
+        show_item_filename(
+            title="界" * 500,
+            tvdb_id=456,
+        )
+    )
+
+    assert (
+        len(
+            long_name.encode(
+                "utf-8"
+            )
+        )
+        < 255
+    )
+
+    assert long_name.endswith(
+        "--tvdb-456.yaml"
     )

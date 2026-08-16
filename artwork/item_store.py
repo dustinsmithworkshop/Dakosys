@@ -16,6 +16,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
+import unicodedata
 
 from artwork.kometa import (
     render_kometa_metadata,
@@ -33,6 +34,151 @@ if TYPE_CHECKING:
 
 MANIFEST_NAME = ".dakosys-manifest.json"
 MANIFEST_SCHEMA_VERSION = 1
+
+_TITLE_SLUG_MAX_BYTES = 120
+_APOSTROPHES = frozenset(
+    {
+        "'",
+        "’",
+        "‘",
+        "ʼ",
+    }
+)
+
+
+def _truncate_utf8(
+    value: str,
+    *,
+    max_bytes: int,
+) -> str:
+    """Truncate text without splitting a UTF-8 codepoint."""
+
+    encoded = value.encode(
+        "utf-8"
+    )
+
+    if len(encoded) <= max_bytes:
+        return value
+
+    return (
+        encoded[:max_bytes]
+        .decode(
+            "utf-8",
+            errors="ignore",
+        )
+    )
+
+
+def _show_title_slug(
+    title: str,
+) -> str:
+    """Return a deterministic filesystem-friendly display slug.
+
+    Unicode letters and numbers are preserved. Punctuation becomes a
+    hyphen, apostrophes are removed, and ampersands are rendered as
+    ``and``.
+
+    The slug is display convenience only. It is never used as artwork
+    identity.
+    """
+
+    normalized = (
+        unicodedata.normalize(
+            "NFKC",
+            str(
+                title
+                or ""
+            ),
+        )
+        .casefold()
+        .strip()
+    )
+
+    normalized = normalized.replace(
+        "&",
+        " and ",
+    )
+
+    characters = []
+    separator_pending = False
+
+    for character in normalized:
+        if character in _APOSTROPHES:
+            continue
+
+        if character.isalnum():
+            if (
+                separator_pending
+                and characters
+            ):
+                characters.append(
+                    "-"
+                )
+
+            characters.append(
+                character
+            )
+
+            separator_pending = False
+
+        else:
+            separator_pending = True
+
+    slug = "".join(
+        characters
+    ).strip(
+        "-"
+    )
+
+    if not slug:
+        slug = "show"
+
+    slug = (
+        _truncate_utf8(
+            slug,
+            max_bytes=(
+                _TITLE_SLUG_MAX_BYTES
+            ),
+        )
+        .rstrip(
+            "-"
+        )
+    )
+
+    return slug or "show"
+
+
+def show_item_filename(
+    *,
+    title: str,
+    tvdb_id: int,
+) -> str:
+    """Return the human-readable per-show Artwork Manager filename."""
+
+    if (
+        not isinstance(
+            tvdb_id,
+            int,
+        )
+        or isinstance(
+            tvdb_id,
+            bool,
+        )
+        or tvdb_id <= 0
+    ):
+        raise ValueError(
+            "TVDB ID must be a "
+            "positive integer"
+        )
+
+    slug = _show_title_slug(
+        title
+    )
+
+    return (
+        f"{slug}"
+        f"--tvdb-{tvdb_id}.yaml"
+    )
 
 
 class ItemStoreError(RuntimeError):
@@ -538,8 +684,13 @@ def build_show_item_store_plan(
                 f"{tvdb_id}"
             )
 
-        filename = (
-            f"tvdb-{tvdb_id}.yaml"
+        filename = show_item_filename(
+            title=(
+                inventory
+                .identity
+                .title
+            ),
+            tvdb_id=tvdb_id,
         )
 
         if filename in desired_filenames:
