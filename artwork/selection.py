@@ -214,3 +214,124 @@ def rank_challengers(
     return rank_artwork_candidates(
         challengers
     )
+
+
+
+def choose_episode_candidate(
+    assessments: Iterable[ArtworkSetAssessment],
+) -> ArtworkSetAssessment | None:
+    """Choose the best cohesive set that actually supplies episode cards."""
+
+    candidates = tuple(
+        assessment
+        for assessment in assessments
+        if (
+            assessment
+            .episode_coverage
+            .available_episode_count
+            > 0
+        )
+    )
+
+    if not candidates:
+        return None
+
+    return choose_discovery_candidate(
+        candidates
+    )
+
+
+def presentation_quality_key(
+    assessment: ArtworkSetAssessment,
+) -> tuple[bool, int, bool]:
+    """Rank one cohesive show/season presentation set.
+
+    Episode-card coverage is intentionally excluded here.
+    """
+
+    expected_seasons = set(
+        assessment.expected_season_numbers
+    )
+
+    provider_seasons = set(
+        assessment.season_poster_numbers
+    )
+
+    expected_season_posters = len(
+        expected_seasons
+        & provider_seasons
+    )
+
+    return (
+        assessment.show_poster_available,
+        expected_season_posters,
+        assessment.show_background_available,
+    )
+
+
+def choose_presentation_candidate(
+    assessments: Iterable[ArtworkSetAssessment],
+    *,
+    preferred: ArtworkSetAssessment | None = None,
+) -> ArtworkSetAssessment | None:
+    """Choose one cohesive show/season presentation set.
+
+    When presentation quality ties exactly, prefer the episode-card set
+    so Dakosys avoids splitting families unnecessarily.
+    """
+
+    candidates = tuple(
+        assessment
+        for assessment in assessments
+        if (
+            assessment.show_poster_available
+            or assessment.show_background_available
+            or bool(
+                set(
+                    assessment.expected_season_numbers
+                )
+                & set(
+                    assessment.season_poster_numbers
+                )
+            )
+        )
+    )
+
+    if not candidates:
+        return None
+
+    best_key = max(
+        presentation_quality_key(
+            assessment
+        )
+        for assessment in candidates
+    )
+
+    tied = tuple(
+        assessment
+        for assessment in candidates
+        if (
+            presentation_quality_key(
+                assessment
+            )
+            == best_key
+        )
+    )
+
+    if preferred is not None:
+        for assessment in tied:
+            if (
+                assessment.artwork_set.provider
+                is preferred.artwork_set.provider
+                and assessment.set_id
+                == preferred.set_id
+            ):
+                return assessment
+
+    return min(
+        tied,
+        key=lambda assessment: (
+            assessment.artwork_set.provider.value,
+            assessment.set_id,
+        ),
+    )

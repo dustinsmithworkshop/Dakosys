@@ -12,6 +12,9 @@ from artwork.assessment import (
 )
 from artwork.inventory import ShowInventory
 from artwork.models import (
+    ArtworkSetSelection,
+    EpisodeArtwork,
+    SeasonArtwork,
     SelectionMode,
     ShowArtworkState,
 )
@@ -21,7 +24,8 @@ from artwork.search import (
     ArtworkSearchRequest,
 )
 from artwork.selection import (
-    choose_discovery_candidate,
+    choose_episode_candidate,
+    choose_presentation_candidate,
 )
 
 
@@ -44,7 +48,17 @@ class ShowDiscoveryExecution:
     state: ShowArtworkState | None
     path: DiscoveryPath
 
+    # Primary selection retained for callers that still expect one
+    # selected assessment. Episode artwork wins when available.
     selected: ArtworkSetAssessment | None = None
+
+    episode_selected: (
+        ArtworkSetAssessment | None
+    ) = None
+
+    presentation_selected: (
+        ArtworkSetAssessment | None
+    ) = None
 
     provider_requested: bool = True
     provider_candidate_count: int = 0
@@ -55,8 +69,6 @@ class ShowDiscoveryExecution:
 
     @property
     def resolved(self) -> bool:
-        """Whether discovery produced new managed artwork state."""
-
         return self.state is not None
 
 
@@ -138,8 +150,6 @@ class LibraryDiscoveryExecution:
 def _has_usable_artwork(
     assessment: ArtworkSetAssessment,
 ) -> bool:
-    """Whether a candidate contributes any managed artwork dimension."""
-
     if (
         assessment
         .episode_coverage
@@ -154,34 +164,253 @@ def _has_usable_artwork(
     if assessment.show_background_available:
         return True
 
-    if assessment.season_poster_numbers:
-        return True
+    expected_seasons = set(
+        assessment.expected_season_numbers
+    )
 
-    return False
+    provider_seasons = set(
+        assessment.season_poster_numbers
+    )
+
+    return bool(
+        expected_seasons
+        & provider_seasons
+    )
+
+
+def _selection_from_assessment(
+    assessment: ArtworkSetAssessment | None,
+) -> ArtworkSetSelection | None:
+    if assessment is None:
+        return None
+
+    artwork_set = assessment.artwork_set
+
+    return ArtworkSetSelection(
+        provider=artwork_set.provider,
+        set_id=artwork_set.set_id,
+        creator=artwork_set.creator,
+        mode=SelectionMode.AUTO,
+    )
+
+
+def _resolved_seasons(
+    *,
+    inventory: ShowInventory,
+    episode_selected: (
+        ArtworkSetAssessment | None
+    ),
+    presentation_selected: (
+        ArtworkSetAssessment | None
+    ),
+) -> dict[int, SeasonArtwork]:
+    """Resolve Plex-backed seasons from the two cohesive families."""
+
+    expected = inventory.expected_episodes()
+
+    episode_set = (
+        episode_selected.artwork_set
+        if episode_selected is not None
+        else None
+    )
+
+    presentation_set = (
+        presentation_selected.artwork_set
+        if presentation_selected is not None
+        else None
+    )
+
+    resolved: dict[
+        int,
+        SeasonArtwork,
+    ] = {}
+
+    for season_number in sorted(
+        expected
+    ):
+        expected_episodes = expected[
+            season_number
+        ]
+
+        episode_season = (
+            episode_set.seasons.get(
+                season_number
+            )
+            if episode_set is not None
+            else None
+        )
+
+        presentation_season = (
+            presentation_set.seasons.get(
+                season_number
+            )
+            if presentation_set is not None
+            else None
+        )
+
+        poster = (
+            presentation_season.poster
+            if (
+                presentation_season
+                is not None
+                and presentation_season.poster
+                is not None
+                and presentation_season
+                .poster
+                .available
+            )
+            else None
+        )
+
+        episodes: dict[
+            int,
+            EpisodeArtwork,
+        ] = {}
+
+        if episode_season is not None:
+            for episode_number in sorted(
+                expected_episodes
+            ):
+                episode = (
+                    episode_season
+                    .episodes
+                    .get(
+                        episode_number
+                    )
+                )
+
+                if (
+                    episode is None
+                    or episode.card is None
+                    or not episode.card.available
+                ):
+                    continue
+
+                episodes[
+                    episode_number
+                ] = EpisodeArtwork(
+                    episode_number=(
+                        episode_number
+                    ),
+                    card=episode.card,
+                )
+
+        if (
+            poster is not None
+            or episodes
+        ):
+            resolved[
+                season_number
+            ] = SeasonArtwork(
+                season_number=(
+                    season_number
+                ),
+                poster=poster,
+                episodes=episodes,
+            )
+
+    return resolved
 
 
 def _state_from_discovery(
     *,
     inventory: ShowInventory,
-    selected: ArtworkSetAssessment,
+    episode_selected: (
+        ArtworkSetAssessment | None
+    ),
+    presentation_selected: (
+        ArtworkSetAssessment | None
+    ),
 ) -> ShowArtworkState:
-    """Create initial durable state from a discovery selection."""
+    """Create initial resolved state from independent artwork families."""
 
     identity = inventory.identity
-    artwork_set = selected.artwork_set
+
+    episode_selection = (
+        _selection_from_assessment(
+            episode_selected
+        )
+    )
+
+    presentation_selection = (
+        _selection_from_assessment(
+            presentation_selected
+        )
+    )
+
+    # Keep legacy single-set fields populated while older managed
+    # reevaluation code still consumes them. Episode-card provenance is
+    # primary when it exists because gap filling is the central artwork
+    # objective.
+    legacy_selection = (
+        episode_selection
+        or presentation_selection
+    )
+
+    presentation_set = (
+        presentation_selected.artwork_set
+        if presentation_selected is not None
+        else None
+    )
+
+    poster = (
+        presentation_set.poster
+        if (
+            presentation_set is not None
+            and presentation_set.poster is not None
+            and presentation_set.poster.available
+        )
+        else None
+    )
+
+    background = (
+        presentation_set.background
+        if (
+            presentation_set is not None
+            and presentation_set.background is not None
+            and presentation_set.background.available
+        )
+        else None
+    )
 
     return ShowArtworkState(
         title=identity.title,
         tvdb_id=identity.tvdb_id,
         tmdb_id=identity.tmdb_id,
         imdb_id=identity.imdb_id,
-        poster=artwork_set.poster,
-        background=artwork_set.background,
-        seasons=artwork_set.seasons,
-        selected_set_id=artwork_set.set_id,
-        selected_set_source=artwork_set.provider,
-        selected_creator=artwork_set.creator,
+        poster=poster,
+        background=background,
+        seasons=_resolved_seasons(
+            inventory=inventory,
+            episode_selected=(
+                episode_selected
+            ),
+            presentation_selected=(
+                presentation_selected
+            ),
+        ),
+        selected_set_id=(
+            legacy_selection.set_id
+            if legacy_selection is not None
+            else None
+        ),
+        selected_set_source=(
+            legacy_selection.provider
+            if legacy_selection is not None
+            else None
+        ),
+        selected_creator=(
+            legacy_selection.creator
+            if legacy_selection is not None
+            else None
+        ),
         selection_mode=SelectionMode.AUTO,
+        episode_selection=(
+            episode_selection
+        ),
+        presentation_selection=(
+            presentation_selection
+        ),
     )
 
 
@@ -190,10 +419,7 @@ def discover_unmanaged_show(
     inventory: ShowInventory,
     provider: ArtworkProvider,
 ) -> ShowDiscoveryExecution:
-    """Discover artwork for one previously unmanaged Plex show.
-
-    This function performs no file writes and makes no Plex changes.
-    """
+    """Discover artwork for one previously unmanaged Plex show."""
 
     identity = inventory.identity
 
@@ -266,26 +492,51 @@ def discover_unmanaged_show(
             usable_candidate_count=0,
         )
 
-    selected = choose_discovery_candidate(
-        usable
+    episode_selected = (
+        choose_episode_candidate(
+            usable
+        )
     )
 
-    if selected is None:
+    presentation_selected = (
+        choose_presentation_candidate(
+            usable,
+            preferred=episode_selected,
+        )
+    )
+
+    primary = (
+        episode_selected
+        or presentation_selected
+    )
+
+    if primary is None:
         raise RuntimeError(
             "usable discovery candidates produced "
-            "no selection"
+            "no artwork-family selection"
         )
 
     state = _state_from_discovery(
         inventory=inventory,
-        selected=selected,
+        episode_selected=(
+            episode_selected
+        ),
+        presentation_selected=(
+            presentation_selected
+        ),
     )
 
     return ShowDiscoveryExecution(
         inventory=inventory,
         state=state,
         path=DiscoveryPath.SELECTED,
-        selected=selected,
+        selected=primary,
+        episode_selected=(
+            episode_selected
+        ),
+        presentation_selected=(
+            presentation_selected
+        ),
         provider_candidate_count=len(
             assessments
         ),
