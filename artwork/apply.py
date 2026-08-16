@@ -22,6 +22,9 @@ from artwork.preview import (
     ArtworkTargetPreview,
     build_show_target_preview,
 )
+from artwork.projection import (
+    project_show_target_states,
+)
 from artwork.target_execution import (
     ShowTargetExecution,
 )
@@ -105,22 +108,24 @@ def apply_show_target(
             )
         )
 
-    resolved_states = (
-        execution.resolved_states
+    output_states = (
+        project_show_target_states(
+            execution
+        )
     )
 
     if (
-        len(resolved_states)
+        len(output_states)
         != current_preview
         .proposed_state_count
     ):
         raise ArtworkApplyError(
-            "resolved state count does not "
+            "projected state count does not "
             "match validated preview"
         )
 
     path = write_kometa_metadata(
-        resolved_states,
+        output_states,
         current_preview.output_path,
     )
 
@@ -128,6 +133,6 @@ def apply_show_target(
         path=path,
         preview=current_preview,
         state_count=len(
-            resolved_states
+            output_states
         ),
     )

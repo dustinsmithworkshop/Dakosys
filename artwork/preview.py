@@ -17,6 +17,9 @@ from typing import TYPE_CHECKING
 
 from artwork.kometa import render_kometa_metadata
 from artwork.models import ShowArtworkState
+from artwork.projection import (
+    project_show_target_items,
+)
 
 if TYPE_CHECKING:
     from artwork.inventory import ShowInventory
@@ -224,27 +227,18 @@ def _proposed_state_map(
     tuple[str, str],
     ShowArtworkState,
 ]:
-    """Return prospective state after provider execution."""
-
-    if execution.coverage_enabled:
-        results = (
-            execution.managed_coverage
-            + execution.discovery_coverage
-        )
-    else:
-        results = (
-            execution.managed.results
-            + execution.discovery.results
-        )
+    """Return Plex-projected prospective state after execution."""
 
     states = {}
 
-    for result in results:
-        if result.state is None:
-            continue
-
+    for (
+        inventory,
+        state,
+    ) in project_show_target_items(
+        execution
+    ):
         key = _inventory_key(
-            result.inventory
+            inventory
         )
 
         if key in states:
@@ -256,10 +250,9 @@ def _proposed_state_map(
 
         states[
             key
-        ] = result.state
+        ] = state
 
     return states
-
 
 def _card_for(
     state: ShowArtworkState | None,

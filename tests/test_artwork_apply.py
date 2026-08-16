@@ -80,6 +80,14 @@ def test_safe_reviewed_preview_is_atomically_written(
         lambda value: preview,
     )
 
+    monkeypatch.setattr(
+        apply,
+        "project_show_target_states",
+        lambda value: (
+            value.resolved_states
+        ),
+    )
+
     calls = []
 
     def fake_write(
@@ -213,6 +221,14 @@ def test_unsafe_preview_is_rejected_before_write(
         lambda value: preview,
     )
 
+    monkeypatch.setattr(
+        apply,
+        "project_show_target_states",
+        lambda value: (
+            value.resolved_states
+        ),
+    )
+
     called = False
 
     def forbidden_write(
@@ -263,6 +279,14 @@ def test_resolved_state_count_must_match_preview(
         lambda value: preview,
     )
 
+    monkeypatch.setattr(
+        apply,
+        "project_show_target_states",
+        lambda value: (
+            value.resolved_states
+        ),
+    )
+
     called = False
 
     def forbidden_write(
@@ -306,6 +330,14 @@ def test_writer_failure_propagates_without_false_success(
         apply,
         "build_show_target_preview",
         lambda value: preview,
+    )
+
+    monkeypatch.setattr(
+        apply,
+        "project_show_target_states",
+        lambda value: (
+            value.resolved_states
+        ),
     )
 
     def failing_write(
