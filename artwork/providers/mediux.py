@@ -366,6 +366,37 @@ class MediuxClient:
             )
 
 
+MEDIUX_ASSET_BASE_URL = (
+    "https://api.mediux.pro/assets"
+)
+
+
+def mediux_asset_url(
+    provider_asset_id: str,
+) -> str:
+    """Build the public delivery URL for a MediUX asset."""
+
+    if not isinstance(
+        provider_asset_id,
+        str,
+    ):
+        raise ValueError(
+            "MediUX asset ID must be a string"
+        )
+
+    asset_id = provider_asset_id.strip()
+
+    if not asset_id:
+        raise ValueError(
+            "MediUX asset ID cannot be empty"
+        )
+
+    return (
+        f"{MEDIUX_ASSET_BASE_URL}/"
+        f"{asset_id}"
+    )
+
+
 def _external_url(
     value: Any,
 ) -> str | None:
@@ -417,8 +448,13 @@ def _asset(
     return ArtworkAsset(
         kind=kind,
         source=ArtworkSource.MEDIUX,
-        url=_external_url(
-            raw.get("src")
+        url=(
+            _external_url(
+                raw.get("src")
+            )
+            or mediux_asset_url(
+                asset_id
+            )
         ),
         provider_asset_id=asset_id,
         quality=ArtworkQuality.CURATED,

@@ -148,7 +148,10 @@ def test_non_url_src_is_not_treated_as_kometa_url():
         .card
     )
 
-    assert card.url is None
+    assert (
+        card.url
+        == "https://api.mediux.pro/assets/s1e1-card"
+    )
     assert card.provider_asset_id == "s1e1-card"
 
 
@@ -389,4 +392,34 @@ def test_client_raises_on_graphql_errors():
     ):
         client.get_show_sets(
             549
+        )
+
+
+
+def test_mediux_asset_url_builds_public_url():
+    from artwork.providers.mediux import (
+        mediux_asset_url,
+    )
+
+    assert (
+        mediux_asset_url(
+            "94de7ab0-993f-4226-a211-c47465f56e31"
+        )
+        ==
+        "https://api.mediux.pro/assets/"
+        "94de7ab0-993f-4226-a211-c47465f56e31"
+    )
+
+
+def test_mediux_asset_url_rejects_empty_id():
+    from artwork.providers.mediux import (
+        mediux_asset_url,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="cannot be empty",
+    ):
+        mediux_asset_url(
+            "   "
         )
