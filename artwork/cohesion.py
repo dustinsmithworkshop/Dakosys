@@ -195,12 +195,18 @@ class MigrationCompatibility:
         ...,
     ] = ()
 
+    episode_card_regressions: tuple[
+        tuple[int, int],
+        ...,
+    ] = ()
+
     @property
     def eligible(self) -> bool:
         return not (
             self.show_poster_regression
             or self.show_background_regression
             or self.season_poster_regressions
+            or self.episode_card_regressions
         )
 
     @property
@@ -220,6 +226,11 @@ class MigrationCompatibility:
         if self.season_poster_regressions:
             reasons.append(
                 "season_poster_regression"
+            )
+
+        if self.episode_card_regressions:
+            reasons.append(
+                "episode_card_regression"
             )
 
         return tuple(reasons)
@@ -281,6 +292,49 @@ def assess_migration_compatibility(
         .available_expected_season_poster_numbers
     )
 
+    current_cards: set[
+        tuple[int, int]
+    ] = set()
+
+    challenger_cards: set[
+        tuple[int, int]
+    ] = set()
+
+    for season in (
+        current
+        .episode_coverage
+        .seasons
+    ):
+        current_cards.update(
+            (
+                season.season_number,
+                episode_number,
+            )
+            for episode_number
+            in season.available_episodes
+        )
+
+    for season in (
+        challenger
+        .episode_coverage
+        .seasons
+    ):
+        challenger_cards.update(
+            (
+                season.season_number,
+                episode_number,
+            )
+            for episode_number
+            in season.available_episodes
+        )
+
+    episode_card_regressions = tuple(
+        sorted(
+            current_cards
+            - challenger_cards
+        )
+    )
+
     return MigrationCompatibility(
         show_poster_regression=(
             current.show_poster_available
@@ -295,5 +349,8 @@ def assess_migration_compatibility(
                 current_seasons
                 - challenger_seasons
             )
+        ),
+        episode_card_regressions=(
+            episode_card_regressions
         ),
     )

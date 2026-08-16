@@ -474,3 +474,207 @@ def test_compatibility_requires_same_plex_inventory():
             current,
             challenger,
         )
+
+
+def test_migration_cannot_drop_existing_episode_cards():
+    current = assess_artwork_set(
+        ArtworkSet(
+            provider=ArtworkSource.MEDIUX,
+            set_id="A",
+            seasons={
+                1: SeasonArtwork(
+                    season_number=1,
+                    episodes={
+                        number: EpisodeArtwork(
+                            episode_number=number,
+                            card=_asset(
+                                ArtworkKind.EPISODE_CARD,
+                                f"a-{number}",
+                            ),
+                        )
+                        for number in range(1, 5)
+                    },
+                ),
+            },
+        ),
+        {
+            1: frozenset(range(1, 9)),
+        },
+    )
+
+    challenger = assess_artwork_set(
+        ArtworkSet(
+            provider=ArtworkSource.MEDIUX,
+            set_id="B",
+            seasons={
+                1: SeasonArtwork(
+                    season_number=1,
+                    episodes={
+                        number: EpisodeArtwork(
+                            episode_number=number,
+                            card=_asset(
+                                ArtworkKind.EPISODE_CARD,
+                                f"b-{number}",
+                            ),
+                        )
+                        for number in range(3, 9)
+                    },
+                ),
+            },
+        ),
+        {
+            1: frozenset(range(1, 9)),
+        },
+    )
+
+    compatibility = (
+        assess_migration_compatibility(
+            current,
+            challenger,
+        )
+    )
+
+    assert compatibility.eligible is False
+
+    assert (
+        compatibility.episode_card_regressions
+        == (
+            (1, 1),
+            (1, 2),
+        )
+    )
+
+    assert (
+        "episode_card_regression"
+        in compatibility.reasons
+    )
+
+
+def test_migration_can_add_cards_without_losing_existing_cards():
+    current = assess_artwork_set(
+        ArtworkSet(
+            provider=ArtworkSource.MEDIUX,
+            set_id="A",
+            seasons={
+                1: SeasonArtwork(
+                    season_number=1,
+                    episodes={
+                        number: EpisodeArtwork(
+                            episode_number=number,
+                            card=_asset(
+                                ArtworkKind.EPISODE_CARD,
+                                f"a-{number}",
+                            ),
+                        )
+                        for number in range(1, 5)
+                    },
+                ),
+            },
+        ),
+        {
+            1: frozenset(range(1, 9)),
+        },
+    )
+
+    challenger = assess_artwork_set(
+        ArtworkSet(
+            provider=ArtworkSource.MEDIUX,
+            set_id="B",
+            seasons={
+                1: SeasonArtwork(
+                    season_number=1,
+                    episodes={
+                        number: EpisodeArtwork(
+                            episode_number=number,
+                            card=_asset(
+                                ArtworkKind.EPISODE_CARD,
+                                f"b-{number}",
+                            ),
+                        )
+                        for number in range(1, 7)
+                    },
+                ),
+            },
+        ),
+        {
+            1: frozenset(range(1, 9)),
+        },
+    )
+
+    compatibility = (
+        assess_migration_compatibility(
+            current,
+            challenger,
+        )
+    )
+
+    assert compatibility.eligible is True
+
+    assert (
+        compatibility.episode_card_regressions
+        == ()
+    )
+
+
+def test_complete_challenger_never_regresses_expected_episode_cards():
+    current = assess_artwork_set(
+        ArtworkSet(
+            provider=ArtworkSource.MEDIUX,
+            set_id="A",
+            seasons={
+                1: SeasonArtwork(
+                    season_number=1,
+                    episodes={
+                        number: EpisodeArtwork(
+                            episode_number=number,
+                            card=_asset(
+                                ArtworkKind.EPISODE_CARD,
+                                f"a-{number}",
+                            ),
+                        )
+                        for number in range(1, 5)
+                    },
+                ),
+            },
+        ),
+        {
+            1: frozenset(range(1, 9)),
+        },
+    )
+
+    challenger = assess_artwork_set(
+        ArtworkSet(
+            provider=ArtworkSource.MEDIUX,
+            set_id="B",
+            seasons={
+                1: SeasonArtwork(
+                    season_number=1,
+                    episodes={
+                        number: EpisodeArtwork(
+                            episode_number=number,
+                            card=_asset(
+                                ArtworkKind.EPISODE_CARD,
+                                f"b-{number}",
+                            ),
+                        )
+                        for number in range(1, 9)
+                    },
+                ),
+            },
+        ),
+        {
+            1: frozenset(range(1, 9)),
+        },
+    )
+
+    compatibility = (
+        assess_migration_compatibility(
+            current,
+            challenger,
+        )
+    )
+
+    assert (
+        compatibility.episode_card_regressions
+        == ()
+    )
