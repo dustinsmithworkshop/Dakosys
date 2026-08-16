@@ -20,6 +20,7 @@ COPY fonts/Juventus-Fans-Bold.ttf /app/fonts/
 
 COPY *.py ./
 COPY tv_metadata/ ./tv_metadata/
+COPY artwork/ ./artwork/
 
 COPY --from=frontend-builder /frontend/out /app/web/out
 
