@@ -254,12 +254,28 @@ def test_executes_only_unambiguous_managed_matches():
         == "B"
     )
 
-    assert len(provider.requests) == 1
+    assert len(provider.requests) == 2
 
     assert (
         provider.requests[0]
         .plex_rating_key
         == "managed"
+    )
+
+    assert (
+        provider.requests[1]
+        .plex_rating_key
+        == "unmanaged"
+    )
+
+    assert (
+        result.discovery.selected_count
+        == 0
+    )
+
+    assert (
+        result.discovery.no_candidates_count
+        == 1
     )
 
 
@@ -339,7 +355,23 @@ def test_orphaned_state_is_not_executed():
         == 0
     )
 
-    assert provider.requests == []
+    assert (
+        result.discovery.unmanaged_count
+        == 1
+    )
+
+    assert (
+        result.discovery.no_candidates_count
+        == 1
+    )
+
+    assert len(provider.requests) == 1
+
+    assert (
+        provider.requests[0]
+        .plex_rating_key
+        == "other"
+    )
 
 
 def test_complete_managed_match_skips_provider():
@@ -449,3 +481,192 @@ def test_provider_error_remains_resolved_from_durable_state():
     )
 
     assert len(provider.requests) == 1
+
+
+
+def test_unmanaged_show_is_discovered_into_prospective_state():
+    inventory = _inventory(
+        rating_key="new",
+        tvdb_id=99,
+        title="New Plex Show",
+    )
+
+    provider = FakeProvider(
+        {
+            "new": [
+                _set(
+                    "NEW",
+                    4,
+                ),
+            ],
+        }
+    )
+
+    result = execute_show_target(
+        target=_target(),
+        inventories=(
+            inventory,
+        ),
+        managed_shows=(),
+        provider=provider,
+    )
+
+    assert result.matched_count == 0
+    assert result.unmanaged_count == 1
+
+    assert (
+        result.discovery.selected_count
+        == 1
+    )
+
+    assert (
+        result.discovered_count
+        == 1
+    )
+
+    assert (
+        result.resolved_count
+        == 1
+    )
+
+    assert (
+        result.resolved_states[0]
+        .title
+        == "New Plex Show"
+    )
+
+    assert (
+        result.resolved_states[0]
+        .selected_set_id
+        == "NEW"
+    )
+
+    assert (
+        result.provider_request_count
+        == 1
+    )
+
+
+def test_missing_identity_is_not_sent_to_discovery():
+    inventory = _inventory(
+        rating_key="missing",
+        tvdb_id=None,
+        title="Missing Identity",
+    )
+
+    provider = FakeProvider()
+
+    result = execute_show_target(
+        target=_target(),
+        inventories=(
+            inventory,
+        ),
+        managed_shows=(),
+        provider=provider,
+    )
+
+    assert (
+        result.missing_identity_count
+        == 1
+    )
+
+    assert (
+        result.unmanaged_count
+        == 0
+    )
+
+    assert (
+        result.discovery.unmanaged_count
+        == 0
+    )
+
+    assert (
+        result.provider_request_count
+        == 0
+    )
+
+    assert provider.requests == []
+
+
+def test_target_reports_managed_and_discovery_provider_errors():
+    managed_inventory = _inventory(
+        rating_key="managed-error",
+        tvdb_id=1,
+        title="Managed Error",
+    )
+
+    unmanaged_inventory = _inventory(
+        rating_key="discovery-error",
+        tvdb_id=2,
+        title="Discovery Error",
+    )
+
+    state = _state(
+        tvdb_id=1,
+        episodes=2,
+    )
+
+    provider = FakeProvider(
+        {
+            "managed-error": RuntimeError(
+                "managed provider error"
+            ),
+            "discovery-error": RuntimeError(
+                "discovery provider error"
+            ),
+        }
+    )
+
+    result = execute_show_target(
+        target=_target(),
+        inventories=(
+            managed_inventory,
+            unmanaged_inventory,
+        ),
+        managed_shows=(
+            state,
+        ),
+        provider=provider,
+    )
+
+    assert (
+        result.managed.provider_error_count
+        == 1
+    )
+
+    assert (
+        result.discovery.provider_error_count
+        == 1
+    )
+
+    assert (
+        result.provider_error_count
+        == 2
+    )
+
+    # Managed provider failure preserves durable state.
+    assert (
+        result.managed.resolved_count
+        == 1
+    )
+
+    # Discovery failure cannot create new state.
+    assert (
+        result.discovery.selected_count
+        == 0
+    )
+
+    assert (
+        result.resolved_count
+        == 1
+    )
+
+    assert (
+        result.resolved_states[0]
+        is state
+    )
+
+    assert (
+        result.provider_request_count
+        == 2
+    )

@@ -5,6 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from artwork.discovery import (
+    LibraryDiscoveryExecution,
+    discover_unmanaged_library,
+)
 from artwork.execution import (
     ManagedLibraryExecution,
     execute_managed_library,
@@ -21,10 +25,11 @@ from artwork.targets import ArtworkTarget
 
 @dataclass(frozen=True)
 class ShowTargetExecution:
-    """Reconciliation plus managed execution for one show target."""
+    """Reconciliation plus artwork execution for one show target."""
 
     reconciliation: TargetReconciliation
     managed: ManagedLibraryExecution
+    discovery: LibraryDiscoveryExecution
 
     @property
     def matched_count(self) -> int:
@@ -57,10 +62,43 @@ class ShowTargetExecution:
         )
 
     @property
+    def discovered_count(self) -> int:
+        return self.discovery.selected_count
+
+    @property
     def resolved_states(
         self,
     ) -> tuple[ShowArtworkState, ...]:
-        return self.managed.resolved_states
+        """Prospective complete managed state for this target."""
+
+        return (
+            self.managed.resolved_states
+            + self.discovery.selected_states
+        )
+
+    @property
+    def resolved_count(self) -> int:
+        return len(
+            self.resolved_states
+        )
+
+    @property
+    def provider_request_count(
+        self,
+    ) -> int:
+        return (
+            self.managed.provider_request_count
+            + self.discovery.provider_request_count
+        )
+
+    @property
+    def provider_error_count(
+        self,
+    ) -> int:
+        return (
+            self.managed.provider_error_count
+            + self.discovery.provider_error_count
+        )
 
 
 def execute_show_target(
@@ -71,13 +109,14 @@ def execute_show_target(
     provider: ArtworkProvider,
     incomplete_migration_threshold: float = 0.25,
 ) -> ShowTargetExecution:
-    """Reconcile and execute managed shows for one Plex library.
+    """Reconcile and execute one Plex show-library target.
 
-    Only unambiguous managed matches are sent to providers.
+    Existing managed shows are reevaluated.
 
-    Unmanaged shows, missing identities, ambiguities, and orphaned
-    durable state remain explicit reconciliation outcomes for later
-    orchestration/reporting.
+    Previously unmanaged shows are sent through discovery.
+
+    Missing identities, ambiguous managed matches, and orphaned durable
+    state remain explicit reconciliation outcomes and are never guessed.
 
     This function performs no file writes and makes no Plex changes.
     """
@@ -88,7 +127,7 @@ def execute_show_target(
         managed_shows=managed_shows,
     )
 
-    items = tuple(
+    managed_items = tuple(
         (
             reconciled.inventory,
             reconciled.artwork,
@@ -98,7 +137,7 @@ def execute_show_target(
     )
 
     managed = execute_managed_library(
-        items=items,
+        items=managed_items,
         provider=provider,
         incomplete_migration_threshold=(
             incomplete_migration_threshold
@@ -114,7 +153,24 @@ def execute_show_target(
             "match reconciliation"
         )
 
+    discovery = discover_unmanaged_library(
+        inventories=(
+            reconciliation.unmanaged
+        ),
+        provider=provider,
+    )
+
+    if (
+        discovery.unmanaged_count
+        != len(reconciliation.unmanaged)
+    ):
+        raise RuntimeError(
+            "discovery execution count does not "
+            "match reconciliation"
+        )
+
     return ShowTargetExecution(
         reconciliation=reconciliation,
         managed=managed,
+        discovery=discovery,
     )
