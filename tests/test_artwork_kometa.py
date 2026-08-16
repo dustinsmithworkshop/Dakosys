@@ -1,40 +1,64 @@
 from pathlib import Path
 
+import pytest
 import yaml
 
 from artwork.kometa import (
     build_kometa_metadata,
+    render_kometa_metadata,
     write_kometa_metadata,
 )
 from artwork.migration import import_mediux_metadata
 
 
-FIXTURE = Path("tests/fixtures/mediux_sample.yml")
+FIXTURE = Path(
+    "tests/fixtures/mediux_sample.yml"
+)
 
 
 def test_builds_kometa_metadata():
-    shows = import_mediux_metadata(FIXTURE)
+    shows = import_mediux_metadata(
+        FIXTURE
+    )
 
-    generated = build_kometa_metadata(shows)
+    generated = (
+        build_kometa_metadata(
+            shows
+        )
+    )
 
     assert "metadata" in generated
-    assert set(generated["metadata"]) == {
+
+    assert set(
+        generated["metadata"]
+    ) == {
         301824,
         999999,
     }
 
 
 def test_generates_show_level_artwork():
-    shows = import_mediux_metadata(FIXTURE)
+    shows = import_mediux_metadata(
+        FIXTURE
+    )
 
-    generated = build_kometa_metadata(shows)
+    generated = (
+        build_kometa_metadata(
+            shows
+        )
+    )
 
-    show = generated["metadata"][301824]
+    show = (
+        generated[
+            "metadata"
+        ][301824]
+    )
 
     assert (
         show["url_poster"]
         == "https://api.mediux.pro/assets/example-show-poster"
     )
+
     assert (
         show["url_background"]
         == "https://api.mediux.pro/assets/example-show-background"
@@ -42,13 +66,22 @@ def test_generates_show_level_artwork():
 
 
 def test_generates_season_and_episode_artwork():
-    shows = import_mediux_metadata(FIXTURE)
+    shows = import_mediux_metadata(
+        FIXTURE
+    )
 
-    generated = build_kometa_metadata(shows)
+    generated = (
+        build_kometa_metadata(
+            shows
+        )
+    )
 
     season = (
-        generated["metadata"][301824]
-        ["seasons"][1]
+        generated[
+            "metadata"
+        ][301824][
+            "seasons"
+        ][1]
     )
 
     assert (
@@ -56,43 +89,90 @@ def test_generates_season_and_episode_artwork():
         == "https://api.mediux.pro/assets/example-season-poster"
     )
 
-    assert set(season["episodes"]) == {1, 2}
+    assert set(
+        season["episodes"]
+    ) == {
+        1,
+        2,
+    }
 
     assert (
-        season["episodes"][1]["url_poster"]
+        season[
+            "episodes"
+        ][1][
+            "url_poster"
+        ]
         == "https://api.mediux.pro/assets/example-s01e01"
     )
 
 
 def test_preserves_specials_and_partial_coverage():
-    shows = import_mediux_metadata(FIXTURE)
+    shows = import_mediux_metadata(
+        FIXTURE
+    )
 
-    generated = build_kometa_metadata(shows)
+    generated = (
+        build_kometa_metadata(
+            shows
+        )
+    )
 
-    seasons = generated["metadata"][999999]["seasons"]
+    seasons = (
+        generated[
+            "metadata"
+        ][999999][
+            "seasons"
+        ]
+    )
 
     assert 0 in seasons
     assert 1 in seasons
 
-    assert set(seasons[0]["episodes"]) == {1}
-    assert set(seasons[1]["episodes"]) == {1, 3}
+    assert set(
+        seasons[0]["episodes"]
+    ) == {
+        1,
+    }
+
+    assert set(
+        seasons[1]["episodes"]
+    ) == {
+        1,
+        3,
+    }
 
 
 def test_round_trip_is_semantically_equivalent():
     original = yaml.safe_load(
-        FIXTURE.read_text(encoding="utf-8")
+        FIXTURE.read_text(
+            encoding="utf-8"
+        )
     )
 
-    shows = import_mediux_metadata(FIXTURE)
-    generated = build_kometa_metadata(shows)
+    shows = import_mediux_metadata(
+        FIXTURE
+    )
+
+    generated = (
+        build_kometa_metadata(
+            shows
+        )
+    )
 
     assert generated == original
 
 
-def test_writes_valid_yaml(tmp_path):
-    shows = import_mediux_metadata(FIXTURE)
+def test_writes_valid_yaml(
+    tmp_path,
+):
+    shows = import_mediux_metadata(
+        FIXTURE
+    )
 
-    output = tmp_path / "generated.yml"
+    output = (
+        tmp_path
+        / "generated.yml"
+    )
 
     write_kometa_metadata(
         shows,
@@ -100,25 +180,289 @@ def test_writes_valid_yaml(tmp_path):
     )
 
     parsed = yaml.safe_load(
-        output.read_text(encoding="utf-8")
+        output.read_text(
+            encoding="utf-8"
+        )
     )
 
     assert (
         parsed
-        == build_kometa_metadata(shows)
+        == build_kometa_metadata(
+            shows
+        )
     )
 
 
 def test_generates_canonical_season_for_legacy_input():
     legacy = Path(
-        "tests/fixtures/mediux_legacy_implicit_season.yml"
+        "tests/fixtures/"
+        "mediux_legacy_implicit_season.yml"
     )
 
-    shows = import_mediux_metadata(legacy)
-    generated = build_kometa_metadata(shows)
+    shows = import_mediux_metadata(
+        legacy
+    )
 
-    show = generated["metadata"][888888]
+    generated = (
+        build_kometa_metadata(
+            shows
+        )
+    )
 
-    assert set(show["seasons"]) == {1}
-    assert "episodes" in show["seasons"][1]
-    assert set(show["seasons"][1]["episodes"]) == {1, 2}
+    show = (
+        generated[
+            "metadata"
+        ][888888]
+    )
+
+    assert set(
+        show["seasons"]
+    ) == {
+        1,
+    }
+
+    assert (
+        "episodes"
+        in show[
+            "seasons"
+        ][1]
+    )
+
+    assert set(
+        show[
+            "seasons"
+        ][1][
+            "episodes"
+        ]
+    ) == {
+        1,
+        2,
+    }
+
+
+def test_rendered_metadata_round_trips():
+    shows = import_mediux_metadata(
+        FIXTURE
+    )
+
+    rendered = (
+        render_kometa_metadata(
+            shows
+        )
+    )
+
+    parsed = yaml.safe_load(
+        rendered
+    )
+
+    assert (
+        parsed
+        == build_kometa_metadata(
+            shows
+        )
+    )
+
+
+def test_rendering_is_deterministic_across_input_order():
+    shows = tuple(
+        import_mediux_metadata(
+            FIXTURE
+        )
+    )
+
+    forward = (
+        render_kometa_metadata(
+            shows
+        )
+    )
+
+    reverse = (
+        render_kometa_metadata(
+            reversed(
+                shows
+            )
+        )
+    )
+
+    assert forward == reverse
+
+
+def test_duplicate_tvdb_identity_is_rejected():
+    shows = tuple(
+        import_mediux_metadata(
+            FIXTURE
+        )
+    )
+
+    duplicate = (
+        shows
+        + (
+            shows[0],
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="301824",
+    ):
+        build_kometa_metadata(
+            duplicate
+        )
+
+
+def test_write_atomically_replaces_existing_file(
+    tmp_path,
+    monkeypatch,
+):
+    shows = import_mediux_metadata(
+        FIXTURE
+    )
+
+    output = (
+        tmp_path
+        / "generated.yml"
+    )
+
+    output.write_text(
+        "old contents\n",
+        encoding="utf-8",
+    )
+
+    from artwork import kometa
+
+    real_replace = (
+        kometa.os.replace
+    )
+
+    calls = []
+
+    def audited_replace(
+        source,
+        destination,
+    ):
+        source = Path(
+            source
+        )
+
+        destination = Path(
+            destination
+        )
+
+        # The old destination still exists until the atomic replacement
+        # itself occurs.
+        assert (
+            destination.read_text(
+                encoding="utf-8"
+            )
+            == "old contents\n"
+        )
+
+        parsed_temporary = (
+            yaml.safe_load(
+                source.read_text(
+                    encoding="utf-8"
+                )
+            )
+        )
+
+        assert (
+            parsed_temporary
+            == build_kometa_metadata(
+                shows
+            )
+        )
+
+        calls.append(
+            (
+                source,
+                destination,
+            )
+        )
+
+        real_replace(
+            source,
+            destination,
+        )
+
+    monkeypatch.setattr(
+        kometa.os,
+        "replace",
+        audited_replace,
+    )
+
+    write_kometa_metadata(
+        shows,
+        output,
+    )
+
+    assert len(calls) == 1
+
+    assert (
+        yaml.safe_load(
+            output.read_text(
+                encoding="utf-8"
+            )
+        )
+        == build_kometa_metadata(
+            shows
+        )
+    )
+
+
+def test_failed_atomic_replace_preserves_existing_file_and_cleans_temp(
+    tmp_path,
+    monkeypatch,
+):
+    shows = import_mediux_metadata(
+        FIXTURE
+    )
+
+    output = (
+        tmp_path
+        / "generated.yml"
+    )
+
+    output.write_text(
+        "old contents\n",
+        encoding="utf-8",
+    )
+
+    from artwork import kometa
+
+    def failing_replace(
+        source,
+        destination,
+    ):
+        raise OSError(
+            "simulated replace failure"
+        )
+
+    monkeypatch.setattr(
+        kometa.os,
+        "replace",
+        failing_replace,
+    )
+
+    with pytest.raises(
+        OSError,
+        match=(
+            "simulated replace failure"
+        ),
+    ):
+        write_kometa_metadata(
+            shows,
+            output,
+        )
+
+    assert (
+        output.read_text(
+            encoding="utf-8"
+        )
+        == "old contents\n"
+    )
+
+    assert list(
+        tmp_path.glob(
+            ".generated.yml.*.tmp"
+        )
+    ) == []
