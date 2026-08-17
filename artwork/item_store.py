@@ -24,6 +24,12 @@ from artwork.kometa import (
 from artwork.projection import (
     project_show_target_items,
 )
+from artwork.state_store import (
+    STATE_NAME,
+    ArtworkStateStore,
+    build_show_state_store,
+    load_show_state_store,
+)
 
 if TYPE_CHECKING:
     from artwork.target_execution import (
@@ -273,6 +279,7 @@ class ItemStorePlan:
     ]
 
     manifest: ItemStoreManifest
+    state_store: ArtworkStateStore
 
     added: tuple[str, ...]
     updated: tuple[str, ...]
@@ -289,6 +296,13 @@ class ItemStorePlan:
         return (
             self.directory
             / MANIFEST_NAME
+        )
+
+    @property
+    def state_path(self) -> Path:
+        return (
+            self.directory
+            / STATE_NAME
         )
 
     @property
@@ -722,6 +736,49 @@ def build_show_item_store_plan(
         )
     )
 
+    existing_state_store = (
+        load_show_state_store(
+            directory,
+            expected_library=library,
+        )
+    )
+
+    if (
+        existing_state_store is not None
+        and existing_manifest is None
+    ):
+        raise ItemStoreError(
+            "Artwork Manager durable state "
+            "exists without an ownership manifest"
+        )
+
+    if (
+        existing_state_store is not None
+        and existing_manifest is not None
+    ):
+        manifest_identities = {
+            entry.plex_rating_key:
+                entry.tvdb_id
+            for entry
+            in existing_manifest.items
+        }
+
+        state_identities = {
+            item.plex_rating_key:
+                item.state.tvdb_id
+            for item
+            in existing_state_store.items
+        }
+
+        if (
+            manifest_identities
+            != state_identities
+        ):
+            raise ItemStoreError(
+                "Artwork Manager ownership manifest "
+                "and durable state disagree"
+            )
+
     old_entries = (
         existing_manifest.items
         if existing_manifest
@@ -747,6 +804,10 @@ def build_show_item_store_plan(
 
     existing_names.discard(
         MANIFEST_NAME
+    )
+
+    existing_names.discard(
+        STATE_NAME
     )
 
     unowned_names = (
@@ -859,6 +920,12 @@ def build_show_item_store_plan(
         )
     )
 
+    state_store = (
+        build_show_state_store(
+            execution
+        )
+    )
+
     return ItemStorePlan(
         library=library,
         directory=directory,
@@ -866,6 +933,7 @@ def build_show_item_store_plan(
             files
         ),
         manifest=manifest,
+        state_store=state_store,
         added=tuple(
             sorted(
                 added
@@ -939,6 +1007,10 @@ def format_item_store_plan(
         (
             "Manifest: "
             f"{plan.manifest_path}"
+        ),
+        (
+            "Durable state: "
+            f"{plan.state_path}"
         ),
         "WRITE: disabled",
     ]

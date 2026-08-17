@@ -32,6 +32,10 @@ from artwork.preview import (
     PreviewIssue,
     PreviewIssueCode,
 )
+from artwork.state_store import (
+    STATE_NAME,
+    load_show_state_store,
+)
 from artwork.targets import (
     ArtworkTarget,
     MediaType,
@@ -296,6 +300,7 @@ def test_applies_new_complete_item_store_snapshot(
         "show-1--tvdb-100.yaml",
         "show-2--tvdb-200.yaml",
         MANIFEST_NAME,
+        STATE_NAME,
     }
 
     assert (
@@ -943,3 +948,148 @@ def test_successful_update_replaces_snapshot_and_cleans_transaction_dirs(
         )
         == ()
     )
+
+
+def test_missing_durable_state_bootstraps_transactionally(
+    tmp_path,
+    monkeypatch,
+):
+    execution = (
+        _two_show_execution(
+            tmp_path
+        )
+    )
+
+    preview = _safe_preview(
+        execution
+    )
+
+    _patch_preview(
+        monkeypatch,
+        preview,
+    )
+
+    first_plan = (
+        build_show_item_store_plan(
+            execution
+        )
+    )
+
+    apply_show_item_store(
+        execution=execution,
+        preview=preview,
+        plan=first_plan,
+    )
+
+    directory = (
+        tmp_path
+        / "artwork-tv"
+    )
+
+    state_path = (
+        directory
+        / STATE_NAME
+    )
+
+    assert state_path.is_file()
+
+    # Simulate a pre-state-store production snapshot:
+    # YAML + manifest exist, semantic state does not.
+    state_path.unlink()
+
+    second_plan = (
+        build_show_item_store_plan(
+            execution
+        )
+    )
+
+    assert second_plan.added == ()
+    assert second_plan.updated == ()
+    assert second_plan.removed == ()
+    assert len(
+        second_plan.unchanged
+    ) == 2
+
+    result = apply_show_item_store(
+        execution=execution,
+        preview=preview,
+        plan=second_plan,
+    )
+
+    assert result.changed
+    assert state_path.is_file()
+
+    loaded = load_show_state_store(
+        directory,
+        expected_library="TV",
+    )
+
+    assert loaded is not None
+    assert (
+        loaded
+        == second_plan.state_store
+    )
+
+
+def test_complete_store_with_durable_state_is_true_noop(
+    tmp_path,
+    monkeypatch,
+):
+    execution = (
+        _two_show_execution(
+            tmp_path
+        )
+    )
+
+    preview = _safe_preview(
+        execution
+    )
+
+    _patch_preview(
+        monkeypatch,
+        preview,
+    )
+
+    apply_show_item_store(
+        execution=execution,
+        preview=preview,
+        plan=(
+            build_show_item_store_plan(
+                execution
+            )
+        ),
+    )
+
+    plan = (
+        build_show_item_store_plan(
+            execution
+        )
+    )
+
+    from artwork import item_store_apply
+
+    def forbidden_stage(
+        **kwargs,
+    ):
+        raise AssertionError(
+            "complete durable store "
+            "must not stage"
+        )
+
+    monkeypatch.setattr(
+        item_store_apply,
+        "_write_staged_snapshot",
+        forbidden_stage,
+    )
+
+    result = apply_show_item_store(
+        execution=execution,
+        preview=preview,
+        plan=plan,
+    )
+
+    assert not result.changed
+    assert result.added_count == 0
+    assert result.updated_count == 0
+    assert result.removed_count == 0
+    assert result.unchanged_count == 2

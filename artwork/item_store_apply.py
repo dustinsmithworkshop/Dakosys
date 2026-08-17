@@ -31,6 +31,10 @@ from artwork.preview import (
     ArtworkTargetPreview,
     build_show_target_preview,
 )
+from artwork.state_store import (
+    STATE_NAME,
+    load_show_state_store,
+)
 from artwork.target_execution import (
     ShowTargetExecution,
 )
@@ -272,6 +276,44 @@ def _write_staged_snapshot(
         manifest_contents,
     )
 
+    state_contents = (
+        plan.state_store.to_json()
+    )
+
+    state_path = (
+        staging
+        / STATE_NAME
+    )
+
+    _write_text_fsync(
+        state_path,
+        state_contents,
+    )
+
+    try:
+        staged_state = (
+            load_show_state_store(
+                staging,
+                expected_library=(
+                    plan.library
+                ),
+            )
+        )
+    except Exception as exc:
+        raise ItemStoreApplyError(
+            "could not validate staged "
+            "Artwork Manager durable state"
+        ) from exc
+
+    if (
+        staged_state
+        != plan.state_store
+    ):
+        raise ItemStoreApplyError(
+            "staged Artwork Manager durable "
+            "state does not match reviewed plan"
+        )
+
     # --------------------------------------------------------------
     # Re-plan against staging itself.
     #
@@ -369,6 +411,32 @@ def _manifest_needs_write(
     )
 
 
+def _state_needs_write(
+    plan: ItemStorePlan,
+) -> bool:
+    path = (
+        plan.state_path
+    )
+
+    if not path.exists():
+        return True
+
+    if not path.is_file():
+        return True
+
+    try:
+        current = path.read_text(
+            encoding="utf-8"
+        )
+    except OSError:
+        return True
+
+    return (
+        current
+        != plan.state_store.to_json()
+    )
+
+
 def apply_show_item_store(
     *,
     execution: ShowTargetExecution,
@@ -450,6 +518,9 @@ def apply_show_item_store(
             current_plan.removed_count
         )
         or _manifest_needs_write(
+            current_plan
+        )
+        or _state_needs_write(
             current_plan
         )
     )
