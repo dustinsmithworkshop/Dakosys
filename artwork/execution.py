@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 
@@ -10,9 +11,15 @@ from artwork.assessment import (
     ArtworkSetAssessment,
     assess_artwork_set,
 )
+from artwork.discovery import (
+    DiscoveryPath,
+    discover_unmanaged_show,
+)
 from artwork.inventory import ShowInventory
 from artwork.models import (
     ArtworkSet,
+    ArtworkSource,
+    SelectionMode,
     ShowArtworkState,
 )
 from artwork.policy import SetAction
@@ -263,6 +270,268 @@ def _state_as_set(
     )
 
 
+def _is_tmdb_fallback_only_state(
+    state: ShowArtworkState,
+) -> bool:
+    """Whether missing set context is valid TMDB fallback state."""
+
+    if (
+        state.selected_set_id is not None
+        or state.selected_set_source is not None
+        or state.episode_selection is not None
+        or state.presentation_selection is not None
+    ):
+        return False
+
+    if (
+        state.selection_mode
+        is not SelectionMode.AUTO
+    ):
+        return False
+
+    sources = []
+
+    def collect(asset):
+        if (
+            asset is not None
+            and asset.available
+        ):
+            sources.append(
+                asset.source
+            )
+
+    collect(
+        state.poster
+    )
+    collect(
+        state.background
+    )
+
+    for season in (
+        state.seasons.values()
+    ):
+        collect(
+            season.poster
+        )
+
+        for episode in (
+            season.episodes.values()
+        ):
+            collect(
+                episode.card
+            )
+
+    return (
+        bool(sources)
+        and all(
+            source
+            is ArtworkSource.TMDB
+            for source in sources
+        )
+    )
+
+
+def _merge_primary_over_fallback(
+    *,
+    fallback: ShowArtworkState,
+    primary: ShowArtworkState,
+) -> ShowArtworkState:
+    """Prefer selected primary artwork while retaining fallback gaps."""
+
+    merged = deepcopy(
+        primary
+    )
+
+    if merged.title is None:
+        merged.title = (
+            fallback.title
+        )
+
+    if merged.tvdb_id is None:
+        merged.tvdb_id = (
+            fallback.tvdb_id
+        )
+
+    if merged.tmdb_id is None:
+        merged.tmdb_id = (
+            fallback.tmdb_id
+        )
+
+    if merged.imdb_id is None:
+        merged.imdb_id = (
+            fallback.imdb_id
+        )
+
+    if (
+        merged.poster is None
+        or not merged.poster.available
+    ):
+        merged.poster = deepcopy(
+            fallback.poster
+        )
+
+    if (
+        merged.background is None
+        or not merged.background.available
+    ):
+        merged.background = deepcopy(
+            fallback.background
+        )
+
+    for (
+        season_number,
+        fallback_season,
+    ) in fallback.seasons.items():
+        primary_season = (
+            merged.seasons.get(
+                season_number
+            )
+        )
+
+        if primary_season is None:
+            merged.seasons[
+                season_number
+            ] = deepcopy(
+                fallback_season
+            )
+
+            continue
+
+        if (
+            primary_season.poster is None
+            or not primary_season.poster.available
+        ):
+            primary_season.poster = deepcopy(
+                fallback_season.poster
+            )
+
+        for (
+            episode_number,
+            fallback_episode,
+        ) in fallback_season.episodes.items():
+            primary_episode = (
+                primary_season
+                .episodes
+                .get(
+                    episode_number
+                )
+            )
+
+            if (
+                primary_episode is None
+                or primary_episode.card is None
+                or not primary_episode.card.available
+            ):
+                primary_season.episodes[
+                    episode_number
+                ] = deepcopy(
+                    fallback_episode
+                )
+
+    # The fallback state may carry an intentional mode even though it
+    # has no provider-set selection.
+    merged.selection_mode = (
+        fallback.selection_mode
+    )
+
+    return merged
+
+
+def _execute_tmdb_fallback_state(
+    *,
+    inventory: ShowInventory,
+    current_state: ShowArtworkState,
+    provider: ArtworkProvider,
+) -> ManagedShowExecution:
+    """Give a persisted TMDB-only state a primary-provider opportunity."""
+
+    discovery = (
+        discover_unmanaged_show(
+            inventory=inventory,
+            provider=provider,
+        )
+    )
+
+    if (
+        discovery.path
+        is DiscoveryPath.PROVIDER_ERROR
+    ):
+        return ManagedShowExecution(
+            inventory=inventory,
+            current_state=current_state,
+            state=current_state,
+            path=(
+                ManagedExecutionPath
+                .PROVIDER_ERROR
+            ),
+            action=SetAction.KEEP_CURRENT,
+            reason=(
+                "fallback_primary_provider_error"
+            ),
+            provider_requested=True,
+            provider_candidate_count=(
+                discovery
+                .provider_candidate_count
+            ),
+            error_type=(
+                discovery.error_type
+            ),
+            error_message=(
+                discovery.error_message
+            ),
+        )
+
+    if discovery.state is None:
+        return ManagedShowExecution(
+            inventory=inventory,
+            current_state=current_state,
+            state=current_state,
+            path=(
+                ManagedExecutionPath
+                .REEVALUATED
+            ),
+            action=SetAction.KEEP_CURRENT,
+            reason=(
+                "fallback_primary_not_available"
+            ),
+            provider_requested=(
+                discovery.provider_requested
+            ),
+            provider_candidate_count=(
+                discovery
+                .provider_candidate_count
+            ),
+        )
+
+    resolved = (
+        _merge_primary_over_fallback(
+            fallback=current_state,
+            primary=discovery.state,
+        )
+    )
+
+    return ManagedShowExecution(
+        inventory=inventory,
+        current_state=current_state,
+        state=resolved,
+        path=(
+            ManagedExecutionPath
+            .REEVALUATED
+        ),
+        action=SetAction.SET_MIGRATION,
+        reason=(
+            "fallback_promoted_to_primary_set"
+        ),
+        provider_requested=(
+            discovery.provider_requested
+        ),
+        provider_candidate_count=(
+            discovery
+            .provider_candidate_count
+        ),
+    )
+
+
 def execute_managed_show(
     *,
     inventory: ShowInventory,
@@ -300,6 +569,17 @@ def execute_managed_show(
         or current_state.selected_set_source
         is None
     ):
+        if _is_tmdb_fallback_only_state(
+            current_state
+        ):
+            return (
+                _execute_tmdb_fallback_state(
+                    inventory=inventory,
+                    current_state=current_state,
+                    provider=provider,
+                )
+            )
+
         return ManagedShowExecution(
             inventory=inventory,
             current_state=current_state,

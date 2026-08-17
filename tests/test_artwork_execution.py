@@ -630,3 +630,188 @@ def test_library_execution_reports_all_outcomes():
         result.cohesion_blocked_count
         == 0
     )
+
+
+def _tmdb_card(
+    asset_id,
+):
+    return ArtworkAsset(
+        kind=ArtworkKind.EPISODE_CARD,
+        source=ArtworkSource.TMDB,
+        provider_asset_id=asset_id,
+        url=(
+            "https://image.tmdb.org/t/p/original/"
+            f"{asset_id}.jpg"
+        ),
+    )
+
+
+def _tmdb_only_state(
+    *,
+    episodes=4,
+    tvdb_id=12345,
+):
+    return ShowArtworkState(
+        title="Example Show",
+        tvdb_id=tvdb_id,
+        tmdb_id=67890,
+        imdb_id="tt1234567",
+        seasons={
+            1: SeasonArtwork(
+                season_number=1,
+                episodes={
+                    number: EpisodeArtwork(
+                        episode_number=number,
+                        card=_tmdb_card(
+                            f"tmdb-{number}"
+                        ),
+                    )
+                    for number in range(
+                        1,
+                        episodes + 1,
+                    )
+                },
+            ),
+        },
+    )
+
+
+def test_tmdb_only_state_discovers_primary_and_keeps_fallback_gaps():
+    inventory = _inventory(
+        episodes=4,
+    )
+
+    state = _tmdb_only_state(
+        episodes=4,
+    )
+
+    provider = FakeProvider(
+        {
+            "1": [
+                _set(
+                    "A",
+                    2,
+                ),
+            ],
+        }
+    )
+
+    result = execute_managed_show(
+        inventory=inventory,
+        current_state=state,
+        provider=provider,
+    )
+
+    assert (
+        result.path
+        is ManagedExecutionPath.REEVALUATED
+    )
+
+    assert (
+        result.action
+        is SetAction.SET_MIGRATION
+    )
+
+    assert (
+        result.reason
+        == "fallback_promoted_to_primary_set"
+    )
+
+    assert (
+        result.state.selected_set_id
+        == "A"
+    )
+
+    assert (
+        result.state.seasons[1]
+        .episodes[1]
+        .card
+        .source
+        is ArtworkSource.MEDIUX
+    )
+
+    assert (
+        result.state.seasons[1]
+        .episodes[2]
+        .card
+        .source
+        is ArtworkSource.MEDIUX
+    )
+
+    assert (
+        result.state.seasons[1]
+        .episodes[3]
+        .card
+        .source
+        is ArtworkSource.TMDB
+    )
+
+    assert (
+        result.state.seasons[1]
+        .episodes[4]
+        .card
+        .source
+        is ArtworkSource.TMDB
+    )
+
+    assert len(
+        provider.requests
+    ) == 1
+
+    assert (
+        provider.requests[0].kind
+        is ArtworkSearchKind.DISCOVERY
+    )
+
+
+def test_tmdb_only_state_without_primary_keeps_fallback():
+    inventory = _inventory(
+        episodes=4,
+    )
+
+    state = _tmdb_only_state(
+        episodes=4,
+    )
+
+    provider = FakeProvider(
+        {
+            "1": [],
+        }
+    )
+
+    result = execute_managed_show(
+        inventory=inventory,
+        current_state=state,
+        provider=provider,
+    )
+
+    assert (
+        result.path
+        is ManagedExecutionPath.REEVALUATED
+    )
+
+    assert (
+        result.action
+        is SetAction.KEEP_CURRENT
+    )
+
+    assert (
+        result.reason
+        == "fallback_primary_not_available"
+    )
+
+    assert result.state is state
+
+    assert (
+        result.provider_requested
+        is True
+    )
+
+    assert len(
+        provider.requests
+    ) == 1
+
+    assert (
+        provider.requests[0].kind
+        is ArtworkSearchKind.DISCOVERY
+    )
