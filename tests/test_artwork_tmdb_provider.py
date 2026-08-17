@@ -235,3 +235,67 @@ def test_tmdb_artwork_client_publicly_resolves_tvdb_identity():
             "timeout": 30.0,
         }
     ]
+
+
+def test_tmdb_artwork_client_returns_tv_external_ids():
+    session = FakeSession(
+        [
+            FakeResponse(
+                payload={
+                    "id": 39980,
+                    "imdb_id": "tt1138300",
+                    "tvdb_id": 339733,
+                    "wikidata_id": "Q666569",
+                }
+            ),
+        ]
+    )
+
+    client = TMDBArtworkClient(
+        api_key="test-key",
+        base_url="https://tmdb.example/3",
+        session=session,
+        timeout=12.0,
+    )
+
+    external = client.get_tv_external_ids(
+        tmdb_id=39980,
+    )
+
+    assert external.tvdb_id == 339733
+    assert external.imdb_id == "tt1138300"
+
+    assert session.calls == [
+        {
+            "url": (
+                "https://tmdb.example/3"
+                "/tv/39980/external_ids"
+            ),
+            "params": {
+                "api_key": "test-key",
+            },
+            "timeout": 12.0,
+        }
+    ]
+
+
+def test_tmdb_artwork_client_returns_empty_external_ids_for_404():
+    session = FakeSession(
+        [
+            FakeResponse(
+                status_code=404,
+            ),
+        ]
+    )
+
+    client = TMDBArtworkClient(
+        api_key="test-key",
+        session=session,
+    )
+
+    external = client.get_tv_external_ids(
+        tmdb_id=39980,
+    )
+
+    assert external.tvdb_id is None
+    assert external.imdb_id is None

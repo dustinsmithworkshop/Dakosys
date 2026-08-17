@@ -6,6 +6,8 @@ artwork-specific episode-still parsing.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from artwork.models import (
     ArtworkAsset,
     ArtworkKind,
@@ -22,6 +24,14 @@ TMDB_IMAGE_BASE_URL = (
 )
 
 TMDB_DEFAULT_IMAGE_SIZE = "original"
+
+
+@dataclass(frozen=True)
+class TMDBTVExternalIds:
+    """Exact external IDs reported by TMDB for one TV series."""
+
+    tvdb_id: int | None = None
+    imdb_id: str | None = None
 
 
 class TMDBArtworkClient(
@@ -82,6 +92,78 @@ class TMDBArtworkClient(
             f"{self.image_base_url}"
             f"/{self.image_size}"
             f"{normalized}"
+        )
+
+    def get_tv_external_ids(
+        self,
+        *,
+        tmdb_id: int,
+    ) -> TMDBTVExternalIds:
+        """Return exact TVDB/IMDb IDs attached to one TMDB TV series."""
+
+        if (
+            not isinstance(
+                tmdb_id,
+                int,
+            )
+            or isinstance(
+                tmdb_id,
+                bool,
+            )
+            or tmdb_id <= 0
+        ):
+            raise ValueError(
+                "TMDB TV ID must be a positive integer"
+            )
+
+        response = self._get(
+            f"/tv/{tmdb_id}/external_ids"
+        )
+
+        if response.status_code == 404:
+            return TMDBTVExternalIds()
+
+        response.raise_for_status()
+
+        payload = response.json()
+
+        raw_tvdb_id = payload.get(
+            "tvdb_id"
+        )
+
+        tvdb_id = (
+            raw_tvdb_id
+            if (
+                isinstance(
+                    raw_tvdb_id,
+                    int,
+                )
+                and not isinstance(
+                    raw_tvdb_id,
+                    bool,
+                )
+                and raw_tvdb_id > 0
+            )
+            else None
+        )
+
+        raw_imdb_id = payload.get(
+            "imdb_id"
+        )
+
+        imdb_id = (
+            raw_imdb_id.strip()
+            if isinstance(
+                raw_imdb_id,
+                str,
+            )
+            and raw_imdb_id.strip()
+            else None
+        )
+
+        return TMDBTVExternalIds(
+            tvdb_id=tvdb_id,
+            imdb_id=imdb_id,
         )
 
     def get_season_episode_cards(

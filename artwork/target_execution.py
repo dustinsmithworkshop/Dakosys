@@ -17,6 +17,10 @@ from artwork.execution import (
     ManagedLibraryExecution,
     execute_managed_library,
 )
+from artwork.identity_enrichment import (
+    ShowIdentityEnrichment,
+    enrich_show_inventory_tvdb,
+)
 from artwork.inventory import ShowInventory
 from artwork.models import ShowArtworkState
 from artwork.providers.base import ArtworkProvider
@@ -38,6 +42,15 @@ class ShowTargetExecution:
     managed: ManagedLibraryExecution
     discovery: LibraryDiscoveryExecution
 
+    # Exact pre-reconciliation identity enrichment.
+    #
+    # When a TMDB client is available, Plex items missing TVDB identity
+    # may recover it through their exact TMDB series ID.
+    identity_enrichment: tuple[
+        ShowIdentityEnrichment,
+        ...,
+    ] = ()
+
     # Optional post-provider episode coverage stage.
     #
     # These remain empty when no TMDB client was supplied so existing
@@ -53,6 +66,39 @@ class ShowTargetExecution:
     ] = ()
 
     coverage_enabled: bool = False
+
+    @property
+    def identity_enriched_count(
+        self,
+    ) -> int:
+        return sum(
+            1
+            for result
+            in self.identity_enrichment
+            if result.enriched
+        )
+
+    @property
+    def identity_enrichment_request_count(
+        self,
+    ) -> int:
+        return sum(
+            1
+            for result
+            in self.identity_enrichment
+            if result.provider_requested
+        )
+
+    @property
+    def identity_enrichment_error_count(
+        self,
+    ) -> int:
+        return sum(
+            1
+            for result
+            in self.identity_enrichment
+            if result.error_type is not None
+        )
 
     @property
     def matched_count(self) -> int:
@@ -253,9 +299,13 @@ def execute_show_target(
     Previously unmanaged shows are sent through primary-provider
     discovery.
 
-    When a TMDB artwork client is supplied, every safely resolved
-    managed state and every unmanaged inventory is then passed through
-    episode-card coverage enrichment:
+    When a TMDB artwork client is supplied, inventories missing TVDB
+    identity are first given an exact TMDB external-ID enrichment
+    opportunity before reconciliation. No title or fuzzy matching is
+    performed.
+
+    Every safely resolved managed state and every unmanaged inventory is
+    then passed through episode-card coverage enrichment:
 
     - existing artwork is never replaced;
     - TMDB fills only remaining expected episode gaps;
@@ -265,15 +315,42 @@ def execute_show_target(
     - managed items missing required durable set context remain
       unresolved and are not silently repaired through fallback.
 
-    Missing identities, ambiguous managed matches, and orphaned durable
-    state remain explicit reconciliation outcomes and are never guessed.
+    Identities that remain unresolved after exact enrichment, ambiguous
+    managed matches, and orphaned durable state remain explicit
+    reconciliation outcomes and are never guessed.
 
     This function performs no file writes and makes no Plex changes.
     """
 
+    inventory_tuple = tuple(
+        inventories
+    )
+
+    if tmdb_client is None:
+        identity_enrichment = ()
+        execution_inventories = (
+            inventory_tuple
+        )
+
+    else:
+        identity_enrichment = tuple(
+            enrich_show_inventory_tvdb(
+                inventory=inventory,
+                tmdb_client=tmdb_client,
+            )
+            for inventory
+            in inventory_tuple
+        )
+
+        execution_inventories = tuple(
+            result.inventory
+            for result
+            in identity_enrichment
+        )
+
     reconciliation = reconcile_show_target(
         target=target,
-        inventories=inventories,
+        inventories=execution_inventories,
         managed_shows=managed_shows,
     )
 
@@ -324,6 +401,9 @@ def execute_show_target(
             reconciliation=reconciliation,
             managed=managed,
             discovery=discovery,
+            identity_enrichment=(
+                identity_enrichment
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -367,6 +447,9 @@ def execute_show_target(
         reconciliation=reconciliation,
         managed=managed,
         discovery=discovery,
+        identity_enrichment=(
+            identity_enrichment
+        ),
         managed_coverage=(
             managed_coverage
         ),

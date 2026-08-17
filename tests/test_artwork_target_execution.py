@@ -670,3 +670,154 @@ def test_target_reports_managed_and_discovery_provider_errors():
         result.provider_request_count
         == 2
     )
+
+
+def test_missing_tvdb_is_enriched_before_reconciliation():
+    from artwork.providers.tmdb import (
+        TMDBTVExternalIds,
+    )
+
+    identity = SimpleNamespace(
+        library="TV",
+        plex_rating_key="digimon",
+        title="Digimon Data Squad",
+        year=2006,
+        tvdb_id=None,
+        tmdb_id=39980,
+        imdb_id="tt1138300",
+        library_roles=(),
+    )
+
+    inventory = ShowInventory(
+        identity=identity,
+        seasons=(
+            SeasonInventory(
+                season_number=1,
+                episode_numbers=frozenset(
+                    {
+                        1,
+                        2,
+                        3,
+                        4,
+                    }
+                ),
+            ),
+        ),
+    )
+
+    class FakeTMDBIdentityClient:
+        def __init__(self):
+            self.external_requests = []
+            self.season_requests = []
+
+        def get_tv_external_ids(
+            self,
+            *,
+            tmdb_id,
+        ):
+            self.external_requests.append(
+                tmdb_id
+            )
+
+            return TMDBTVExternalIds(
+                tvdb_id=339733,
+                imdb_id="tt1138300",
+            )
+
+        def get_season_episode_cards(
+            self,
+            *,
+            tmdb_id,
+            season_number,
+        ):
+            self.season_requests.append(
+                (
+                    tmdb_id,
+                    season_number,
+                )
+            )
+
+            return {}
+
+    tmdb_client = FakeTMDBIdentityClient()
+
+    provider = FakeProvider(
+        {
+            "digimon": [
+                _set(
+                    "DIGIMON",
+                    4,
+                ),
+            ],
+        }
+    )
+
+    result = execute_show_target(
+        target=_target(),
+        inventories=(
+            inventory,
+        ),
+        managed_shows=(),
+        provider=provider,
+        tmdb_client=tmdb_client,
+    )
+
+    # Exact TMDB bridge happened before reconciliation.
+    assert (
+        result.identity_enriched_count
+        == 1
+    )
+
+    assert (
+        result.identity_enrichment_request_count
+        == 1
+    )
+
+    assert (
+        result.identity_enrichment_error_count
+        == 0
+    )
+
+    assert (
+        tmdb_client.external_requests
+        == [
+            39980,
+        ]
+    )
+
+    # The original missing-TVDB condition no longer blocks execution.
+    assert (
+        result.missing_identity_count
+        == 0
+    )
+
+    assert (
+        result.unmanaged_count
+        == 1
+    )
+
+    assert (
+        result.discovery.selected_count
+        == 1
+    )
+
+    assert (
+        result.resolved_count
+        == 1
+    )
+
+    # The recovered TVDB identity propagates all the way into durable
+    # prospective artwork state.
+    state = result.resolved_states[0]
+
+    assert state.title == "Digimon Data Squad"
+    assert state.tmdb_id == 39980
+    assert state.tvdb_id == 339733
+    assert state.imdb_id == "tt1138300"
+
+    # Primary artwork was already complete, so TMDB did not need to
+    # fetch episode stills after identity enrichment.
+    assert (
+        tmdb_client.season_requests
+        == []
+    )
