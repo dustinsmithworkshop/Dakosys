@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from artwork.assessment import ArtworkSetAssessment
-from artwork.models import ShowArtworkState
+from artwork.models import (
+    ArtworkSetSelection,
+    ShowArtworkState,
+)
 from artwork.policy import SetAction
 from artwork.reevaluation import ReevaluationResult
 
@@ -95,6 +98,35 @@ def materialize_reevaluation_state(
 
     artwork_set = selected.artwork_set
 
+    if result.action is SetAction.SET_MIGRATION:
+        migrated_selection = (
+            ArtworkSetSelection(
+                provider=artwork_set.provider,
+                set_id=artwork_set.set_id,
+                creator=artwork_set.creator,
+                mode=current_state.selection_mode,
+            )
+        )
+
+        episode_selection = (
+            migrated_selection
+        )
+        presentation_selection = (
+            migrated_selection
+        )
+
+    else:
+        # KEEP_CURRENT and same-set refresh must preserve the independent
+        # episode/presentation provenance established during discovery.
+        episode_selection = (
+            current_state
+            .episode_selection
+        )
+        presentation_selection = (
+            current_state
+            .presentation_selection
+        )
+
     state = ShowArtworkState(
         title=current_state.title,
         tvdb_id=current_state.tvdb_id,
@@ -107,6 +139,12 @@ def materialize_reevaluation_state(
         selected_set_source=artwork_set.provider,
         selected_creator=artwork_set.creator,
         selection_mode=current_state.selection_mode,
+        episode_selection=(
+            episode_selection
+        ),
+        presentation_selection=(
+            presentation_selection
+        ),
     )
 
     return ResolvedArtworkState(

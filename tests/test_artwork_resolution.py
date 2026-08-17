@@ -5,6 +5,7 @@ from artwork.models import (
     ArtworkAsset,
     ArtworkKind,
     ArtworkSet,
+    ArtworkSetSelection,
     ArtworkSource,
     EpisodeArtwork,
     SeasonArtwork,
@@ -329,3 +330,198 @@ def test_rejects_mismatched_current_state():
             current_assessment=current,
             result=result,
         )
+
+
+def test_keep_current_preserves_split_provenance():
+    current = _assessment(
+        "A",
+        4,
+    )
+
+    live = _assessment(
+        "A",
+        4,
+    )
+
+    state = _state(
+        current
+    )
+
+    state.episode_selection = (
+        ArtworkSetSelection(
+            provider=ArtworkSource.MEDIUX,
+            set_id="A",
+            creator="episode-creator",
+        )
+    )
+
+    state.presentation_selection = (
+        ArtworkSetSelection(
+            provider=ArtworkSource.MEDIUX,
+            set_id="PRESENTATION",
+            creator="presentation-creator",
+        )
+    )
+
+    result = reevaluate_artwork_selection(
+        current=current,
+        candidates=[
+            live,
+        ],
+    )
+
+    resolved = (
+        materialize_reevaluation_state(
+            current_state=state,
+            current_assessment=current,
+            result=result,
+        )
+    )
+
+    assert (
+        resolved.state.episode_selection
+        == state.episode_selection
+    )
+
+    assert (
+        resolved.state
+        .presentation_selection
+        == state.presentation_selection
+    )
+
+
+def test_same_set_refresh_preserves_split_provenance():
+    current = _assessment(
+        "A",
+        2,
+    )
+
+    live = _assessment(
+        "A",
+        4,
+    )
+
+    state = _state(
+        current
+    )
+
+    state.episode_selection = (
+        ArtworkSetSelection(
+            provider=ArtworkSource.MEDIUX,
+            set_id="A",
+            creator="episode-creator",
+        )
+    )
+
+    state.presentation_selection = (
+        ArtworkSetSelection(
+            provider=ArtworkSource.MEDIUX,
+            set_id="PRESENTATION",
+            creator="presentation-creator",
+        )
+    )
+
+    result = reevaluate_artwork_selection(
+        current=current,
+        candidates=[
+            live,
+        ],
+    )
+
+    resolved = (
+        materialize_reevaluation_state(
+            current_state=state,
+            current_assessment=current,
+            result=result,
+        )
+    )
+
+    assert (
+        resolved.action
+        is SetAction.SET_REFRESH
+    )
+
+    assert (
+        resolved.state.episode_selection
+        == state.episode_selection
+    )
+
+    assert (
+        resolved.state
+        .presentation_selection
+        == state.presentation_selection
+    )
+
+
+def test_set_migration_updates_both_split_selections():
+    current = _assessment(
+        "A",
+        2,
+    )
+
+    challenger = _assessment(
+        "B",
+        4,
+    )
+
+    state = _state(
+        current
+    )
+
+    state.episode_selection = (
+        ArtworkSetSelection(
+            provider=ArtworkSource.MEDIUX,
+            set_id="A",
+            creator="episode-creator",
+        )
+    )
+
+    state.presentation_selection = (
+        ArtworkSetSelection(
+            provider=ArtworkSource.MEDIUX,
+            set_id="PRESENTATION",
+            creator="presentation-creator",
+        )
+    )
+
+    result = reevaluate_artwork_selection(
+        current=current,
+        candidates=[
+            challenger,
+        ],
+    )
+
+    resolved = (
+        materialize_reevaluation_state(
+            current_state=state,
+            current_assessment=current,
+            result=result,
+        )
+    )
+
+    assert (
+        resolved.action
+        is SetAction.SET_MIGRATION
+    )
+
+    assert (
+        resolved.state
+        .episode_selection
+        .set_id
+        == "B"
+    )
+
+    assert (
+        resolved.state
+        .presentation_selection
+        .set_id
+        == "B"
+    )
+
+    assert (
+        resolved.state
+        .episode_selection
+        ==
+        resolved.state
+        .presentation_selection
+    )
