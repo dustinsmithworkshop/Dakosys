@@ -301,3 +301,133 @@ export interface IgnoredMappingsResponse {
   ignored: IgnoredMappingEntry[];
   error?: string;
 }
+
+export interface ArtworkTarget {
+  library: string;
+  media_type: "show" | "movie";
+  output_path: string;
+  supported: boolean;
+  status: "ready" | "movie_support_pending";
+}
+
+export interface ArtworkTargetsResponse {
+  enabled: boolean;
+  targets: ArtworkTarget[];
+}
+
+export interface ArtworkPreviewIssue {
+  code: string;
+  message: string;
+}
+
+export interface ArtworkEpisodeSource {
+  source: string;
+  before: number;
+  after: number;
+  change: number;
+}
+
+export interface ArtworkLibraryPreview {
+  library: string;
+  media_type: "show" | "movie";
+  output_path: string;
+
+  baseline: {
+    source: "durable_state" | "legacy_migration" | "new_library" | string;
+    state_count: number;
+  };
+
+  safety: {
+    safe_to_apply: boolean;
+    issues: ArtworkPreviewIssue[];
+  };
+
+  inventory: {
+    plex_shows: number;
+    managed_before: number;
+    managed_after: number;
+    newly_managed: number;
+    lost_managed: number;
+    shows_without_state: number;
+    no_state_titles: string[];
+  };
+
+  coverage: {
+    expected_episodes: number;
+    cards_before: number;
+    cards_after: number;
+    gaps_before: number;
+    gaps_after: number;
+    coverage_before: number;
+    coverage_after: number;
+    coverage_change: number;
+    sources: ArtworkEpisodeSource[];
+  };
+
+  presentation: {
+    show_posters: number;
+    backgrounds: number;
+    shows_with_season_art: number;
+  };
+
+  provider_activity: {
+    primary_requests: number;
+    primary_errors: number;
+
+    identity_enrichment: {
+      requests: number;
+      enriched: number;
+      errors: number;
+    };
+
+    tmdb: {
+      requests: number;
+      errors: number;
+      created_states: number;
+      changed_shows: number;
+      gaps_filled: number;
+      gaps_remaining: number;
+    };
+  };
+
+  selection_activity: {
+    set_refreshes: number;
+    set_migrations: number;
+  };
+
+  output: {
+    rendered_yaml_bytes: number;
+    desired: number;
+    added: number;
+    updated: number;
+    unchanged: number;
+    removed: number;
+    preserved_unowned: number;
+    changed_files: number;
+
+    files: {
+      added: string[];
+      updated: string[];
+      removed: string[];
+    };
+  };
+}
+
+export interface ArtworkSkippedTarget {
+  library: string;
+  media_type: "show" | "movie";
+  output_path: string;
+  reason: string;
+}
+
+export interface ArtworkWorkflowResponse {
+  summary: {
+    library_count: number;
+    skipped_count: number;
+    safe_to_apply: boolean;
+    changed_files: number;
+  };
+
+  libraries: ArtworkLibraryPreview[];
+  skipped: ArtworkSkippedTarget[];
+}

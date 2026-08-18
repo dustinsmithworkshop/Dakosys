@@ -25,6 +25,8 @@ import type {
   PlexLibrariesSetupResponse,
   TraktTestResult,
   IgnoredMappingsResponse,
+  ArtworkTargetsResponse,
+  ArtworkWorkflowResponse,
 } from "@/types/api";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -37,6 +39,16 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  getArtworkTargets: () =>
+    apiFetch<ArtworkTargetsResponse>(
+      "/api/artwork/targets"
+    ),
+
+  getArtworkPreview: (library: string) =>
+    apiFetch<ArtworkWorkflowResponse>(
+      `/api/artwork/preview/${encodeURIComponent(library)}`
+    ),
+
   getStatus: () => apiFetch<StatusResponse>("/api/status"),
 
   getTVStatus: () => apiFetch<TVStatusResponse>("/api/tv-status"),
