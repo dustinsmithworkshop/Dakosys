@@ -155,6 +155,7 @@ def _stub_show_pipeline(
         value = SimpleNamespace(
             execution=execution,
             safe_to_apply=True,
+            issues=(),
         )
 
         calls["preview"].append(
@@ -548,3 +549,112 @@ def test_apply_uses_exact_reviewed_library_artifacts(
     )
 
     assert run.changed_file_count == 2
+
+
+def test_workflow_preserves_unplannable_preview_as_blocked(
+    monkeypatch,
+):
+    from artwork.preview import (
+        PreviewIssue,
+        PreviewIssueCode,
+    )
+
+    _stub_show_pipeline(
+        monkeypatch
+    )
+
+    preview = SimpleNamespace(
+        safe_to_apply=False,
+        issues=(
+            PreviewIssue(
+                code=(
+                    PreviewIssueCode
+                    .KOMETA_RENDER_ERROR
+                ),
+                message=(
+                    "duplicate TVDB identity "
+                    "in Kometa artwork output: 188551"
+                ),
+            ),
+        ),
+    )
+
+    monkeypatch.setattr(
+        "artwork.workflow."
+        "build_show_target_preview",
+        lambda execution:
+            preview,
+    )
+
+    def fail_if_planned(
+        execution,
+    ):
+        raise AssertionError(
+            "unsafe Kometa output must not "
+            "build a filesystem plan"
+        )
+
+    monkeypatch.setattr(
+        "artwork.workflow."
+        "build_show_item_store_plan",
+        fail_if_planned,
+    )
+
+    plex = FakePlex(
+        FakeSection(
+            "Anime",
+            "show",
+            items=("panty",),
+        ),
+    )
+
+    workflow = (
+        build_artwork_manager_workflow(
+            plex=plex,
+            config=_config(),
+            provider=object(),
+        )
+    )
+
+    assert len(
+        workflow.libraries
+    ) == 1
+
+    run = (
+        workflow.libraries[0]
+    )
+
+    assert (
+        run.library
+        == "Anime"
+    )
+
+    assert (
+        run.safe_to_apply
+        is False
+    )
+
+    assert (
+        run.plan
+        is None
+    )
+
+    assert (
+        run.plan_available
+        is False
+    )
+
+    assert (
+        run.needs_apply
+        is False
+    )
+
+    assert (
+        run.desired_count
+        == 0
+    )
+
+    assert (
+        run.changed_file_count
+        == 0
+    )

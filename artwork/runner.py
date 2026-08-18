@@ -193,21 +193,19 @@ def execute_artwork_library_workflow(
             "ArtworkApplyMode"
         )
 
-    planned_needs_apply = (
-        run.needs_apply
-    )
-
     if not run.safe_to_apply:
         return ArtworkLibraryRunResult(
             workflow=run,
             apply_mode=apply_mode,
-            planned_needs_apply=(
-                planned_needs_apply
-            ),
+            planned_needs_apply=False,
             outcome=(
                 ArtworkRunOutcome.BLOCKED
             ),
         )
+
+    planned_needs_apply = (
+        run.needs_apply
+    )
 
     if not planned_needs_apply:
         return ArtworkLibraryRunResult(

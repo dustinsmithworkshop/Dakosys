@@ -36,6 +36,7 @@ from artwork.managed_state import (
 )
 from artwork.preview import (
     ArtworkTargetPreview,
+    PreviewIssueCode,
     build_show_target_preview,
 )
 from artwork.progress import (
@@ -78,7 +79,7 @@ class ArtworkLibraryWorkflow:
     baseline: ManagedStateBaseline
     execution: ShowTargetExecution
     preview: ArtworkTargetPreview
-    plan: ItemStorePlan
+    plan: ItemStorePlan | None
 
     @property
     def library(self) -> str:
@@ -94,19 +95,35 @@ class ArtworkLibraryWorkflow:
 
     @property
     def desired_count(self) -> int:
-        return self.plan.desired_count
+        return (
+            self.plan.desired_count
+            if self.plan is not None
+            else 0
+        )
 
     @property
     def added_count(self) -> int:
-        return self.plan.added_count
+        return (
+            self.plan.added_count
+            if self.plan is not None
+            else 0
+        )
 
     @property
     def updated_count(self) -> int:
-        return self.plan.updated_count
+        return (
+            self.plan.updated_count
+            if self.plan is not None
+            else 0
+        )
 
     @property
     def removed_count(self) -> int:
-        return self.plan.removed_count
+        return (
+            self.plan.removed_count
+            if self.plan is not None
+            else 0
+        )
 
     @property
     def changed_file_count(self) -> int:
@@ -120,11 +137,18 @@ class ArtworkLibraryWorkflow:
     def needs_apply(self) -> bool:
         """Whether transactional persistence would change durable state."""
 
+        if self.plan is None:
+            return False
+
         return (
             item_store_plan_needs_apply(
                 self.plan
             )
         )
+
+    @property
+    def plan_available(self) -> bool:
+        return self.plan is not None
 
 
 @dataclass(frozen=True)
@@ -485,8 +509,22 @@ def build_artwork_target_workflow(
         ),
     )
 
+    unplannable_codes = {
+        PreviewIssueCode
+        .OUTPUT_IDENTITY_MISSING,
+        PreviewIssueCode
+        .KOMETA_RENDER_ERROR,
+    }
+
+    unplannable = any(
+        issue.code in unplannable_codes
+        for issue in preview.issues
+    )
+
     plan = (
-        build_show_item_store_plan(
+        None
+        if unplannable
+        else build_show_item_store_plan(
             execution
         )
     )
@@ -628,6 +666,12 @@ def apply_artwork_library_workflow(
     The underlying apply layer revalidates both the semantic preview and
     filesystem plan before making any changes.
     """
+
+    if run.plan is None:
+        raise RuntimeError(
+            "Artwork Manager workflow has no "
+            "safe filesystem plan"
+        )
 
     return apply_show_item_store(
         execution=run.execution,
