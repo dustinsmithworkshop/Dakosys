@@ -821,3 +821,275 @@ def test_missing_tvdb_is_enriched_before_reconciliation():
         tmdb_client.season_requests
         == []
     )
+
+
+def _split_test_asset(
+    kind,
+    asset_id,
+):
+    return ArtworkAsset(
+        kind=kind,
+        source=ArtworkSource.MEDIUX,
+        provider_asset_id=asset_id,
+        url=(
+            "https://api.mediux.pro/assets/"
+            f"{asset_id}"
+        ),
+    )
+
+
+def _split_managed_state():
+    from artwork.models import (
+        ArtworkSetSelection,
+    )
+
+    episode_set = _set(
+        "EPISODES",
+        2,
+    )
+
+    poster = _split_test_asset(
+        ArtworkKind.SHOW_POSTER,
+        "presentation-poster",
+    )
+
+    season_poster = _split_test_asset(
+        ArtworkKind.SEASON_POSTER,
+        "presentation-season-1",
+    )
+
+    state = ShowArtworkState(
+        title="Split Show",
+        tvdb_id=1,
+        tmdb_id=10001,
+        imdb_id="tt0000001",
+        poster=poster,
+        background=None,
+        seasons={
+            1: SeasonArtwork(
+                season_number=1,
+                poster=season_poster,
+                episodes=dict(
+                    episode_set
+                    .seasons[1]
+                    .episodes
+                ),
+            ),
+        },
+        selected_set_id="EPISODES",
+        selected_set_source=(
+            ArtworkSource.MEDIUX
+        ),
+        selected_creator=(
+            "creator-EPISODES"
+        ),
+        episode_selection=(
+            ArtworkSetSelection(
+                provider=(
+                    ArtworkSource.MEDIUX
+                ),
+                set_id="EPISODES",
+                creator=(
+                    "creator-EPISODES"
+                ),
+            )
+        ),
+        presentation_selection=(
+            ArtworkSetSelection(
+                provider=(
+                    ArtworkSource.MEDIUX
+                ),
+                set_id="PRESENTATION",
+                creator=(
+                    "presentation-creator"
+                ),
+            )
+        ),
+    )
+
+    return state
+
+
+def _split_presentation_set():
+    return ArtworkSet(
+        provider=ArtworkSource.MEDIUX,
+        set_id="PRESENTATION",
+        creator="presentation-creator",
+        poster=_split_test_asset(
+            ArtworkKind.SHOW_POSTER,
+            "presentation-poster",
+        ),
+        seasons={
+            1: SeasonArtwork(
+                season_number=1,
+                poster=_split_test_asset(
+                    ArtworkKind.SEASON_POSTER,
+                    "presentation-season-1",
+                ),
+            ),
+        },
+    )
+
+
+def test_split_episode_reevaluation_does_not_absorb_presentation_artwork():
+    from artwork.execution import (
+        execute_managed_show,
+    )
+
+    inventory = _inventory(
+        rating_key="split",
+        tvdb_id=1,
+        title="Split Show",
+        episodes=4,
+    )
+
+    current_state = (
+        _split_managed_state()
+    )
+
+    live_episode_set = _set(
+        "EPISODES",
+        2,
+    )
+
+    # This belongs to the episode set and must never be silently mixed
+    # into the independently selected presentation family.
+    live_episode_set.background = (
+        _split_test_asset(
+            ArtworkKind.SHOW_BACKGROUND,
+            "episode-set-background",
+        )
+    )
+
+    result = execute_managed_show(
+        inventory=inventory,
+        current_state=current_state,
+        provider=FakeProvider(
+            {
+                "split": [
+                    live_episode_set,
+                    _split_presentation_set(),
+                ],
+            }
+        ),
+    )
+
+    assert (
+        result.action
+        is SetAction.KEEP_CURRENT
+    )
+
+    assert result.state.background is None
+
+    assert (
+        result.state.poster.provider_asset_id
+        == "presentation-poster"
+    )
+
+    assert (
+        result.state
+        .presentation_selection
+        .set_id
+        == "PRESENTATION"
+    )
+
+    assert (
+        result.state
+        .episode_selection
+        .set_id
+        == "EPISODES"
+    )
+
+
+def test_split_episode_migration_preserves_presentation_family():
+    from artwork.execution import (
+        execute_managed_show,
+    )
+
+    inventory = _inventory(
+        rating_key="split-migration",
+        tvdb_id=1,
+        title="Split Show",
+        episodes=4,
+    )
+
+    current_state = (
+        _split_managed_state()
+    )
+
+    current_episode = _set(
+        "EPISODES",
+        2,
+    )
+
+    challenger = _set(
+        "BETTER-EPISODES",
+        4,
+    )
+
+    # Even a migrating episode set must not take presentation ownership.
+    challenger.background = (
+        _split_test_asset(
+            ArtworkKind.SHOW_BACKGROUND,
+            "challenger-background",
+        )
+    )
+
+    result = execute_managed_show(
+        inventory=inventory,
+        current_state=current_state,
+        provider=FakeProvider(
+            {
+                "split-migration": [
+                    current_episode,
+                    challenger,
+                    _split_presentation_set(),
+                ],
+            }
+        ),
+    )
+
+    assert (
+        result.action
+        is SetAction.SET_MIGRATION
+    )
+
+    assert (
+        result.state
+        .episode_selection
+        .set_id
+        == "BETTER-EPISODES"
+    )
+
+    assert (
+        result.state
+        .presentation_selection
+        .set_id
+        == "PRESENTATION"
+    )
+
+    assert (
+        result.state.selected_set_id
+        == "BETTER-EPISODES"
+    )
+
+    assert (
+        result.state.poster.provider_asset_id
+        == "presentation-poster"
+    )
+
+    assert result.state.background is None
+
+    assert (
+        result.state
+        .seasons[1]
+        .poster
+        .provider_asset_id
+        == "presentation-season-1"
+    )
+
+    assert len(
+        result.state
+        .seasons[1]
+        .episodes
+    ) == 4

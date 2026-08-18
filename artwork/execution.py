@@ -19,6 +19,7 @@ from artwork.inventory import ShowInventory
 from artwork.models import (
     ArtworkSet,
     ArtworkSource,
+    SeasonArtwork,
     SelectionMode,
     ShowArtworkState,
 )
@@ -268,6 +269,197 @@ def _state_as_set(
         background=state.background,
         seasons=state.seasons,
     )
+
+
+def _selection_key(
+    selection,
+):
+    if selection is None:
+        return None
+
+    return (
+        selection.provider,
+        selection.set_id,
+    )
+
+
+def _has_split_family_selection(
+    state: ShowArtworkState,
+) -> bool:
+    """Whether episode and presentation artwork use different sets."""
+
+    episode = (
+        state.effective_episode_selection
+    )
+
+    presentation = (
+        state.effective_presentation_selection
+    )
+
+    return (
+        episode is not None
+        and presentation is not None
+        and _selection_key(
+            episode
+        )
+        != _selection_key(
+            presentation
+        )
+    )
+
+
+def _episode_only_set(
+    artwork_set: ArtworkSet,
+) -> ArtworkSet:
+    """Project one provider set to episode-card artwork only."""
+
+    return ArtworkSet(
+        provider=artwork_set.provider,
+        set_id=artwork_set.set_id,
+        creator=artwork_set.creator,
+        title=artwork_set.title,
+        seasons={
+            season_number:
+                SeasonArtwork(
+                    season_number=(
+                        season_number
+                    ),
+                    episodes=deepcopy(
+                        season.episodes
+                    ),
+                )
+            for (
+                season_number,
+                season,
+            )
+            in artwork_set.seasons.items()
+        },
+    )
+
+
+def _state_as_episode_set(
+    state: ShowArtworkState,
+) -> ArtworkSet:
+    """Project durable split state to its episode cohesive family."""
+
+    selection = (
+        state.effective_episode_selection
+    )
+
+    if selection is None:
+        raise ValueError(
+            "managed artwork state has no "
+            "episode selection"
+        )
+
+    return ArtworkSet(
+        provider=selection.provider,
+        set_id=selection.set_id,
+        creator=selection.creator,
+        title=state.title,
+        seasons={
+            season_number:
+                SeasonArtwork(
+                    season_number=(
+                        season_number
+                    ),
+                    episodes=deepcopy(
+                        season.episodes
+                    ),
+                )
+            for (
+                season_number,
+                season,
+            )
+            in state.seasons.items()
+        },
+    )
+
+
+def _restore_split_presentation(
+    *,
+    current_state: ShowArtworkState,
+    resolved_state: ShowArtworkState,
+) -> ShowArtworkState:
+    """Preserve presentation artwork across episode-family reevaluation."""
+
+    restored = deepcopy(
+        resolved_state
+    )
+
+    restored.poster = deepcopy(
+        current_state.poster
+    )
+
+    restored.background = deepcopy(
+        current_state.background
+    )
+
+    season_numbers = sorted(
+        set(
+            current_state.seasons
+        )
+        | set(
+            restored.seasons
+        )
+    )
+
+    seasons = {}
+
+    for season_number in season_numbers:
+        current_season = (
+            current_state.seasons.get(
+                season_number
+            )
+        )
+
+        resolved_season = (
+            restored.seasons.get(
+                season_number
+            )
+        )
+
+        poster = (
+            deepcopy(
+                current_season.poster
+            )
+            if current_season is not None
+            else None
+        )
+
+        episodes = (
+            deepcopy(
+                resolved_season.episodes
+            )
+            if resolved_season is not None
+            else {}
+        )
+
+        if (
+            poster is not None
+            or episodes
+        ):
+            seasons[
+                season_number
+            ] = SeasonArtwork(
+                season_number=(
+                    season_number
+                ),
+                poster=poster,
+                episodes=episodes,
+            )
+
+    restored.seasons = seasons
+
+    # Make the independent presentation provenance explicit even when
+    # it originally came from legacy fallback. This prevents an episode
+    # migration from silently changing presentation ownership.
+    restored.presentation_selection = (
+        current_state
+        .effective_presentation_selection
+    )
+
+    return restored
 
 
 def _is_tmdb_fallback_only_state(
@@ -597,11 +789,38 @@ def execute_managed_show(
         inventory.expected_episodes()
     )
 
+    split_families = (
+        _has_split_family_selection(
+            current_state
+        )
+    )
+
+    current_selection = (
+        current_state
+        .effective_episode_selection
+        if split_families
+        else current_state.legacy_selection
+    )
+
+    if current_selection is None:
+        raise RuntimeError(
+            "managed artwork state has no "
+            "current reevaluation selection"
+        )
+
+    current_set = (
+        _state_as_episode_set(
+            current_state
+        )
+        if split_families
+        else _state_as_set(
+            current_state
+        )
+    )
+
     current_assessment = (
         assess_artwork_set(
-            _state_as_set(
-                current_state
-            ),
+            current_set,
             expected,
         )
     )
@@ -644,16 +863,13 @@ def execute_managed_show(
             .REEVALUATION
         ),
         current_set_id=(
-            current_state
-            .selected_set_id
+            current_selection.set_id
         ),
         current_set_source=(
-            current_state
-            .selected_set_source
+            current_selection.provider
         ),
         current_creator=(
-            current_state
-            .selected_creator
+            current_selection.creator
         ),
         selection_mode=(
             current_state
@@ -695,7 +911,13 @@ def execute_managed_show(
 
     candidates = tuple(
         assess_artwork_set(
-            artwork_set,
+            (
+                _episode_only_set(
+                    artwork_set
+                )
+                if split_families
+                else artwork_set
+            ),
             expected,
         )
         for artwork_set in artwork_sets
@@ -717,10 +939,31 @@ def execute_managed_show(
         )
     )
 
+    materialization_state = (
+        current_state
+    )
+
+    if split_families:
+        materialization_state = deepcopy(
+            current_state
+        )
+
+        # The legacy fields remain episode-oriented while old managed
+        # materialization still consumes them.
+        materialization_state.selected_set_id = (
+            current_selection.set_id
+        )
+        materialization_state.selected_set_source = (
+            current_selection.provider
+        )
+        materialization_state.selected_creator = (
+            current_selection.creator
+        )
+
     resolved = (
         materialize_reevaluation_state(
             current_state=(
-                current_state
+                materialization_state
             ),
             current_assessment=(
                 current_assessment
@@ -729,10 +972,26 @@ def execute_managed_show(
         )
     )
 
+    resolved_state = (
+        resolved.state
+    )
+
+    if split_families:
+        resolved_state = (
+            _restore_split_presentation(
+                current_state=(
+                    current_state
+                ),
+                resolved_state=(
+                    resolved_state
+                ),
+            )
+        )
+
     return ManagedShowExecution(
         inventory=inventory,
         current_state=current_state,
-        state=resolved.state,
+        state=resolved_state,
         path=(
             ManagedExecutionPath
             .REEVALUATED
