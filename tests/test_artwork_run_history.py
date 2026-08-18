@@ -467,3 +467,114 @@ def test_history_rejects_naive_timestamp(
                 30,
             ),
         )
+
+
+def test_run_record_serializes_pre_workflow_block(
+    monkeypatch,
+):
+    from artwork.targets import (
+        ArtworkTarget,
+        MediaType,
+    )
+    from artwork.runner import (
+        ArtworkLibraryRunFailure,
+    )
+
+    target = ArtworkTarget(
+        name="Animation Archive",
+        library="Animation Archive",
+        media_type=MediaType.SHOW,
+        output_path=Path(
+            "/metadata/artwork-animation-archive"
+        ),
+    )
+
+    blocked = (
+        ArtworkLibraryRunFailure(
+            target=target,
+            apply_mode=(
+                ArtworkApplyMode.AUTO
+            ),
+            outcome=(
+                ArtworkRunOutcome.BLOCKED
+            ),
+            error_type=(
+                "ArtworkStateBootstrapRequiredError"
+            ),
+            error_message=(
+                "explicit legacy bootstrap metadata is required"
+            ),
+        )
+    )
+
+    result = ArtworkManagerRunResult(
+        apply_mode=(
+            ArtworkApplyMode.AUTO
+        ),
+        libraries=(
+            blocked,
+        ),
+        skipped=(),
+    )
+
+    record = build_artwork_run_record(
+        result,
+        generated_at=datetime(
+            2026,
+            8,
+            18,
+            20,
+            0,
+            tzinfo=timezone.utc,
+        ),
+        run_id="blocked-library",
+    )
+
+    assert (
+        record["summary"]["blocked"]
+        == 1
+    )
+
+    library = (
+        record["libraries"][0]
+    )
+
+    assert (
+        library["library"]
+        == "Animation Archive"
+    )
+
+    assert (
+        library["output_path"]
+        == (
+            "/metadata/"
+            "artwork-animation-archive"
+        )
+    )
+
+    assert (
+        library["decision"]["outcome"]
+        == "blocked"
+    )
+
+    assert (
+        library["decision"]["safe_to_apply"]
+        is False
+    )
+
+    assert (
+        library["decision"]["needs_apply"]
+        is False
+    )
+
+    assert (
+        library["safety"]["issues"][0]["code"]
+        == "setup_required"
+    )
+
+    assert (
+        library["error"]["type"]
+        == (
+            "ArtworkStateBootstrapRequiredError"
+        )
+    )

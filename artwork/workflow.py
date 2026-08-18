@@ -248,39 +248,27 @@ def _normalize_legacy_metadata(
     return result
 
 
-def build_artwork_manager_workflow(
+def resolve_artwork_workflow_targets(
+    targets: Iterable[ArtworkTarget],
     *,
-    plex,
-    config: dict,
-    provider: ArtworkProvider,
-    tmdb_client: TMDBArtworkClient | None = None,
-    selected_libraries: str | Iterable[str] | None = None,
+    selected_libraries: (
+        str
+        | Iterable[str]
+        | None
+    ) = None,
     legacy_metadata_by_library: Mapping[
         str,
         str | Path,
     ]
     | None = None,
-    incomplete_migration_threshold: float = 0.25,
-    progress_callback: ArtworkProgressCallback | None = None,
-) -> ArtworkManagerWorkflow:
-    """Build the complete read-only Artwork Manager workflow.
+) -> tuple[
+    tuple[ArtworkTarget, ...],
+    dict[str, Path],
+]:
+    """Resolve exact execution targets from one discovery snapshot."""
 
-    Plex library discovery is authoritative. Library names are treated as
-    opaque exact names and have no Dakosys-specific roles.
-
-    ``selected_libraries`` may restrict execution to exact discovered Plex
-    library names without changing configuration.
-
-    ``legacy_metadata_by_library`` is an explicit one-time migration input.
-    Legacy metadata is never inferred from the name of a Plex library.
-    Durable state remains authoritative whenever it already exists.
-
-    This function performs provider reads but does not write item stores.
-    """
-
-    targets = discover_artwork_targets(
-        plex,
-        config,
+    targets = tuple(
+        targets
     )
 
     targets_by_library = {
@@ -288,8 +276,10 @@ def build_artwork_manager_workflow(
         for target in targets
     }
 
-    selected = _normalize_selected_libraries(
-        selected_libraries
+    selected = (
+        _normalize_selected_libraries(
+            selected_libraries
+        )
     )
 
     if selected is not None:
@@ -311,24 +301,37 @@ def build_artwork_manager_workflow(
                 f"{formatted}"
             )
 
-        selected_names = set(selected)
+        selected_names = set(
+            selected
+        )
 
         execution_targets = tuple(
             target
             for target in targets
-            if target.library in selected_names
+            if (
+                target.library
+                in selected_names
+            )
         )
-    else:
-        execution_targets = targets
 
-    legacy = _normalize_legacy_metadata(
-        legacy_metadata_by_library
+    else:
+        execution_targets = (
+            targets
+        )
+
+    legacy = (
+        _normalize_legacy_metadata(
+            legacy_metadata_by_library
+        )
     )
 
     show_target_names = {
         target.library
         for target in targets
-        if target.media_type is MediaType.SHOW
+        if (
+            target.media_type
+            is MediaType.SHOW
+        )
     }
 
     unknown_legacy = sorted(
@@ -349,6 +352,219 @@ def build_artwork_manager_workflow(
             f"{formatted}"
         )
 
+    return (
+        execution_targets,
+        legacy,
+    )
+
+
+def build_artwork_target_workflow(
+    *,
+    plex,
+    target: ArtworkTarget,
+    provider: ArtworkProvider,
+    tmdb_client: TMDBArtworkClient | None = None,
+    legacy_metadata: str | Path | None = None,
+    incomplete_migration_threshold: float = 0.25,
+    progress_callback: ArtworkProgressCallback | None = None,
+) -> ArtworkLibraryWorkflow:
+    """Build one already-discovered show target without rediscovery."""
+
+    if (
+        target.media_type
+        is not MediaType.SHOW
+    ):
+        raise ValueError(
+            "Artwork Manager target workflow "
+            "currently supports show libraries only"
+        )
+
+    baseline = (
+        load_show_managed_state_baseline(
+            directory=target.output_path,
+            library=target.library,
+            legacy_metadata=(
+                legacy_metadata
+            ),
+        )
+    )
+
+    section = plex.library.section(
+        target.library
+    )
+
+    shows = tuple(
+        section.all()
+    )
+
+    inventory_results = []
+
+    total_shows = len(
+        shows
+    )
+
+    for index, show in enumerate(
+        shows,
+        start=1,
+    ):
+        inventory = (
+            build_show_inventory(
+                show,
+                target.library,
+            )
+        )
+
+        inventory_results.append(
+            inventory
+        )
+
+        emit_artwork_progress(
+            progress_callback,
+            library=target.library,
+            phase=(
+                ArtworkScanPhase
+                .INVENTORY
+            ),
+            completed=index,
+            total=total_shows,
+            message=(
+                "Reading Plex library inventory"
+            ),
+            current_title=(
+                getattr(
+                    getattr(
+                        inventory,
+                        "identity",
+                        None,
+                    ),
+                    "title",
+                    None,
+                )
+            ),
+        )
+
+    inventories = tuple(
+        inventory_results
+    )
+
+    execution_options = {}
+
+    if progress_callback is not None:
+        execution_options[
+            "progress_callback"
+        ] = progress_callback
+
+    execution = execute_show_target(
+        target=target,
+        inventories=inventories,
+        managed_shows=baseline.states,
+        provider=provider,
+        tmdb_client=tmdb_client,
+        incomplete_migration_threshold=(
+            incomplete_migration_threshold
+        ),
+        **execution_options,
+    )
+
+    preview = (
+        build_show_target_preview(
+            execution
+        )
+    )
+
+    emit_artwork_progress(
+        progress_callback,
+        library=target.library,
+        phase=(
+            ArtworkScanPhase.PLANNING
+        ),
+        completed=1,
+        total=2,
+        message=(
+            "Evaluating safety and changes"
+        ),
+    )
+
+    plan = (
+        build_show_item_store_plan(
+            execution
+        )
+    )
+
+    emit_artwork_progress(
+        progress_callback,
+        library=target.library,
+        phase=(
+            ArtworkScanPhase.PLANNING
+        ),
+        completed=2,
+        total=2,
+        message=(
+            "Planning Artwork Manager output"
+        ),
+    )
+
+    run = ArtworkLibraryWorkflow(
+        target=target,
+        baseline=baseline,
+        execution=execution,
+        preview=preview,
+        plan=plan,
+    )
+
+    emit_artwork_progress(
+        progress_callback,
+        library=target.library,
+        phase=(
+            ArtworkScanPhase.COMPLETE
+        ),
+        completed=1,
+        total=1,
+        message=(
+            "Current-state scan complete"
+        ),
+    )
+
+    return run
+
+
+def build_artwork_manager_workflow(
+    *,
+    plex,
+    config: dict,
+    provider: ArtworkProvider,
+    tmdb_client: TMDBArtworkClient | None = None,
+    selected_libraries: str | Iterable[str] | None = None,
+    legacy_metadata_by_library: Mapping[
+        str,
+        str | Path,
+    ]
+    | None = None,
+    incomplete_migration_threshold: float = 0.25,
+    progress_callback: ArtworkProgressCallback | None = None,
+) -> ArtworkManagerWorkflow:
+    """Build the complete read-only Artwork Manager workflow."""
+
+    targets = (
+        discover_artwork_targets(
+            plex,
+            config,
+        )
+    )
+
+    (
+        execution_targets,
+        legacy,
+    ) = resolve_artwork_workflow_targets(
+        targets,
+        selected_libraries=(
+            selected_libraries
+        ),
+        legacy_metadata_by_library=(
+            legacy_metadata_by_library
+        ),
+    )
+
     library_runs: list[
         ArtworkLibraryWorkflow
     ] = []
@@ -358,7 +574,10 @@ def build_artwork_manager_workflow(
     ] = []
 
     for target in execution_targets:
-        if target.media_type is MediaType.MOVIE:
+        if (
+            target.media_type
+            is MediaType.MOVIE
+        ):
             skipped.append(
                 SkippedArtworkWorkflowTarget(
                     target=target,
@@ -368,157 +587,36 @@ def build_artwork_manager_workflow(
                     ),
                 )
             )
+
             continue
 
-        if target.media_type is not MediaType.SHOW:
-            raise ValueError(
-                "unsupported Artwork Manager media type "
-                f"{target.media_type!r}"
-            )
-
-        baseline = load_show_managed_state_baseline(
-            directory=target.output_path,
-            library=target.library,
-            legacy_metadata=legacy.get(
-                target.library
-            ),
-        )
-
-        section = plex.library.section(
-            target.library
-        )
-
-        shows = tuple(
-            section.all()
-        )
-
-        inventory_results = []
-
-        total_shows = len(
-            shows
-        )
-
-        for index, show in enumerate(
-            shows,
-            start=1,
-        ):
-            inventory = (
-                build_show_inventory(
-                    show,
-                    target.library,
-                )
-            )
-
-            inventory_results.append(
-                inventory
-            )
-
-            emit_artwork_progress(
-                progress_callback,
-                library=target.library,
-                phase=(
-                    ArtworkScanPhase
-                    .INVENTORY
-                ),
-                completed=index,
-                total=total_shows,
-                message=(
-                    "Reading Plex library inventory"
-                ),
-                current_title=(
-                    getattr(
-                        getattr(
-                            inventory,
-                            "identity",
-                            None,
-                        ),
-                        "title",
-                        None,
+        library_runs.append(
+            build_artwork_target_workflow(
+                plex=plex,
+                target=target,
+                provider=provider,
+                tmdb_client=tmdb_client,
+                legacy_metadata=(
+                    legacy.get(
+                        target.library
                     )
                 ),
+                incomplete_migration_threshold=(
+                    incomplete_migration_threshold
+                ),
+                progress_callback=(
+                    progress_callback
+                ),
             )
-
-        inventories = tuple(
-            inventory_results
-        )
-
-        execution_options = {}
-
-        if progress_callback is not None:
-            execution_options[
-                "progress_callback"
-            ] = progress_callback
-
-        execution = execute_show_target(
-            target=target,
-            inventories=inventories,
-            managed_shows=baseline.states,
-            provider=provider,
-            tmdb_client=tmdb_client,
-            incomplete_migration_threshold=(
-                incomplete_migration_threshold
-            ),
-            **execution_options,
-        )
-
-        preview = build_show_target_preview(
-            execution
-        )
-
-        emit_artwork_progress(
-            progress_callback,
-            library=target.library,
-            phase=(
-                ArtworkScanPhase.PLANNING
-            ),
-            completed=1,
-            total=2,
-            message=(
-                "Evaluating safety and changes"
-            ),
-        )
-
-        plan = build_show_item_store_plan(
-            execution
-        )
-
-        emit_artwork_progress(
-            progress_callback,
-            library=target.library,
-            phase=(
-                ArtworkScanPhase.PLANNING
-            ),
-            completed=2,
-            total=2,
-            message=(
-                "Planning Artwork Manager output"
-            ),
-        )
-
-        library_runs.append(
-            ArtworkLibraryWorkflow(
-                target=target,
-                baseline=baseline,
-                execution=execution,
-                preview=preview,
-                plan=plan,
-            )
-        )
-
-        emit_artwork_progress(
-            progress_callback,
-            library=target.library,
-            phase=(
-                ArtworkScanPhase.COMPLETE
-            ),
-            completed=1,
-            total=1,
-            message="Current-state scan complete",
         )
 
     return ArtworkManagerWorkflow(
-        libraries=tuple(library_runs),
-        skipped=tuple(skipped),
+        libraries=tuple(
+            library_runs
+        ),
+        skipped=tuple(
+            skipped
+        ),
     )
 
 

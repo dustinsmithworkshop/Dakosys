@@ -14,8 +14,10 @@ import re
 from uuid import uuid4
 
 from artwork.runner import (
+    ArtworkLibraryRunFailure,
     ArtworkLibraryRunResult,
     ArtworkManagerRunResult,
+    ArtworkRunOutcome,
 )
 from artwork.serialization import (
     serialize_artwork_library,
@@ -164,16 +166,144 @@ def _serialize_apply_result(
     }
 
 
+def _serialize_unavailable_library(
+    result: ArtworkLibraryRunFailure,
+) -> dict:
+    """Serialize a discovered library whose workflow could not be built."""
+
+    issue_code = (
+        "setup_required"
+        if (
+            result.outcome
+            is ArtworkRunOutcome.BLOCKED
+        )
+        else "build_failed"
+    )
+
+    return {
+        "library":
+            result.library,
+
+        "media_type":
+            _value(
+                result.target.media_type
+            ),
+
+        "output_path":
+            str(
+                result.target.output_path
+            ),
+
+        "baseline": {
+            "source": "unavailable",
+            "state_count": 0,
+        },
+
+        "safety": {
+            "safe_to_apply": False,
+            "issues": [
+                {
+                    "code": issue_code,
+                    "message":
+                        result.error_message,
+                },
+            ],
+        },
+
+        "inventory": {
+            "plex_shows": 0,
+            "managed_before": 0,
+            "managed_after": 0,
+            "newly_managed": 0,
+            "lost_managed": 0,
+            "shows_without_state": 0,
+            "no_state_titles": [],
+        },
+
+        "coverage": {
+            "expected_episodes": 0,
+            "cards_before": 0,
+            "cards_after": 0,
+            "gaps_before": 0,
+            "gaps_after": 0,
+            "coverage_before": 0.0,
+            "coverage_after": 0.0,
+            "coverage_change": 0.0,
+            "sources": [],
+        },
+
+        "presentation": {
+            "show_posters": 0,
+            "backgrounds": 0,
+            "shows_with_season_art": 0,
+        },
+
+        "provider_activity": {
+            "primary_requests": 0,
+            "primary_errors": 0,
+            "identity_enrichment": {
+                "requests": 0,
+                "enriched": 0,
+                "errors": 0,
+            },
+            "tmdb": {
+                "requests": 0,
+                "errors": 0,
+                "created_states": 0,
+                "changed_shows": 0,
+                "gaps_filled": 0,
+                "gaps_remaining": 0,
+            },
+        },
+
+        "selection_activity": {
+            "set_refreshes": 0,
+            "set_migrations": 0,
+        },
+
+        "output": {
+            "rendered_yaml_bytes": 0,
+            "desired": 0,
+            "added": 0,
+            "updated": 0,
+            "unchanged": 0,
+            "removed": 0,
+            "preserved_unowned": 0,
+            "changed_files": 0,
+            "needs_apply": False,
+            "files": {
+                "added": [],
+                "updated": [],
+                "removed": [],
+            },
+        },
+    }
+
+
 def serialize_artwork_library_run(
-    result: ArtworkLibraryRunResult,
+    result: (
+        ArtworkLibraryRunResult
+        | ArtworkLibraryRunFailure
+    ),
 ) -> dict:
     """Serialize one operational library outcome."""
 
-    payload = (
-        serialize_artwork_library(
-            result.workflow
+    if isinstance(
+        result,
+        ArtworkLibraryRunFailure,
+    ):
+        payload = (
+            _serialize_unavailable_library(
+                result
+            )
         )
-    )
+
+    else:
+        payload = (
+            serialize_artwork_library(
+                result.workflow
+            )
+        )
 
     # serialize_artwork_library() describes the live workflow object.
     # After an automatic apply, its dynamic filesystem check may now be

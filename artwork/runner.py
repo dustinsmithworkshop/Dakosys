@@ -14,6 +14,9 @@ from artwork.item_store_apply import (
 from artwork.review import (
     build_artwork_review_fingerprint,
 )
+from artwork.targets import (
+    ArtworkTarget,
+)
 from artwork.workflow import (
     ArtworkLibraryWorkflow,
     ArtworkManagerWorkflow,
@@ -72,13 +75,57 @@ class ArtworkLibraryRunResult:
 
 
 @dataclass(frozen=True)
+class ArtworkLibraryRunFailure:
+    """Outcome for a discovered library that could not build a workflow."""
+
+    target: ArtworkTarget
+    apply_mode: ArtworkApplyMode
+    outcome: ArtworkRunOutcome
+    error_type: str
+    error_message: str
+
+    def __post_init__(
+        self,
+    ) -> None:
+        if self.outcome not in {
+            ArtworkRunOutcome.BLOCKED,
+            ArtworkRunOutcome.FAILED,
+        }:
+            raise ValueError(
+                "pre-workflow library results "
+                "must be BLOCKED or FAILED"
+            )
+
+    @property
+    def library(self) -> str:
+        return self.target.library
+
+    @property
+    def safe_to_apply(self) -> bool:
+        return False
+
+    @property
+    def needs_apply(self) -> bool:
+        return False
+
+    @property
+    def apply_result(self):
+        return None
+
+    @property
+    def review_fingerprint(self):
+        return None
+
+
+@dataclass(frozen=True)
 class ArtworkManagerRunResult:
     """Aggregate policy result across Artwork Manager libraries."""
 
     apply_mode: ArtworkApplyMode
 
     libraries: tuple[
-        ArtworkLibraryRunResult,
+        ArtworkLibraryRunResult
+        | ArtworkLibraryRunFailure,
         ...,
     ]
 
@@ -130,6 +177,113 @@ class ArtworkManagerRunResult:
         )
 
 
+def execute_artwork_library_workflow(
+    run: ArtworkLibraryWorkflow,
+    *,
+    apply_mode: ArtworkApplyMode,
+) -> ArtworkLibraryRunResult:
+    """Execute one already-built library according to apply policy."""
+
+    if not isinstance(
+        apply_mode,
+        ArtworkApplyMode,
+    ):
+        raise ValueError(
+            "apply_mode must be an "
+            "ArtworkApplyMode"
+        )
+
+    planned_needs_apply = (
+        run.needs_apply
+    )
+
+    if not run.safe_to_apply:
+        return ArtworkLibraryRunResult(
+            workflow=run,
+            apply_mode=apply_mode,
+            planned_needs_apply=(
+                planned_needs_apply
+            ),
+            outcome=(
+                ArtworkRunOutcome.BLOCKED
+            ),
+        )
+
+    if not planned_needs_apply:
+        return ArtworkLibraryRunResult(
+            workflow=run,
+            apply_mode=apply_mode,
+            planned_needs_apply=(
+                planned_needs_apply
+            ),
+            outcome=(
+                ArtworkRunOutcome.NO_CHANGES
+            ),
+        )
+
+    if (
+        apply_mode
+        is ArtworkApplyMode.MANUAL
+    ):
+        return ArtworkLibraryRunResult(
+            workflow=run,
+            apply_mode=apply_mode,
+            planned_needs_apply=(
+                planned_needs_apply
+            ),
+            outcome=(
+                ArtworkRunOutcome
+                .PENDING_REVIEW
+            ),
+            review_fingerprint=(
+                build_artwork_review_fingerprint(
+                    run
+                )
+            ),
+        )
+
+    try:
+        apply_result = (
+            apply_artwork_library_workflow(
+                run
+            )
+        )
+
+    except Exception as exc:
+        return ArtworkLibraryRunResult(
+            workflow=run,
+            apply_mode=apply_mode,
+            planned_needs_apply=(
+                planned_needs_apply
+            ),
+            outcome=(
+                ArtworkRunOutcome.FAILED
+            ),
+            error_type=(
+                type(exc).__name__
+            ),
+            error_message=str(
+                exc
+            ),
+        )
+
+    outcome = (
+        ArtworkRunOutcome.APPLIED
+        if apply_result.changed
+        else ArtworkRunOutcome.NO_CHANGES
+    )
+
+    return ArtworkLibraryRunResult(
+        workflow=run,
+        apply_mode=apply_mode,
+        planned_needs_apply=(
+            planned_needs_apply
+        ),
+        outcome=outcome,
+        apply_result=apply_result,
+    )
+
+
 def execute_artwork_manager_workflow(
     workflow: ArtworkManagerWorkflow,
     *,
@@ -137,15 +291,8 @@ def execute_artwork_manager_workflow(
 ) -> ArtworkManagerRunResult:
     """Execute one already-built workflow according to apply policy.
 
-    Safety always wins over apply mode:
-
-    unsafe               -> BLOCKED
-    safe + no changes    -> NO_CHANGES
-    safe + manual        -> PENDING_REVIEW
-    safe + auto          -> transactional apply
-
-    A failure applying one library does not prevent later libraries from
-    being processed.
+    Each library is evaluated independently. An apply failure in one
+    library does not prevent later libraries from executing.
     """
 
     if not isinstance(
@@ -157,127 +304,17 @@ def execute_artwork_manager_workflow(
             "ArtworkApplyMode"
         )
 
-    results: list[
-        ArtworkLibraryRunResult
-    ] = []
-
-    for run in workflow.libraries:
-        planned_needs_apply = (
-            run.needs_apply
+    results = tuple(
+        execute_artwork_library_workflow(
+            run,
+            apply_mode=apply_mode,
         )
-
-        if not run.safe_to_apply:
-            results.append(
-                ArtworkLibraryRunResult(
-                    workflow=run,
-                    apply_mode=apply_mode,
-                    planned_needs_apply=(
-                        planned_needs_apply
-                    ),
-                    outcome=(
-                        ArtworkRunOutcome
-                        .BLOCKED
-                    ),
-                )
-            )
-
-            continue
-
-        if not planned_needs_apply:
-            results.append(
-                ArtworkLibraryRunResult(
-                    workflow=run,
-                    apply_mode=apply_mode,
-                    planned_needs_apply=(
-                        planned_needs_apply
-                    ),
-                    outcome=(
-                        ArtworkRunOutcome
-                        .NO_CHANGES
-                    ),
-                )
-            )
-
-            continue
-
-        if (
-            apply_mode
-            is ArtworkApplyMode.MANUAL
-        ):
-            results.append(
-                ArtworkLibraryRunResult(
-                    workflow=run,
-                    apply_mode=apply_mode,
-                    planned_needs_apply=(
-                        planned_needs_apply
-                    ),
-                    outcome=(
-                        ArtworkRunOutcome
-                        .PENDING_REVIEW
-                    ),
-                    review_fingerprint=(
-                        build_artwork_review_fingerprint(
-                            run
-                        )
-                    ),
-                )
-            )
-
-            continue
-
-        try:
-            apply_result = (
-                apply_artwork_library_workflow(
-                    run
-                )
-            )
-
-        except Exception as exc:
-            results.append(
-                ArtworkLibraryRunResult(
-                    workflow=run,
-                    apply_mode=apply_mode,
-                    planned_needs_apply=(
-                        planned_needs_apply
-                    ),
-                    outcome=(
-                        ArtworkRunOutcome
-                        .FAILED
-                    ),
-                    error_type=(
-                        type(exc).__name__
-                    ),
-                    error_message=str(
-                        exc
-                    ),
-                )
-            )
-
-            continue
-
-        outcome = (
-            ArtworkRunOutcome.APPLIED
-            if apply_result.changed
-            else (
-                ArtworkRunOutcome
-                .NO_CHANGES
-            )
-        )
-
-        results.append(
-            ArtworkLibraryRunResult(
-                workflow=run,
-                apply_mode=apply_mode,
-                planned_needs_apply=(
-                    planned_needs_apply
-                ),
-                outcome=outcome,
-                apply_result=apply_result,
-            )
-        )
+        for run in workflow.libraries
+    )
 
     return ArtworkManagerRunResult(
         apply_mode=apply_mode,
-        libraries=tuple(results),
+        libraries=results,
         skipped=workflow.skipped,
     )
+
