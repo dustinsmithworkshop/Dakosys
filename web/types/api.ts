@@ -404,6 +404,7 @@ export interface ArtworkLibraryPreview {
     removed: number;
     preserved_unowned: number;
     changed_files: number;
+    needs_apply: boolean;
 
     files: {
       added: string[];

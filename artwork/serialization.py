@@ -243,6 +243,9 @@ def serialize_artwork_library(
             "changed_files": (
                 run.changed_file_count
             ),
+            "needs_apply": (
+                run.needs_apply
+            ),
             "files": {
                 "added": list(
                     plan.added

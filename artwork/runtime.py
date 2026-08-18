@@ -20,6 +20,10 @@ from collections.abc import (
 from dataclasses import dataclass
 from pathlib import Path
 
+from artwork.apply_policy import (
+    ArtworkApplyMode,
+    resolve_artwork_apply_mode,
+)
 from artwork.providers.base import (
     ArtworkProvider,
 )
@@ -42,6 +46,7 @@ class ArtworkRuntime:
 
     provider: ArtworkProvider
     tmdb_client: TMDBArtworkClient | None
+    apply_mode: ArtworkApplyMode
 
     @property
     def primary_provider_name(self) -> str:
@@ -154,6 +159,12 @@ def build_artwork_runtime(
     ):
         return None
 
+    apply_mode = (
+        resolve_artwork_apply_mode(
+            config
+        )
+    )
+
     providers = _mapping(
         service.get("providers"),
         field=(
@@ -257,6 +268,7 @@ def build_artwork_runtime(
     return ArtworkRuntime(
         provider=provider,
         tmdb_client=tmdb_client,
+        apply_mode=apply_mode,
     )
 
 

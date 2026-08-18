@@ -68,6 +68,12 @@ services:
   # hidden ownership-manifest and durable-state files inside the store.
   artwork_manager:
     enabled: false
+
+    # Safe changes are applied automatically by default.
+    # Set this to "manual" to scan automatically but require review
+    # before writing Artwork Manager state.
+    apply_mode: auto
+
     output_dir: /kometa/metadata
 
     providers:

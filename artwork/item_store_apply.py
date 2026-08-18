@@ -437,6 +437,27 @@ def _state_needs_write(
     )
 
 
+def item_store_plan_needs_apply(
+    plan: ItemStorePlan,
+) -> bool:
+    """Whether the reviewed store differs from durable filesystem state."""
+
+    return (
+        bool(
+            plan.write_count
+        )
+        or bool(
+            plan.removed_count
+        )
+        or _manifest_needs_write(
+            plan
+        )
+        or _state_needs_write(
+            plan
+        )
+    )
+
+
 def apply_show_item_store(
     *,
     execution: ShowTargetExecution,
@@ -511,16 +532,7 @@ def apply_show_item_store(
         )
 
     needs_apply = (
-        bool(
-            current_plan.write_count
-        )
-        or bool(
-            current_plan.removed_count
-        )
-        or _manifest_needs_write(
-            current_plan
-        )
-        or _state_needs_write(
+        item_store_plan_needs_apply(
             current_plan
         )
     )

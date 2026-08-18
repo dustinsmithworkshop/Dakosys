@@ -110,6 +110,7 @@ def _library_run():
         updated_count=2,
         unchanged_count=2,
         removed_count=1,
+        write_count=3,
         preserved_unowned=(
             "notes.txt",
         ),
@@ -338,3 +339,14 @@ def test_empty_workflow_serializes_cleanly():
     }
 
     json.dumps(result)
+
+
+def test_library_serialization_exposes_real_apply_requirement():
+    result = serialize_artwork_library(
+        _library_run()
+    )
+
+    assert (
+        result["output"]["needs_apply"]
+        is True
+    )

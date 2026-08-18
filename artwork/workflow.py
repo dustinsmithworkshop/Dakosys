@@ -28,6 +28,7 @@ from artwork.item_store import (
 from artwork.item_store_apply import (
     ItemStoreApplyResult,
     apply_show_item_store,
+    item_store_plan_needs_apply,
 )
 from artwork.managed_state import (
     ManagedStateBaseline,
@@ -108,6 +109,16 @@ class ArtworkLibraryWorkflow:
             self.added_count
             + self.updated_count
             + self.removed_count
+        )
+
+    @property
+    def needs_apply(self) -> bool:
+        """Whether transactional persistence would change durable state."""
+
+        return (
+            item_store_plan_needs_apply(
+                self.plan
+            )
         )
 
 

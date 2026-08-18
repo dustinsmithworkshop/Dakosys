@@ -283,3 +283,79 @@ def test_disabled_configured_workflow_is_empty():
             skipped=(),
         )
     )
+
+
+def test_runtime_defaults_to_auto_apply_mode():
+    from artwork.apply_policy import (
+        ArtworkApplyMode,
+    )
+
+    runtime = build_artwork_runtime(
+        _config(),
+        environ={},
+    )
+
+    assert runtime is not None
+    assert (
+        runtime.apply_mode
+        is ArtworkApplyMode.AUTO
+    )
+
+
+def test_runtime_supports_manual_apply_mode():
+    from artwork.apply_policy import (
+        ArtworkApplyMode,
+    )
+
+    config = _config()
+
+    config[
+        "services"
+    ][
+        "artwork_manager"
+    ][
+        "apply_mode"
+    ] = "manual"
+
+    runtime = build_artwork_runtime(
+        config,
+        environ={},
+    )
+
+    assert runtime is not None
+    assert (
+        runtime.apply_mode
+        is ArtworkApplyMode.MANUAL
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "ask",
+        "review",
+        "",
+        123,
+    ),
+)
+def test_runtime_rejects_invalid_apply_mode(
+    value,
+):
+    config = _config()
+
+    config[
+        "services"
+    ][
+        "artwork_manager"
+    ][
+        "apply_mode"
+    ] = value
+
+    with pytest.raises(
+        ValueError,
+        match="apply_mode",
+    ):
+        build_artwork_runtime(
+            config,
+            environ={},
+        )
