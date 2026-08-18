@@ -243,7 +243,7 @@ function ArtworkRunDashboard({
               isLoading={loading}
               onPress={onRefresh}
             >
-              Refresh
+              Refresh Artwork Status
             </Button>
           </div>
         </CardBody>
@@ -294,7 +294,7 @@ function ArtworkRunDashboard({
               isLoading={loading}
               onPress={onRefresh}
             >
-              Refresh Status
+              Refresh Artwork Status
             </Button>
           </div>
 
@@ -553,7 +553,7 @@ function PreviewPanel({
 
           {coverage.coverage_change !== 0 && (
             <p className="text-xs text-zinc-400">
-              Preview change:{" "}
+              Current-state change:{" "}
               <span
                 className={
                   coverage.coverage_change > 0
@@ -789,7 +789,7 @@ function PreviewPanel({
         output.updated > 0 ||
         output.removed > 0) && (
         <div className="text-xs text-zinc-500">
-          This page is preview-only. No Artwork Manager
+          Current state is read-only. No Artwork Manager
           files have been written.
         </div>
       )}
@@ -802,12 +802,12 @@ function TargetCard({
   target,
   preview,
   previewing,
-  onPreview,
+  previewError,
 }: {
   target: ArtworkTarget;
   preview: ArtworkLibraryPreview | null;
   previewing: boolean;
-  onPreview: () => void;
+  previewError: string | null;
 }) {
   return (
     <Card className="bg-zinc-900 border border-zinc-800">
@@ -841,20 +841,34 @@ function TargetCard({
             </div>
 
             {target.supported ? (
-              <Button
-                color="secondary"
-                variant={
-                  preview
-                    ? "flat"
-                    : "solid"
-                }
-                isLoading={previewing}
-                onPress={onPreview}
-              >
-                {preview
-                  ? "Refresh Preview"
-                  : "Preview Changes"}
-              </Button>
+              previewing ? (
+                <div className="flex items-center gap-2 text-zinc-400 text-sm">
+                  <Spinner
+                    size="sm"
+                    color="secondary"
+                  />
+                  <span>
+                    Scanning current state…
+                  </span>
+                </div>
+              ) : (
+                <Chip
+                  variant="flat"
+                  color={
+                    previewError
+                      ? "danger"
+                      : preview
+                        ? "success"
+                        : "default"
+                  }
+                >
+                  {previewError
+                    ? "Scan Failed"
+                    : preview
+                      ? "Current State"
+                      : "Waiting"}
+                </Chip>
+              )
             ) : (
               <Chip
                 variant="flat"
@@ -865,6 +879,20 @@ function TargetCard({
             )}
           </div>
         </div>
+
+        {previewError && (
+          <div className="border-t border-zinc-800 p-5">
+            <div className="bg-red-950/40 border border-red-900 rounded-lg p-4">
+              <p className="text-red-300 font-semibold text-sm">
+                Current state could not be loaded
+              </p>
+
+              <p className="text-zinc-300 text-sm mt-1">
+                {previewError}
+              </p>
+            </div>
+          </div>
+        )}
 
         {preview && (
           <PreviewPanel
@@ -912,7 +940,12 @@ export default function ArtworkPage() {
   const [
     previewing,
     setPreviewing,
-  ] = useState<string | null>(null);
+  ] = useState<Record<string, boolean>>({});
+
+  const [
+    previewErrors,
+    setPreviewErrors,
+  ] = useState<Record<string, string>>({});
 
   const [
     loading,
@@ -933,6 +966,12 @@ export default function ArtworkPage() {
 
       setTargetsResponse(result);
       setError(null);
+
+      if (result.enabled) {
+        void loadSupportedLibraryStates(
+          result.targets
+        );
+      }
     } catch (e: unknown) {
       setError(
         e instanceof Error
@@ -974,15 +1013,48 @@ export default function ArtworkPage() {
     }
   };
 
+  const refreshArtworkStatus = async () => {
+    const targets =
+      targetsResponse?.targets ?? [];
+
+    await Promise.allSettled([
+      loadHistory(),
+      targets.length > 0
+        ? loadSupportedLibraryStates(
+            targets
+          )
+        : loadTargets(),
+    ]);
+  };
+
   useEffect(() => {
     loadTargets();
     loadHistory();
   }, []);
 
-  const previewLibrary = async (
+  const loadLibraryState = async (
     library: string
   ) => {
-    setPreviewing(library);
+    setPreviewing(
+      (current) => ({
+        ...current,
+        [library]: true,
+      })
+    );
+
+    setPreviewErrors(
+      (current) => {
+        const next = {
+          ...current,
+        };
+
+        delete next[
+          library
+        ];
+
+        return next;
+      }
+    );
 
     try {
       const result =
@@ -998,7 +1070,7 @@ export default function ArtworkPage() {
 
       if (!preview) {
         throw new Error(
-          `No preview returned for ${library}`
+          `No current state returned for ${library}`
         );
       }
 
@@ -1008,17 +1080,45 @@ export default function ArtworkPage() {
           [library]: preview,
         })
       );
-
-      setError(null);
     } catch (e: unknown) {
-      setError(
+      const message =
         e instanceof Error
           ? e.message
-          : `Failed to preview ${library}`
+          : `Failed to load ${library}`;
+
+      setPreviewErrors(
+        (current) => ({
+          ...current,
+          [library]: message,
+        })
       );
     } finally {
-      setPreviewing(null);
+      setPreviewing(
+        (current) => ({
+          ...current,
+          [library]: false,
+        })
+      );
     }
+  };
+
+  const loadSupportedLibraryStates = async (
+    targets: ArtworkTarget[]
+  ) => {
+    const supported =
+      targets.filter(
+        (target) =>
+          target.supported
+      );
+
+    await Promise.allSettled(
+      supported.map(
+        (target) =>
+          loadLibraryState(
+            target.library
+          )
+      )
+    );
   };
 
   const targets =
@@ -1080,8 +1180,13 @@ export default function ArtworkPage() {
       <ArtworkRunDashboard
         latest={latestRun}
         recent={recentRuns}
-        loading={historyLoading}
-        onRefresh={loadHistory}
+        loading={
+          historyLoading ||
+          Object.values(
+            previewing
+          ).some(Boolean)
+        }
+        onRefresh={refreshArtworkStatus}
       />
 
       {loading && (
@@ -1139,13 +1244,14 @@ export default function ArtworkPage() {
                 ] ?? null
               }
               previewing={
-                previewing ===
-                target.library
-              }
-              onPreview={() =>
-                previewLibrary(
+                previewing[
                   target.library
-                )
+                ] ?? false
+              }
+              previewError={
+                previewErrors[
+                  target.library
+                ] ?? null
               }
             />
           )
