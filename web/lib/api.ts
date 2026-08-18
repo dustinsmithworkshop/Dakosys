@@ -29,6 +29,9 @@ import type {
   ArtworkWorkflowResponse,
   ArtworkLatestRunResponse,
   ArtworkRunHistoryResponse,
+  ArtworkCurrentStateResponse,
+  ArtworkScanStartResponse,
+  ArtworkScanStatusResponse,
 } from "@/types/api";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -49,6 +52,24 @@ export const api = {
   getArtworkPreview: (library: string) =>
     apiFetch<ArtworkWorkflowResponse>(
       `/api/artwork/preview/${encodeURIComponent(library)}`
+    ),
+
+  getArtworkCurrentState: (library: string) =>
+    apiFetch<ArtworkCurrentStateResponse>(
+      `/api/artwork/current-state/${encodeURIComponent(library)}`
+    ),
+
+  startArtworkScan: (library: string) =>
+    apiFetch<ArtworkScanStartResponse>(
+      `/api/artwork/scan/${encodeURIComponent(library)}`,
+      {
+        method: "POST",
+      }
+    ),
+
+  getArtworkScan: (scanId: string) =>
+    apiFetch<ArtworkScanStatusResponse>(
+      `/api/artwork/scan/${encodeURIComponent(scanId)}`
     ),
 
   getArtworkLatestRun: () =>

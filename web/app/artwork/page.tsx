@@ -17,6 +17,7 @@ import type {
   ArtworkLibraryRun,
   ArtworkRunOutcome,
   ArtworkRunRecord,
+  ArtworkScanRecord,
   ArtworkTarget,
   ArtworkTargetsResponse,
 } from "@/types/api";
@@ -37,6 +38,35 @@ function baselineLabel(source: string): string {
       return "New Library";
     default:
       return source;
+  }
+}
+
+
+function scanPhaseLabel(
+  phase: string,
+  fallback: string
+): string {
+  switch (phase) {
+    case "starting":
+      return "Starting current-state scan";
+    case "inventory":
+      return "Reading Plex library inventory";
+    case "identity":
+      return "Resolving show identities";
+    case "primary_managed":
+      return "Checking managed artwork with MediUX";
+    case "primary_discovery":
+      return "Discovering artwork with MediUX";
+    case "tmdb_managed":
+      return "Checking managed episode gaps with TMDB";
+    case "tmdb_discovery":
+      return "Checking unmanaged episode gaps with TMDB";
+    case "planning":
+      return "Planning current-state changes";
+    case "complete":
+      return "Current-state scan complete";
+    default:
+      return fallback || phase;
   }
 }
 
@@ -801,14 +831,34 @@ function PreviewPanel({
 function TargetCard({
   target,
   preview,
-  previewing,
+  scan,
   previewError,
+  scannedAt,
 }: {
   target: ArtworkTarget;
   preview: ArtworkLibraryPreview | null;
-  previewing: boolean;
+  scan: ArtworkScanRecord | null;
   previewError: string | null;
+  scannedAt: string | null;
 }) {
+  const scanning =
+    scan?.status === "running";
+
+  const progress =
+    scanning
+      ? scan.progress
+      : null;
+
+  const progressPercent =
+    progress !== null &&
+    progress.total > 0 &&
+    progress.fraction !== null
+      ? progress.fraction * 100
+      : undefined;
+
+  const determinate =
+    progressPercent !== undefined;
+
   return (
     <Card className="bg-zinc-900 border border-zinc-800">
       <CardBody className="p-0">
@@ -838,37 +888,39 @@ function TargetCard({
               <p className="text-zinc-500 text-xs mt-2 font-mono break-all">
                 {target.output_path}
               </p>
+
+              {preview && scannedAt && (
+                <p className="text-zinc-500 text-xs mt-2">
+                  Last scanned {runTime(scannedAt)}
+                </p>
+              )}
             </div>
 
             {target.supported ? (
-              previewing ? (
-                <div className="flex items-center gap-2 text-zinc-400 text-sm">
-                  <Spinner
-                    size="sm"
-                    color="secondary"
-                  />
-                  <span>
-                    Scanning current state…
-                  </span>
-                </div>
-              ) : (
-                <Chip
-                  variant="flat"
-                  color={
-                    previewError
+              <Chip
+                variant="flat"
+                color={
+                  scanning
+                    ? "secondary"
+                    : previewError
                       ? "danger"
                       : preview
                         ? "success"
                         : "default"
-                  }
-                >
-                  {previewError
-                    ? "Scan Failed"
+                }
+              >
+                {scanning
+                  ? preview
+                    ? "Refreshing"
+                    : "Scanning"
+                  : previewError
+                    ? preview
+                      ? "Refresh Failed"
+                      : "Scan Failed"
                     : preview
                       ? "Current State"
                       : "Waiting"}
-                </Chip>
-              )
+              </Chip>
             ) : (
               <Chip
                 variant="flat"
@@ -880,16 +932,77 @@ function TargetCard({
           </div>
         </div>
 
+        {scanning && progress && (
+          <div className="border-t border-zinc-800 p-5">
+            <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-4">
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 mb-3">
+                <div>
+                  <p className="text-zinc-100 font-medium">
+                    {scanPhaseLabel(
+                      progress.phase,
+                      progress.message
+                    )}
+                  </p>
+
+                  <p className="text-zinc-500 text-xs mt-1">
+                    Current phase
+                  </p>
+                </div>
+
+                {progress.total > 0 && (
+                  <p className="text-violet-300 text-sm font-medium">
+                    {progress.completed.toLocaleString()}
+                    {" / "}
+                    {progress.total.toLocaleString()}
+                  </p>
+                )}
+              </div>
+
+              <Progress
+                aria-label={`${target.library} current scan phase progress`}
+                color="secondary"
+                isIndeterminate={!determinate}
+                value={progressPercent}
+              />
+
+              {progress.current_title && (
+                <p className="text-zinc-400 text-sm mt-3">
+                  Processing{" "}
+                  <span className="text-zinc-200">
+                    {progress.current_title}
+                  </span>
+                </p>
+              )}
+
+              {preview && scannedAt && (
+                <p className="text-zinc-500 text-xs mt-3">
+                  Showing cached results from{" "}
+                  {runTime(scannedAt)} while the
+                  refresh runs.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
         {previewError && (
           <div className="border-t border-zinc-800 p-5">
             <div className="bg-red-950/40 border border-red-900 rounded-lg p-4">
               <p className="text-red-300 font-semibold text-sm">
-                Current state could not be loaded
+                {preview
+                  ? "Current-state refresh failed"
+                  : "Current state could not be loaded"}
               </p>
 
               <p className="text-zinc-300 text-sm mt-1">
                 {previewError}
               </p>
+
+              {preview && (
+                <p className="text-zinc-500 text-xs mt-2">
+                  The previous cached result has been retained.
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -921,6 +1034,20 @@ export default function ArtworkPage() {
   >({});
 
   const [
+    scannedAt,
+    setScannedAt,
+  ] = useState<
+    Record<string, string>
+  >({});
+
+  const [
+    scans,
+    setScans,
+  ] = useState<
+    Record<string, ArtworkScanRecord>
+  >({});
+
+  const [
     latestRun,
     setLatestRun,
   ] = useState<ArtworkRunRecord | null>(
@@ -938,11 +1065,6 @@ export default function ArtworkPage() {
   ] = useState(false);
 
   const [
-    previewing,
-    setPreviewing,
-  ] = useState<Record<string, boolean>>({});
-
-  const [
     previewErrors,
     setPreviewErrors,
   ] = useState<Record<string, string>>({});
@@ -956,6 +1078,306 @@ export default function ArtworkPage() {
     error,
     setError,
   ] = useState<string | null>(null);
+
+  const clearLibraryError = (
+    library: string
+  ) => {
+    setPreviewErrors(
+      (current) => {
+        const next = {
+          ...current,
+        };
+
+        delete next[
+          library
+        ];
+
+        return next;
+      }
+    );
+  };
+
+  const setLibraryError = (
+    library: string,
+    message: string
+  ) => {
+    setPreviewErrors(
+      (current) => ({
+        ...current,
+        [library]: message,
+      })
+    );
+  };
+
+  const loadCachedLibraryState = async (
+    library: string
+  ): Promise<boolean> => {
+    try {
+      const result =
+        await api.getArtworkCurrentState(
+          library
+        );
+
+      if (!result.state) {
+        return false;
+      }
+
+      setPreviews(
+        (current) => ({
+          ...current,
+          [library]:
+            result.state!.preview,
+        })
+      );
+
+      setScannedAt(
+        (current) => ({
+          ...current,
+          [library]:
+            result.state!.scanned_at,
+        })
+      );
+
+      clearLibraryError(
+        library
+      );
+
+      return true;
+    } catch (e: unknown) {
+      setLibraryError(
+        library,
+        e instanceof Error
+          ? e.message
+          : `Failed to load cached state for ${library}`
+      );
+
+      return false;
+    }
+  };
+
+  const markLocalScanFailed = (
+    library: string,
+    message: string
+  ) => {
+    setScans(
+      (current) => {
+        const existing =
+          current[
+            library
+          ];
+
+        if (!existing) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [library]: {
+            ...existing,
+            status: "failed",
+            updated_at:
+              new Date().toISOString(),
+            error: {
+              type: "ClientError",
+              message,
+            },
+          },
+        };
+      }
+    );
+  };
+
+  const pollArtworkScan = async (
+    library: string,
+    scanId: string
+  ) => {
+    while (true) {
+      await new Promise(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            1000
+          )
+      );
+
+      let result;
+
+      try {
+        result =
+          await api.getArtworkScan(
+            scanId
+          );
+      } catch (e: unknown) {
+        const message =
+          e instanceof Error
+            ? e.message
+            : `Lost scan status for ${library}`;
+
+        markLocalScanFailed(
+          library,
+          message
+        );
+
+        setLibraryError(
+          library,
+          message
+        );
+
+        return;
+      }
+
+      const scan =
+        result.scan;
+
+      setScans(
+        (current) => ({
+          ...current,
+          [library]: scan,
+        })
+      );
+
+      if (
+        scan.status === "complete"
+      ) {
+        const loaded =
+          await loadCachedLibraryState(
+            library
+          );
+
+        if (!loaded) {
+          setLibraryError(
+            library,
+            (
+              `${library} scan completed, ` +
+              "but its cached result could not be loaded"
+            )
+          );
+        }
+
+        return;
+      }
+
+      if (
+        scan.status === "failed"
+      ) {
+        setLibraryError(
+          library,
+          scan.error?.message ??
+            `Current-state scan failed for ${library}`
+        );
+
+        return;
+      }
+    }
+  };
+
+  const scanLibraryState = async (
+    library: string
+  ) => {
+    clearLibraryError(
+      library
+    );
+
+    try {
+      const started =
+        await api.startArtworkScan(
+          library
+        );
+
+      const scan =
+        started.scan;
+
+      setScans(
+        (current) => ({
+          ...current,
+          [library]: scan,
+        })
+      );
+
+      if (
+        scan.status === "complete"
+      ) {
+        await loadCachedLibraryState(
+          library
+        );
+
+        return;
+      }
+
+      if (
+        scan.status === "failed"
+      ) {
+        setLibraryError(
+          library,
+          scan.error?.message ??
+            `Current-state scan failed for ${library}`
+        );
+
+        return;
+      }
+
+      await pollArtworkScan(
+        library,
+        scan.scan_id
+      );
+    } catch (e: unknown) {
+      const message =
+        e instanceof Error
+          ? e.message
+          : `Failed to start current-state scan for ${library}`;
+
+      setLibraryError(
+        library,
+        message
+      );
+    }
+  };
+
+  const loadSupportedLibraryStates = async (
+    targets: ArtworkTarget[]
+  ) => {
+    const supported =
+      targets.filter(
+        (target) =>
+          target.supported
+      );
+
+    await Promise.allSettled(
+      supported.map(
+        async (target) => {
+          const cached =
+            await loadCachedLibraryState(
+              target.library
+            );
+
+          if (!cached) {
+            await scanLibraryState(
+              target.library
+            );
+          }
+        }
+      )
+    );
+  };
+
+  const refreshSupportedLibraryStates = async (
+    targets: ArtworkTarget[]
+  ) => {
+    const supported =
+      targets.filter(
+        (target) =>
+          target.supported
+      );
+
+    await Promise.allSettled(
+      supported.map(
+        (target) =>
+          scanLibraryState(
+            target.library
+          )
+      )
+    );
+  };
 
   const loadTargets = async () => {
     setLoading(true);
@@ -1020,7 +1442,7 @@ export default function ArtworkPage() {
     await Promise.allSettled([
       loadHistory(),
       targets.length > 0
-        ? loadSupportedLibraryStates(
+        ? refreshSupportedLibraryStates(
             targets
           )
         : loadTargets(),
@@ -1031,95 +1453,6 @@ export default function ArtworkPage() {
     loadTargets();
     loadHistory();
   }, []);
-
-  const loadLibraryState = async (
-    library: string
-  ) => {
-    setPreviewing(
-      (current) => ({
-        ...current,
-        [library]: true,
-      })
-    );
-
-    setPreviewErrors(
-      (current) => {
-        const next = {
-          ...current,
-        };
-
-        delete next[
-          library
-        ];
-
-        return next;
-      }
-    );
-
-    try {
-      const result =
-        await api.getArtworkPreview(
-          library
-        );
-
-      const preview =
-        result.libraries.find(
-          (item) =>
-            item.library === library
-        );
-
-      if (!preview) {
-        throw new Error(
-          `No current state returned for ${library}`
-        );
-      }
-
-      setPreviews(
-        (current) => ({
-          ...current,
-          [library]: preview,
-        })
-      );
-    } catch (e: unknown) {
-      const message =
-        e instanceof Error
-          ? e.message
-          : `Failed to load ${library}`;
-
-      setPreviewErrors(
-        (current) => ({
-          ...current,
-          [library]: message,
-        })
-      );
-    } finally {
-      setPreviewing(
-        (current) => ({
-          ...current,
-          [library]: false,
-        })
-      );
-    }
-  };
-
-  const loadSupportedLibraryStates = async (
-    targets: ArtworkTarget[]
-  ) => {
-    const supported =
-      targets.filter(
-        (target) =>
-          target.supported
-      );
-
-    await Promise.allSettled(
-      supported.map(
-        (target) =>
-          loadLibraryState(
-            target.library
-          )
-      )
-    );
-  };
 
   const targets =
     targetsResponse?.targets ?? [];
@@ -1183,8 +1516,11 @@ export default function ArtworkPage() {
         loading={
           historyLoading ||
           Object.values(
-            previewing
-          ).some(Boolean)
+            scans
+          ).some(
+            (scan) =>
+              scan.status === "running"
+          )
         }
         onRefresh={refreshArtworkStatus}
       />
@@ -1243,13 +1579,18 @@ export default function ArtworkPage() {
                   target.library
                 ] ?? null
               }
-              previewing={
-                previewing[
+              scan={
+                scans[
                   target.library
-                ] ?? false
+                ] ?? null
               }
               previewError={
                 previewErrors[
+                  target.library
+                ] ?? null
+              }
+              scannedAt={
+                scannedAt[
                   target.library
                 ] ?? null
               }

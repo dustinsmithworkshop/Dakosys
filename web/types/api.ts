@@ -503,3 +503,54 @@ export interface ArtworkRunHistoryResponse {
   runs: ArtworkRunRecord[];
   count: number;
 }
+
+
+export interface ArtworkCurrentStateRecord {
+  schema_version: number;
+  library: string;
+  scanned_at: string;
+  preview: ArtworkLibraryPreview;
+}
+
+export interface ArtworkCurrentStateResponse {
+  state: ArtworkCurrentStateRecord | null;
+}
+
+export type ArtworkScanStatus =
+  | "running"
+  | "complete"
+  | "failed";
+
+export interface ArtworkScanProgress {
+  phase: string;
+  completed: number;
+  total: number;
+  fraction: number | null;
+  message: string;
+  current_title: string | null;
+}
+
+export interface ArtworkScanError {
+  type: string;
+  message: string;
+}
+
+export interface ArtworkScanRecord {
+  scan_id: string;
+  library: string;
+  status: ArtworkScanStatus;
+  started_at: string;
+  updated_at: string;
+  scanned_at: string | null;
+  progress: ArtworkScanProgress;
+  error: ArtworkScanError | null;
+}
+
+export interface ArtworkScanStartResponse {
+  scan: ArtworkScanRecord;
+  reused: boolean;
+}
+
+export interface ArtworkScanStatusResponse {
+  scan: ArtworkScanRecord;
+}
