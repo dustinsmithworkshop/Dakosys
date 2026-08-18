@@ -361,14 +361,23 @@ def test_runtime_rejects_invalid_apply_mode(
         )
 
 
-def test_configured_runner_uses_runtime_apply_mode(
+def test_configured_runner_processes_targets_independently(
     monkeypatch,
 ):
+    from pathlib import Path
+
     from artwork.apply_policy import (
         ArtworkApplyMode,
     )
+    from artwork.runner import (
+        ArtworkRunOutcome,
+    )
     from artwork.runtime import (
         run_configured_artwork_manager,
+    )
+    from artwork.targets import (
+        ArtworkTarget,
+        MediaType,
     )
 
     provider = object()
@@ -389,46 +398,100 @@ def test_configured_runner_uses_runtime_apply_mode(
             runtime,
     )
 
-    workflow = object()
+    targets = (
+        ArtworkTarget(
+            name="Series One",
+            library="Series One",
+            media_type=MediaType.SHOW,
+            output_path=Path(
+                "/metadata/artwork-series-one"
+            ),
+        ),
+        ArtworkTarget(
+            name="Cinema",
+            library="Cinema",
+            media_type=MediaType.MOVIE,
+            output_path=Path(
+                "/metadata/artwork-cinema"
+            ),
+        ),
+        ArtworkTarget(
+            name="Series Two",
+            library="Series Two",
+            media_type=MediaType.SHOW,
+            output_path=Path(
+                "/metadata/artwork-series-two"
+            ),
+        ),
+    )
 
-    seen_build = {}
+    discoveries = []
+
+    def fake_discover(
+        plex,
+        config,
+    ):
+        discoveries.append(
+            (
+                plex,
+                config,
+            )
+        )
+
+        return targets
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "discover_artwork_targets",
+        fake_discover,
+    )
+
+    built = []
 
     def fake_build(
         **kwargs,
     ):
-        seen_build.update(
-            kwargs
+        built.append(
+            kwargs["target"].library
         )
 
-        return workflow
+        return SimpleNamespace(
+            library=(
+                kwargs["target"].library
+            ),
+        )
 
     monkeypatch.setattr(
         "artwork.runtime."
-        "build_artwork_manager_workflow",
+        "build_artwork_target_workflow",
         fake_build,
     )
 
-    expected = object()
-    seen_execute = {}
+    executed = []
 
     def fake_execute(
-        value,
+        run,
         *,
         apply_mode,
     ):
-        seen_execute[
-            "workflow"
-        ] = value
+        executed.append(
+            (
+                run.library,
+                apply_mode,
+            )
+        )
 
-        seen_execute[
-            "apply_mode"
-        ] = apply_mode
-
-        return expected
+        return SimpleNamespace(
+            library=run.library,
+            outcome=(
+                ArtworkRunOutcome
+                .NO_CHANGES
+            ),
+        )
 
     monkeypatch.setattr(
         "artwork.runtime."
-        "execute_artwork_manager_workflow",
+        "execute_artwork_library_workflow",
         fake_execute,
     )
 
@@ -440,43 +503,39 @@ def test_configured_runner_uses_runtime_apply_mode(
             plex=plex,
             config=config,
             environ={},
-            selected_libraries=(
-                "Series"
-            ),
         )
     )
 
-    assert result is expected
+    assert result is not None
 
-    assert (
-        seen_build["plex"]
-        is plex
-    )
+    assert len(
+        discoveries
+    ) == 1
 
-    assert (
-        seen_build["provider"]
-        is provider
-    )
+    assert built == [
+        "Series One",
+        "Series Two",
+    ]
 
-    assert (
-        seen_build["tmdb_client"]
-        is tmdb_client
-    )
-
-    assert (
-        seen_build[
-            "selected_libraries"
-        ]
-        == "Series"
-    )
-
-    assert seen_execute == {
-        "workflow":
-            workflow,
-
-        "apply_mode":
+    assert executed == [
+        (
+            "Series One",
             ArtworkApplyMode.MANUAL,
-    }
+        ),
+        (
+            "Series Two",
+            ArtworkApplyMode.MANUAL,
+        ),
+    ]
+
+    assert [
+        item.target.library
+        for item
+        in result.skipped
+    ] == [
+        "Cinema"
+    ]
+
 
 
 def test_disabled_configured_runner_returns_none(
@@ -523,11 +582,20 @@ def test_configured_runner_persists_history_when_requested(
     monkeypatch,
     tmp_path,
 ):
+    from pathlib import Path
+
     from artwork.apply_policy import (
         ArtworkApplyMode,
     )
+    from artwork.runner import (
+        ArtworkRunOutcome,
+    )
     from artwork.runtime import (
         run_configured_artwork_manager,
+    )
+    from artwork.targets import (
+        ArtworkTarget,
+        MediaType,
     )
 
     runtime = SimpleNamespace(
@@ -545,22 +613,47 @@ def test_configured_runner_persists_history_when_requested(
             runtime,
     )
 
-    workflow = object()
+    target = ArtworkTarget(
+        name="Series",
+        library="Series",
+        media_type=MediaType.SHOW,
+        output_path=Path(
+            "/metadata/artwork-series"
+        ),
+    )
 
     monkeypatch.setattr(
         "artwork.runtime."
-        "build_artwork_manager_workflow",
+        "discover_artwork_targets",
+        lambda plex, config: (
+            target,
+        ),
+    )
+
+    workflow = SimpleNamespace(
+        library="Series",
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "build_artwork_target_workflow",
         lambda **kwargs:
             workflow,
     )
 
-    result = object()
+    library_result = SimpleNamespace(
+        library="Series",
+        outcome=(
+            ArtworkRunOutcome
+            .NO_CHANGES
+        ),
+    )
 
     monkeypatch.setattr(
         "artwork.runtime."
-        "execute_artwork_manager_workflow",
-        lambda value, apply_mode:
-            result,
+        "execute_artwork_library_workflow",
+        lambda value, *, apply_mode:
+            library_result,
     )
 
     seen = {}
@@ -597,12 +690,195 @@ def test_configured_runner_persists_history_when_requested(
         )
     )
 
-    assert returned is result
+    assert returned is not None
+
+    assert (
+        returned.libraries
+        == (
+            library_result,
+        )
+    )
 
     assert seen == {
         "result":
-            result,
+            returned,
 
         "directory":
             directory,
     }
+
+
+
+def test_configured_runner_continues_after_library_bootstrap_block(
+    monkeypatch,
+):
+    from pathlib import Path
+
+    from artwork.apply_policy import (
+        ArtworkApplyMode,
+    )
+    from artwork.managed_state import (
+        ArtworkStateBootstrapRequiredError,
+    )
+    from artwork.runner import (
+        ArtworkLibraryRunFailure,
+        ArtworkRunOutcome,
+    )
+    from artwork.runtime import (
+        run_configured_artwork_manager,
+    )
+    from artwork.targets import (
+        ArtworkTarget,
+        MediaType,
+    )
+
+    runtime = SimpleNamespace(
+        provider=object(),
+        tmdb_client=None,
+        apply_mode=(
+            ArtworkApplyMode.AUTO
+        ),
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "build_artwork_runtime",
+        lambda config, environ=None:
+            runtime,
+    )
+
+    blocked_target = ArtworkTarget(
+        name="Needs Bootstrap",
+        library="Needs Bootstrap",
+        media_type=MediaType.SHOW,
+        output_path=Path(
+            "/metadata/artwork-needs-bootstrap"
+        ),
+    )
+
+    healthy_target = ArtworkTarget(
+        name="Healthy Series",
+        library="Healthy Series",
+        media_type=MediaType.SHOW,
+        output_path=Path(
+            "/metadata/artwork-healthy-series"
+        ),
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "discover_artwork_targets",
+        lambda plex, config: (
+            blocked_target,
+            healthy_target,
+        ),
+    )
+
+    healthy_run = SimpleNamespace(
+        library="Healthy Series",
+    )
+
+    def fake_build(
+        **kwargs,
+    ):
+        target = kwargs[
+            "target"
+        ]
+
+        if (
+            target.library
+            == "Needs Bootstrap"
+        ):
+            raise (
+                ArtworkStateBootstrapRequiredError(
+                    "explicit legacy bootstrap "
+                    "metadata is required"
+                )
+            )
+
+        return healthy_run
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "build_artwork_target_workflow",
+        fake_build,
+    )
+
+    executed = []
+
+    def fake_execute(
+        run,
+        *,
+        apply_mode,
+    ):
+        executed.append(
+            run.library
+        )
+
+        return SimpleNamespace(
+            library=run.library,
+            outcome=(
+                ArtworkRunOutcome
+                .NO_CHANGES
+            ),
+        )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "execute_artwork_library_workflow",
+        fake_execute,
+    )
+
+    result = (
+        run_configured_artwork_manager(
+            plex=object(),
+            config=_config(),
+            environ={},
+        )
+    )
+
+    assert result is not None
+
+    assert len(
+        result.libraries
+    ) == 2
+
+    blocked = (
+        result.libraries[0]
+    )
+
+    assert isinstance(
+        blocked,
+        ArtworkLibraryRunFailure,
+    )
+
+    assert (
+        blocked.library
+        == "Needs Bootstrap"
+    )
+
+    assert (
+        blocked.outcome
+        is ArtworkRunOutcome.BLOCKED
+    )
+
+    assert (
+        blocked.error_type
+        == (
+            "ArtworkStateBootstrapRequiredError"
+        )
+    )
+
+    assert executed == [
+        "Healthy Series"
+    ]
+
+    assert (
+        result.blocked_count
+        == 1
+    )
+
+    assert (
+        result.no_changes_count
+        == 1
+    )

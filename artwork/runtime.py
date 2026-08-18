@@ -24,6 +24,12 @@ from artwork.apply_policy import (
     ArtworkApplyMode,
     resolve_artwork_apply_mode,
 )
+from artwork.item_store import (
+    ItemStoreError,
+)
+from artwork.managed_state import (
+    ManagedStateBaselineError,
+)
 from artwork.progress import (
     ArtworkProgressCallback,
 )
@@ -38,15 +44,28 @@ from artwork.providers.tmdb import (
     TMDBArtworkClient,
 )
 from artwork.runner import (
+    ArtworkLibraryRunFailure,
     ArtworkManagerRunResult,
-    execute_artwork_manager_workflow,
+    ArtworkRunOutcome,
+    execute_artwork_library_workflow,
 )
 from artwork.run_history import (
     write_artwork_run_history,
 )
+from artwork.state_store import (
+    ArtworkStateStoreError,
+)
+from artwork.targets import (
+    MediaType,
+    discover_artwork_targets,
+)
 from artwork.workflow import (
     ArtworkManagerWorkflow,
+    ArtworkWorkflowSkipReason,
+    SkippedArtworkWorkflowTarget,
     build_artwork_manager_workflow,
+    build_artwork_target_workflow,
+    resolve_artwork_workflow_targets,
 )
 
 
@@ -374,12 +393,16 @@ def run_configured_artwork_manager(
         | None
     ) = None,
 ) -> ArtworkManagerRunResult | None:
-    """Build and execute Artwork Manager using configured apply policy.
+    """Execute configured Artwork Manager targets independently.
+
+    Target discovery and selection happen once. Each discovered target
+    then builds and executes independently so one library cannot prevent
+    later libraries from reaching an operational result.
+
+    Existing semantic-state, ownership, or filesystem integrity problems
+    are BLOCKED. Unexpected build/provider failures are FAILED.
 
     Returns ``None`` when Artwork Manager is disabled.
-
-    This function is intentionally not tied to the scheduler, CLI, or
-    web server. Those application surfaces may call it explicitly.
     """
 
     runtime = build_artwork_runtime(
@@ -390,42 +413,174 @@ def run_configured_artwork_manager(
     if runtime is None:
         return None
 
-    workflow = (
-        build_artwork_manager_workflow(
-            plex=plex,
-            config=config,
-            provider=runtime.provider,
-            tmdb_client=(
-                runtime.tmdb_client
-            ),
-            selected_libraries=(
-                selected_libraries
-            ),
-            legacy_metadata_by_library=(
-                legacy_metadata_by_library
-            ),
-            incomplete_migration_threshold=(
-                incomplete_migration_threshold
-            ),
+    targets = (
+        discover_artwork_targets(
+            plex,
+            config,
         )
     )
 
-    result = (
-        execute_artwork_manager_workflow(
-            workflow,
-            apply_mode=(
-                runtime.apply_mode
-            ),
+    (
+        execution_targets,
+        legacy,
+    ) = resolve_artwork_workflow_targets(
+        targets,
+        selected_libraries=(
+            selected_libraries
+        ),
+        legacy_metadata_by_library=(
+            legacy_metadata_by_library
+        ),
+    )
+
+    libraries = []
+    skipped = []
+
+    blocking_errors = (
+        ManagedStateBaselineError,
+        ItemStoreError,
+        ArtworkStateStoreError,
+    )
+
+    for target in execution_targets:
+        if (
+            target.media_type
+            is MediaType.MOVIE
+        ):
+            skipped.append(
+                SkippedArtworkWorkflowTarget(
+                    target=target,
+                    reason=(
+                        ArtworkWorkflowSkipReason
+                        .MOVIE_SUPPORT_PENDING
+                    ),
+                )
+            )
+
+            continue
+
+        try:
+            run = (
+                build_artwork_target_workflow(
+                    plex=plex,
+                    target=target,
+                    provider=(
+                        runtime.provider
+                    ),
+                    tmdb_client=(
+                        runtime.tmdb_client
+                    ),
+                    legacy_metadata=(
+                        legacy.get(
+                            target.library
+                        )
+                    ),
+                    incomplete_migration_threshold=(
+                        incomplete_migration_threshold
+                    ),
+                )
+            )
+
+        except blocking_errors as exc:
+            libraries.append(
+                ArtworkLibraryRunFailure(
+                    target=target,
+                    apply_mode=(
+                        runtime.apply_mode
+                    ),
+                    outcome=(
+                        ArtworkRunOutcome
+                        .BLOCKED
+                    ),
+                    error_type=(
+                        type(exc).__name__
+                    ),
+                    error_message=str(
+                        exc
+                    ),
+                )
+            )
+
+            continue
+
+        except Exception as exc:
+            libraries.append(
+                ArtworkLibraryRunFailure(
+                    target=target,
+                    apply_mode=(
+                        runtime.apply_mode
+                    ),
+                    outcome=(
+                        ArtworkRunOutcome
+                        .FAILED
+                    ),
+                    error_type=(
+                        type(exc).__name__
+                    ),
+                    error_message=str(
+                        exc
+                    ),
+                )
+            )
+
+            continue
+
+        try:
+            library_result = (
+                execute_artwork_library_workflow(
+                    run,
+                    apply_mode=(
+                        runtime.apply_mode
+                    ),
+                )
+            )
+
+        except Exception as exc:
+            # The normal executor already converts transactional apply
+            # failures to FAILED. This final boundary protects the
+            # aggregate run from unexpected policy/review failures too.
+            libraries.append(
+                ArtworkLibraryRunFailure(
+                    target=target,
+                    apply_mode=(
+                        runtime.apply_mode
+                    ),
+                    outcome=(
+                        ArtworkRunOutcome
+                        .FAILED
+                    ),
+                    error_type=(
+                        type(exc).__name__
+                    ),
+                    error_message=str(
+                        exc
+                    ),
+                )
+            )
+
+            continue
+
+        libraries.append(
+            library_result
         )
+
+    result = ArtworkManagerRunResult(
+        apply_mode=(
+            runtime.apply_mode
+        ),
+        libraries=tuple(
+            libraries
+        ),
+        skipped=tuple(
+            skipped
+        ),
     )
 
     if history_directory is not None:
         write_artwork_run_history(
             result,
-            directory=(
-                Path(
-                    history_directory
-                )
+            directory=Path(
+                history_directory
             ),
         )
 
