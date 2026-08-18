@@ -20,7 +20,8 @@ plex:
       - TV
 
 # TMDB v3 API key.
-# Used by TV Status metadata and by the web UI for artwork.
+# Used by TV Status metadata, Artwork Manager episode fallback and
+# identity enrichment, and by the web UI for artwork.
 # TMDB_TOKEN may be supplied as an advanced environment-variable
 # bearer-token override.
 tmdb_api_key: REPLACE_WITH_TMDB_API_KEY
@@ -50,8 +51,8 @@ kometa_config:
   yaml_output_dir: /kometa/overlays
 
 services:
-  # Discovers supported Plex libraries automatically and generates one
-  # independent Kometa artwork metadata file per Plex library.
+  # Discovers supported Plex libraries automatically and creates one
+  # independent Kometa artwork item-store directory per Plex library.
   #
   # Plex library names are not predefined by Dakosys. A library named
   # "Series", "Films", "Kids & Family", or anything else works the same.
@@ -59,14 +60,24 @@ services:
   # Artwork Manager writes Kometa metadata, not overlays, so its
   # output directory is configured independently from yaml_output_dir.
   #
-  # Generated files are named:
+  # Default library stores are created as:
   #
-  #   artwork-<plex-library>.yaml
+  #   <output_dir>/artwork-<plex-library>/
+  #
+  # Each show is rendered to its own YAML file. Dakosys also maintains
+  # hidden ownership-manifest and durable-state files inside the store.
   artwork_manager:
     enabled: false
     output_dir: /kometa/metadata
+
+    providers:
+      mediux:
+        # MEDIUX_API_TOKEN may be supplied through the container
+        # environment and takes precedence over this value.
+        api_token: REPLACE_WITH_MEDIUX_API_TOKEN
+
     #
-    # Optional library filtering and overrides:
+    # Optional library filtering and directory overrides:
     #
     # libraries:
     #   include:
@@ -77,7 +88,7 @@ services:
     #
     #   overrides:
     #     Kids & Family:
-    #       output: /kometa/metadata/kids-artwork.yaml
+    #       output: /kometa/metadata/kids-artwork
 
   # Plex + AnimeFillerList -> local episode mapper -> Kometa.
   # No Trakt account or Trakt personal lists are required.
