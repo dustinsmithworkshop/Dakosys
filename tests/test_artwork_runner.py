@@ -300,3 +300,67 @@ def test_apply_failure_does_not_stop_other_libraries(
         failure.error_message
         == "disk problem"
     )
+
+
+def test_auto_result_keeps_pre_apply_needs_apply_snapshot(
+    monkeypatch,
+):
+    class MutableRun:
+        library = "Series"
+        safe_to_apply = True
+
+        def __init__(
+            self,
+        ):
+            self.applied = False
+
+        @property
+        def needs_apply(
+            self,
+        ):
+            return not self.applied
+
+    run = MutableRun()
+
+    def fake_apply(
+        value,
+    ):
+        value.applied = True
+
+        return SimpleNamespace(
+            changed=True
+        )
+
+    monkeypatch.setattr(
+        "artwork.runner."
+        "apply_artwork_library_workflow",
+        fake_apply,
+    )
+
+    result = (
+        execute_artwork_manager_workflow(
+            _workflow(run),
+            apply_mode=(
+                ArtworkApplyMode.AUTO
+            ),
+        )
+    )
+
+    # The live workflow now sees an up-to-date filesystem.
+    assert (
+        run.needs_apply
+        is False
+    )
+
+    # The operational record preserves why this run acted.
+    assert (
+        result.libraries[0]
+        .needs_apply
+        is True
+    )
+
+    assert (
+        result.libraries[0]
+        .outcome
+        is ArtworkRunOutcome.APPLIED
+    )

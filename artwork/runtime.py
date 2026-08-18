@@ -38,6 +38,9 @@ from artwork.runner import (
     ArtworkManagerRunResult,
     execute_artwork_manager_workflow,
 )
+from artwork.run_history import (
+    write_artwork_run_history,
+)
 from artwork.workflow import (
     ArtworkManagerWorkflow,
     build_artwork_manager_workflow,
@@ -355,6 +358,11 @@ def run_configured_artwork_manager(
     incomplete_migration_threshold: (
         float
     ) = 0.25,
+    history_directory: (
+        str
+        | Path
+        | None
+    ) = None,
 ) -> ArtworkManagerRunResult | None:
     """Build and execute Artwork Manager using configured apply policy.
 
@@ -392,7 +400,7 @@ def run_configured_artwork_manager(
         )
     )
 
-    return (
+    result = (
         execute_artwork_manager_workflow(
             workflow,
             apply_mode=(
@@ -400,4 +408,16 @@ def run_configured_artwork_manager(
             ),
         )
     )
+
+    if history_directory is not None:
+        write_artwork_run_history(
+            result,
+            directory=(
+                Path(
+                    history_directory
+                )
+            ),
+        )
+
+    return result
 

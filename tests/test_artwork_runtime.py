@@ -517,3 +517,92 @@ def test_disabled_configured_runner_returns_none(
     )
 
     assert result is None
+
+
+def test_configured_runner_persists_history_when_requested(
+    monkeypatch,
+    tmp_path,
+):
+    from artwork.apply_policy import (
+        ArtworkApplyMode,
+    )
+    from artwork.runtime import (
+        run_configured_artwork_manager,
+    )
+
+    runtime = SimpleNamespace(
+        provider=object(),
+        tmdb_client=None,
+        apply_mode=(
+            ArtworkApplyMode.AUTO
+        ),
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "build_artwork_runtime",
+        lambda config, environ=None:
+            runtime,
+    )
+
+    workflow = object()
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "build_artwork_manager_workflow",
+        lambda **kwargs:
+            workflow,
+    )
+
+    result = object()
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "execute_artwork_manager_workflow",
+        lambda value, apply_mode:
+            result,
+    )
+
+    seen = {}
+
+    def fake_history(
+        value,
+        *,
+        directory,
+    ):
+        seen["result"] = value
+        seen["directory"] = (
+            directory
+        )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "write_artwork_run_history",
+        fake_history,
+    )
+
+    directory = (
+        tmp_path
+        / "artwork-manager"
+    )
+
+    returned = (
+        run_configured_artwork_manager(
+            plex=object(),
+            config=_config(),
+            environ={},
+            history_directory=(
+                directory
+            ),
+        )
+    )
+
+    assert returned is result
+
+    assert seen == {
+        "result":
+            result,
+
+        "directory":
+            directory,
+    }

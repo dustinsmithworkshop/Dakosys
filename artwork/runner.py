@@ -49,6 +49,11 @@ class ArtworkLibraryRunResult:
 
     review_fingerprint: str | None = None
 
+    # Snapshot taken before any automatic apply mutates the live
+    # filesystem. History must describe why this run acted, not only
+    # what the filesystem looks like afterward.
+    planned_needs_apply: bool = False
+
     @property
     def library(self) -> str:
         return self.workflow.library
@@ -62,7 +67,7 @@ class ArtworkLibraryRunResult:
     @property
     def needs_apply(self) -> bool:
         return (
-            self.workflow.needs_apply
+            self.planned_needs_apply
         )
 
 
@@ -157,11 +162,18 @@ def execute_artwork_manager_workflow(
     ] = []
 
     for run in workflow.libraries:
+        planned_needs_apply = (
+            run.needs_apply
+        )
+
         if not run.safe_to_apply:
             results.append(
                 ArtworkLibraryRunResult(
                     workflow=run,
                     apply_mode=apply_mode,
+                    planned_needs_apply=(
+                        planned_needs_apply
+                    ),
                     outcome=(
                         ArtworkRunOutcome
                         .BLOCKED
@@ -171,11 +183,14 @@ def execute_artwork_manager_workflow(
 
             continue
 
-        if not run.needs_apply:
+        if not planned_needs_apply:
             results.append(
                 ArtworkLibraryRunResult(
                     workflow=run,
                     apply_mode=apply_mode,
+                    planned_needs_apply=(
+                        planned_needs_apply
+                    ),
                     outcome=(
                         ArtworkRunOutcome
                         .NO_CHANGES
@@ -193,6 +208,9 @@ def execute_artwork_manager_workflow(
                 ArtworkLibraryRunResult(
                     workflow=run,
                     apply_mode=apply_mode,
+                    planned_needs_apply=(
+                        planned_needs_apply
+                    ),
                     outcome=(
                         ArtworkRunOutcome
                         .PENDING_REVIEW
@@ -219,6 +237,9 @@ def execute_artwork_manager_workflow(
                 ArtworkLibraryRunResult(
                     workflow=run,
                     apply_mode=apply_mode,
+                    planned_needs_apply=(
+                        planned_needs_apply
+                    ),
                     outcome=(
                         ArtworkRunOutcome
                         .FAILED
@@ -247,6 +268,9 @@ def execute_artwork_manager_workflow(
             ArtworkLibraryRunResult(
                 workflow=run,
                 apply_mode=apply_mode,
+                planned_needs_apply=(
+                    planned_needs_apply
+                ),
                 outcome=outcome,
                 apply_result=apply_result,
             )
