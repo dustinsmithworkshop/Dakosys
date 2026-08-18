@@ -14,6 +14,9 @@ import { Spotlight } from "@/components/ui/spotlight";
 import { api } from "@/lib/api";
 import type {
   ArtworkLibraryPreview,
+  ArtworkLibraryRun,
+  ArtworkRunOutcome,
+  ArtworkRunRecord,
   ArtworkTarget,
   ArtworkTargetsResponse,
 } from "@/types/api";
@@ -53,6 +56,402 @@ function Stat({
       <p className="text-zinc-100 text-lg font-semibold mt-1">
         {value}
       </p>
+    </div>
+  );
+}
+
+
+function runTime(value: string): string {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString([], {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+
+function outcomeLabel(
+  outcome: ArtworkRunOutcome
+): string {
+  switch (outcome) {
+    case "applied":
+      return "Applied";
+    case "no_changes":
+      return "No Changes";
+    case "pending_review":
+      return "Pending Review";
+    case "blocked":
+      return "Blocked";
+    case "failed":
+      return "Failed";
+    default:
+      return outcome;
+  }
+}
+
+
+function outcomeColor(
+  outcome: ArtworkRunOutcome
+):
+  | "success"
+  | "secondary"
+  | "warning"
+  | "danger"
+  | "default" {
+  switch (outcome) {
+    case "applied":
+      return "success";
+    case "no_changes":
+      return "default";
+    case "pending_review":
+      return "warning";
+    case "blocked":
+    case "failed":
+      return "danger";
+    default:
+      return "default";
+  }
+}
+
+
+function LibraryRunRow({
+  run,
+}: {
+  run: ArtworkLibraryRun;
+}) {
+  const decision = run.decision;
+
+  return (
+    <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-zinc-100 font-medium">
+              {run.library}
+            </p>
+
+            <Chip
+              size="sm"
+              variant="flat"
+              color={outcomeColor(
+                decision.outcome
+              )}
+            >
+              {outcomeLabel(
+                decision.outcome
+              )}
+            </Chip>
+          </div>
+
+          <p className="text-zinc-500 text-xs mt-1 font-mono break-all">
+            {run.output_path}
+          </p>
+        </div>
+
+        <div className="text-sm text-zinc-400 sm:text-right">
+          {run.selection_activity.set_refreshes > 0 && (
+            <p>
+              {run.selection_activity.set_refreshes} set{" "}
+              {run.selection_activity.set_refreshes === 1
+                ? "refresh"
+                : "refreshes"}
+            </p>
+          )}
+
+          {run.selection_activity.set_migrations > 0 && (
+            <p>
+              {run.selection_activity.set_migrations} set{" "}
+              {run.selection_activity.set_migrations === 1
+                ? "migration"
+                : "migrations"}
+            </p>
+          )}
+
+          {decision.needs_apply && (
+            <p>
+              {run.output.changed_files} file{" "}
+              {run.output.changed_files === 1
+                ? "change"
+                : "changes"}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {run.error && (
+        <div className="mt-3 bg-red-950/40 border border-red-900 rounded-md px-3 py-2">
+          <p className="text-red-300 text-sm">
+            {run.error.type
+              ? `${run.error.type}: `
+              : ""}
+            {run.error.message}
+          </p>
+        </div>
+      )}
+
+      {decision.outcome === "pending_review" &&
+        decision.review_fingerprint && (
+          <div className="mt-3">
+            <p className="text-zinc-500 text-xs uppercase tracking-wider">
+              Review identity
+            </p>
+
+            <p className="text-zinc-400 text-xs font-mono mt-1 break-all">
+              {decision.review_fingerprint}
+            </p>
+          </div>
+        )}
+    </div>
+  );
+}
+
+
+function ArtworkRunDashboard({
+  latest,
+  recent,
+  loading,
+  onRefresh,
+}: {
+  latest: ArtworkRunRecord | null;
+  recent: ArtworkRunRecord[];
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  if (!latest) {
+    return (
+      <Card className="bg-zinc-900 border border-zinc-800 mb-6">
+        <CardBody className="p-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <p className="text-white font-semibold text-lg">
+                Automation Status
+              </p>
+
+              <p className="text-zinc-400 text-sm mt-1">
+                No Artwork Manager run has been recorded yet.
+              </p>
+            </div>
+
+            <Button
+              variant="flat"
+              color="secondary"
+              isLoading={loading}
+              onPress={onRefresh}
+            >
+              Refresh
+            </Button>
+          </div>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  const summary = latest.summary;
+
+  return (
+    <div className="space-y-4 mb-6">
+      <Card className="bg-zinc-900 border border-zinc-800">
+        <CardBody className="p-5 space-y-5">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-white font-semibold text-lg">
+                  Automation Status
+                </p>
+
+                <Chip
+                  size="sm"
+                  variant="flat"
+                  color={
+                    latest.apply_mode === "auto"
+                      ? "success"
+                      : "warning"
+                  }
+                >
+                  {latest.apply_mode === "auto"
+                    ? "Automatic Apply"
+                    : "Manual Review"}
+                </Chip>
+              </div>
+
+              <p className="text-zinc-400 text-sm mt-1">
+                Last run {runTime(latest.generated_at)}
+              </p>
+
+              <p className="text-zinc-600 text-xs font-mono mt-1">
+                {latest.run_id}
+              </p>
+            </div>
+
+            <Button
+              variant="flat"
+              color="secondary"
+              isLoading={loading}
+              onPress={onRefresh}
+            >
+              Refresh Status
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <Stat
+              label="Applied"
+              value={summary.applied}
+            />
+
+            <Stat
+              label="No Changes"
+              value={summary.no_changes}
+            />
+
+            <Stat
+              label="Pending"
+              value={summary.pending_review}
+            />
+
+            <Stat
+              label="Blocked"
+              value={summary.blocked}
+            />
+
+            <Stat
+              label="Failed"
+              value={summary.failed}
+            />
+          </div>
+
+          {latest.libraries.length > 0 && (
+            <div>
+              <p className="text-zinc-400 text-xs uppercase tracking-wider mb-3">
+                Library Results
+              </p>
+
+              <div className="space-y-2">
+                {latest.libraries.map(
+                  (run) => (
+                    <LibraryRunRow
+                      key={run.library}
+                      run={run}
+                    />
+                  )
+                )}
+              </div>
+            </div>
+          )}
+
+          {latest.skipped.length > 0 && (
+            <div>
+              <p className="text-zinc-400 text-xs uppercase tracking-wider mb-2">
+                Skipped
+              </p>
+
+              <div className="flex flex-wrap gap-2">
+                {latest.skipped.map(
+                  (item) => (
+                    <Chip
+                      key={`${item.library}-${item.reason}`}
+                      size="sm"
+                      variant="flat"
+                      color="warning"
+                    >
+                      {item.library}: {item.reason}
+                    </Chip>
+                  )
+                )}
+              </div>
+            </div>
+          )}
+        </CardBody>
+      </Card>
+
+      {recent.length > 1 && (
+        <Card className="bg-zinc-900 border border-zinc-800">
+          <CardBody className="p-5">
+            <p className="text-zinc-400 text-xs uppercase tracking-wider mb-3">
+              Recent Runs
+            </p>
+
+            <div className="divide-y divide-zinc-800">
+              {recent.slice(0, 5).map(
+                (run) => (
+                  <div
+                    key={run.run_id}
+                    className="py-3 first:pt-0 last:pb-0 flex flex-col md:flex-row md:items-center justify-between gap-2"
+                  >
+                    <div>
+                      <p className="text-zinc-200 text-sm">
+                        {runTime(
+                          run.generated_at
+                        )}
+                      </p>
+
+                      <p className="text-zinc-600 text-xs font-mono">
+                        {run.run_id}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {run.summary.applied > 0 && (
+                        <Chip
+                          size="sm"
+                          variant="flat"
+                          color="success"
+                        >
+                          {run.summary.applied} applied
+                        </Chip>
+                      )}
+
+                      {run.summary.pending_review > 0 && (
+                        <Chip
+                          size="sm"
+                          variant="flat"
+                          color="warning"
+                        >
+                          {run.summary.pending_review} pending
+                        </Chip>
+                      )}
+
+                      {run.summary.blocked > 0 && (
+                        <Chip
+                          size="sm"
+                          variant="flat"
+                          color="danger"
+                        >
+                          {run.summary.blocked} blocked
+                        </Chip>
+                      )}
+
+                      {run.summary.failed > 0 && (
+                        <Chip
+                          size="sm"
+                          variant="flat"
+                          color="danger"
+                        >
+                          {run.summary.failed} failed
+                        </Chip>
+                      )}
+
+                      {run.summary.no_changes > 0 && (
+                        <Chip
+                          size="sm"
+                          variant="flat"
+                        >
+                          {run.summary.no_changes} unchanged
+                        </Chip>
+                      )}
+                    </div>
+                  </div>
+                )
+              )}
+            </div>
+          </CardBody>
+        </Card>
+      )}
     </div>
   );
 }
@@ -494,6 +893,23 @@ export default function ArtworkPage() {
   >({});
 
   const [
+    latestRun,
+    setLatestRun,
+  ] = useState<ArtworkRunRecord | null>(
+    null
+  );
+
+  const [
+    recentRuns,
+    setRecentRuns,
+  ] = useState<ArtworkRunRecord[]>([]);
+
+  const [
+    historyLoading,
+    setHistoryLoading,
+  ] = useState(false);
+
+  const [
     previewing,
     setPreviewing,
   ] = useState<string | null>(null);
@@ -528,8 +944,39 @@ export default function ArtworkPage() {
     }
   };
 
+  const loadHistory = async () => {
+    setHistoryLoading(true);
+
+    try {
+      const [
+        latest,
+        history,
+      ] = await Promise.all([
+        api.getArtworkLatestRun(),
+        api.getArtworkHistory(10),
+      ]);
+
+      setLatestRun(
+        latest.run
+      );
+
+      setRecentRuns(
+        history.runs
+      );
+    } catch (e: unknown) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Failed to load Artwork Manager history"
+      );
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadTargets();
+    loadHistory();
   }, []);
 
   const previewLibrary = async (
@@ -599,9 +1046,9 @@ export default function ArtworkPage() {
             </h1>
 
             <p className="text-zinc-400 mt-1">
-              Discover, preview, and review
-              artwork management across Plex
-              libraries.
+              Monitor automated artwork management
+              across Plex libraries and inspect
+              proposed changes when needed.
             </p>
           </div>
 
@@ -629,6 +1076,13 @@ export default function ArtworkPage() {
           )}
         </div>
       </Spotlight>
+
+      <ArtworkRunDashboard
+        latest={latestRun}
+        recent={recentRuns}
+        loading={historyLoading}
+        onRefresh={loadHistory}
+      />
 
       {loading && (
         <div className="flex justify-center items-center h-40">

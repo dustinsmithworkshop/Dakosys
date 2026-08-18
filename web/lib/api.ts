@@ -27,6 +27,8 @@ import type {
   IgnoredMappingsResponse,
   ArtworkTargetsResponse,
   ArtworkWorkflowResponse,
+  ArtworkLatestRunResponse,
+  ArtworkRunHistoryResponse,
 } from "@/types/api";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -47,6 +49,16 @@ export const api = {
   getArtworkPreview: (library: string) =>
     apiFetch<ArtworkWorkflowResponse>(
       `/api/artwork/preview/${encodeURIComponent(library)}`
+    ),
+
+  getArtworkLatestRun: () =>
+    apiFetch<ArtworkLatestRunResponse>(
+      "/api/artwork/history/latest"
+    ),
+
+  getArtworkHistory: (limit = 10) =>
+    apiFetch<ArtworkRunHistoryResponse>(
+      `/api/artwork/history?limit=${encodeURIComponent(limit)}`
     ),
 
   getStatus: () => apiFetch<StatusResponse>("/api/status"),

@@ -432,3 +432,74 @@ export interface ArtworkWorkflowResponse {
   libraries: ArtworkLibraryPreview[];
   skipped: ArtworkSkippedTarget[];
 }
+
+
+export type ArtworkApplyMode =
+  | "auto"
+  | "manual";
+
+export type ArtworkRunOutcome =
+  | "applied"
+  | "no_changes"
+  | "pending_review"
+  | "blocked"
+  | "failed";
+
+export interface ArtworkRunApplyResult {
+  changed: boolean;
+  directory: string;
+  manifest_path: string;
+  desired: number;
+  added: number;
+  updated: number;
+  unchanged: number;
+  removed: number;
+  retained_rollback_path: string | null;
+}
+
+export interface ArtworkLibraryRun
+  extends ArtworkLibraryPreview {
+  decision: {
+    apply_mode: ArtworkApplyMode;
+    outcome: ArtworkRunOutcome;
+    safe_to_apply: boolean;
+    needs_apply: boolean;
+    review_fingerprint: string | null;
+  };
+
+  apply_result: ArtworkRunApplyResult | null;
+
+  error: {
+    type: string | null;
+    message: string | null;
+  } | null;
+}
+
+export interface ArtworkRunRecord {
+  schema_version: number;
+  run_id: string;
+  generated_at: string;
+  apply_mode: ArtworkApplyMode;
+
+  summary: {
+    library_count: number;
+    skipped_count: number;
+    applied: number;
+    no_changes: number;
+    pending_review: number;
+    blocked: number;
+    failed: number;
+  };
+
+  libraries: ArtworkLibraryRun[];
+  skipped: ArtworkSkippedTarget[];
+}
+
+export interface ArtworkLatestRunResponse {
+  run: ArtworkRunRecord | null;
+}
+
+export interface ArtworkRunHistoryResponse {
+  runs: ArtworkRunRecord[];
+  count: number;
+}
