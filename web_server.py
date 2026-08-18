@@ -10,7 +10,8 @@ import copy
 import shutil
 import threading
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 from typing import Dict, List, Optional, Any
 
@@ -20,6 +21,15 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from artwork.current_state import (
+    ArtworkCurrentStateError,
+    load_artwork_current_state,
+    write_artwork_current_state,
+)
+from artwork.progress import (
+    ArtworkScanPhase,
+    ArtworkScanProgress,
+)
 from artwork.run_history import (
     ArtworkRunHistoryError,
     list_artwork_run_history,
@@ -29,6 +39,7 @@ from artwork.runtime import (
     build_configured_artwork_manager_workflow,
 )
 from artwork.serialization import (
+    serialize_artwork_library,
     serialize_artwork_workflow,
 )
 from artwork.targets import (
@@ -56,6 +67,242 @@ ARTWORK_HISTORY_DIR = os.path.join(
     "artwork-manager",
 )
 ARTWORK_HISTORY_LIMIT_MAX = 100
+
+# Current-state scans run only in the web process.
+#
+# Finished results are durable under /app/data/artwork-manager/current-state.
+# The in-memory registry exists only for live progress while a scan is
+# running. A web-process restart can therefore lose live progress but never
+# the last successfully cached result.
+ARTWORK_SCAN_LOCK = threading.Lock()
+
+ARTWORK_SCANS: Dict[
+    str,
+    Dict[str, Any],
+] = {}
+
+ARTWORK_ACTIVE_SCANS: Dict[
+    str,
+    str,
+] = {}
+
+
+def _artwork_utc_now() -> str:
+    """Return an aware UTC timestamp for scan status records."""
+
+    return datetime.now(
+        timezone.utc
+    ).isoformat(
+        timespec="microseconds"
+    )
+
+
+def _artwork_scan_snapshot(
+    scan_id: str,
+) -> Optional[dict]:
+    """Return a detached copy of one live scan record."""
+
+    with ARTWORK_SCAN_LOCK:
+        record = (
+            ARTWORK_SCANS.get(
+                scan_id
+            )
+        )
+
+        if record is None:
+            return None
+
+        return copy.deepcopy(
+            record
+        )
+
+
+def _update_artwork_scan(
+    scan_id: str,
+    **changes,
+) -> None:
+    """Atomically update one live scan record."""
+
+    with ARTWORK_SCAN_LOCK:
+        record = (
+            ARTWORK_SCANS.get(
+                scan_id
+            )
+        )
+
+        if record is None:
+            return
+
+        record.update(
+            changes
+        )
+
+        record[
+            "updated_at"
+        ] = _artwork_utc_now()
+
+
+def _serialize_artwork_scan_progress(
+    progress: ArtworkScanProgress,
+) -> dict:
+    """Convert one domain progress event to JSON-safe API state."""
+
+    return {
+        "phase":
+            progress.phase.value,
+
+        "completed":
+            progress.completed,
+
+        "total":
+            progress.total,
+
+        "fraction":
+            progress.fraction,
+
+        "message":
+            progress.message,
+
+        "current_title":
+            progress.current_title,
+    }
+
+
+def _run_artwork_current_state_scan(
+    scan_id: str,
+    library: str,
+) -> None:
+    """Build and cache one read-only library scan in a worker thread."""
+
+    def progress_callback(
+        progress: ArtworkScanProgress,
+    ) -> None:
+        _update_artwork_scan(
+            scan_id,
+            progress=(
+                _serialize_artwork_scan_progress(
+                    progress
+                )
+            ),
+        )
+
+    try:
+        config = load_config()
+
+        if not config:
+            raise RuntimeError(
+                "Config file not found"
+            )
+
+        plex = _connect_plex(
+            config
+        )
+
+        workflow = (
+            build_configured_artwork_manager_workflow(
+                plex=plex,
+                config=config,
+                selected_libraries=library,
+                progress_callback=(
+                    progress_callback
+                ),
+            )
+        )
+
+        run = (
+            workflow.run_for_library(
+                library
+            )
+        )
+
+        if run is None:
+            skipped = tuple(
+                item
+                for item in workflow.skipped
+                if (
+                    item.target.library
+                    == library
+                )
+            )
+
+            if skipped:
+                raise RuntimeError(
+                    "Artwork Manager library "
+                    f"{library!r} is not yet supported"
+                )
+
+            raise RuntimeError(
+                "Artwork Manager library "
+                f"{library!r} was not found"
+            )
+
+        preview = (
+            serialize_artwork_library(
+                run
+            )
+        )
+
+        cached = (
+            write_artwork_current_state(
+                directory=(
+                    ARTWORK_HISTORY_DIR
+                ),
+                library=library,
+                preview=preview,
+            )
+        )
+
+        _update_artwork_scan(
+            scan_id,
+            status="complete",
+            scanned_at=(
+                cached[
+                    "scanned_at"
+                ]
+            ),
+            progress={
+                "phase":
+                    ArtworkScanPhase
+                    .COMPLETE
+                    .value,
+
+                "completed": 1,
+                "total": 1,
+                "fraction": 1.0,
+                "message":
+                    "Current-state scan complete",
+
+                "current_title":
+                    None,
+            },
+            error=None,
+        )
+
+    except Exception as exc:
+        _update_artwork_scan(
+            scan_id,
+            status="failed",
+            error={
+                "type":
+                    type(exc).__name__,
+
+                "message":
+                    str(exc),
+            },
+        )
+
+    finally:
+        with ARTWORK_SCAN_LOCK:
+            if (
+                ARTWORK_ACTIVE_SCANS.get(
+                    library
+                )
+                == scan_id
+            ):
+                ARTWORK_ACTIVE_SCANS.pop(
+                    library,
+                    None,
+                )
 
 
 def _expand_status(data: Dict[str, Any]) -> str:
@@ -1254,6 +1501,250 @@ def get_artwork_history(
             status_code=500,
             detail=str(exc),
         ) from exc
+
+
+@app.get("/api/artwork/current-state/{library}")
+def get_artwork_current_state(
+    library: str,
+):
+    """Return the last successfully cached read-only state for one library."""
+
+    try:
+        return {
+            "state":
+                load_artwork_current_state(
+                    directory=(
+                        ARTWORK_HISTORY_DIR
+                    ),
+                    library=library,
+                ),
+        }
+
+    except (
+        ArtworkCurrentStateError,
+        ValueError,
+    ) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        ) from exc
+
+
+@app.post(
+    "/api/artwork/scan/{library}",
+    status_code=202,
+)
+def start_artwork_current_state_scan(
+    library: str,
+):
+    """Start or reuse one asynchronous read-only library scan."""
+
+    normalized = str(
+        library
+    ).strip()
+
+    if not normalized:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Artwork Manager library "
+                "cannot be empty"
+            ),
+        )
+
+    config = load_config()
+
+    if not config:
+        raise HTTPException(
+            status_code=500,
+            detail="Config file not found",
+        )
+
+    service = (
+        config.get(
+            "services",
+            {},
+        )
+        .get(
+            "artwork_manager",
+            {},
+        )
+        or {}
+    )
+
+    if not service.get(
+        "enabled",
+        False,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Artwork Manager is disabled"
+            ),
+        )
+
+    with ARTWORK_SCAN_LOCK:
+        existing_id = (
+            ARTWORK_ACTIVE_SCANS.get(
+                normalized
+            )
+        )
+
+        if existing_id is not None:
+            existing = (
+                ARTWORK_SCANS.get(
+                    existing_id
+                )
+            )
+
+            if (
+                existing is not None
+                and existing.get(
+                    "status"
+                )
+                == "running"
+            ):
+                return {
+                    "scan":
+                        copy.deepcopy(
+                            existing
+                        ),
+
+                    "reused": True,
+                }
+
+        scan_id = (
+            uuid4().hex
+        )
+
+        timestamp = (
+            _artwork_utc_now()
+        )
+
+        record = {
+            "scan_id":
+                scan_id,
+
+            "library":
+                normalized,
+
+            "status":
+                "running",
+
+            "started_at":
+                timestamp,
+
+            "updated_at":
+                timestamp,
+
+            "scanned_at":
+                None,
+
+            "progress": {
+                "phase":
+                    "starting",
+
+                "completed": 0,
+                "total": 0,
+                "fraction": None,
+                "message":
+                    "Starting current-state scan",
+
+                "current_title":
+                    None,
+            },
+
+            "error":
+                None,
+        }
+
+        ARTWORK_SCANS[
+            scan_id
+        ] = record
+
+        ARTWORK_ACTIVE_SCANS[
+            normalized
+        ] = scan_id
+
+    worker = threading.Thread(
+        target=(
+            _run_artwork_current_state_scan
+        ),
+        args=(
+            scan_id,
+            normalized,
+        ),
+        name=(
+            "artwork-current-state-"
+            f"{scan_id[:8]}"
+        ),
+        daemon=True,
+    )
+
+    try:
+        worker.start()
+
+    except Exception as exc:
+        with ARTWORK_SCAN_LOCK:
+            ARTWORK_SCANS.pop(
+                scan_id,
+                None,
+            )
+
+            if (
+                ARTWORK_ACTIVE_SCANS.get(
+                    normalized
+                )
+                == scan_id
+            ):
+                ARTWORK_ACTIVE_SCANS.pop(
+                    normalized,
+                    None,
+                )
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Could not start Artwork "
+                f"Manager scan: {exc}"
+            ),
+        ) from exc
+
+    return {
+        "scan":
+            copy.deepcopy(
+                record
+            ),
+
+        "reused": False,
+    }
+
+
+@app.get("/api/artwork/scan/{scan_id}")
+def get_artwork_current_state_scan(
+    scan_id: str,
+):
+    """Return current progress for one asynchronous scan."""
+
+    record = (
+        _artwork_scan_snapshot(
+            scan_id
+        )
+    )
+
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Artwork Manager scan "
+                f"{scan_id!r} was not found"
+            ),
+        )
+
+    return {
+        "scan":
+            record,
+    }
 
 
 @app.get("/api/artwork/preview/{library}")

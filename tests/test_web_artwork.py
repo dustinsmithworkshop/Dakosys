@@ -690,3 +690,577 @@ def test_artwork_history_does_not_contact_plex_or_providers(
             "count": 0,
         }
     )
+
+
+def test_artwork_current_state_returns_none_before_first_scan(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_HISTORY_DIR",
+        str(
+            tmp_path
+            / "artwork-manager"
+        ),
+    )
+
+    assert (
+        web_server
+        .get_artwork_current_state(
+            "Series"
+        )
+        == {
+            "state": None,
+        }
+    )
+
+
+def test_artwork_current_state_returns_cached_result(
+    monkeypatch,
+    tmp_path,
+):
+    from artwork.current_state import (
+        write_artwork_current_state,
+    )
+
+    directory = (
+        tmp_path
+        / "artwork-manager"
+    )
+
+    record = (
+        write_artwork_current_state(
+            directory=directory,
+            library="Series",
+            preview={
+                "library": "Series",
+                "output": {
+                    "needs_apply": False,
+                },
+            },
+        )
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_HISTORY_DIR",
+        str(
+            directory
+        ),
+    )
+
+    assert (
+        web_server
+        .get_artwork_current_state(
+            "Series"
+        )
+        == {
+            "state": record,
+        }
+    )
+
+
+def test_artwork_scan_start_returns_immediately_and_reuses_active_scan(
+    monkeypatch,
+):
+    config = {
+        "services": {
+            "artwork_manager": {
+                "enabled": True,
+            },
+        },
+    }
+
+    monkeypatch.setattr(
+        web_server,
+        "load_config",
+        lambda: config,
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_SCANS",
+        {},
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_ACTIVE_SCANS",
+        {},
+    )
+
+    started = []
+
+    class FakeThread:
+        def __init__(
+            self,
+            *,
+            target,
+            args,
+            name,
+            daemon,
+        ):
+            self.target = target
+            self.args = args
+            self.name = name
+            self.daemon = daemon
+
+        def start(
+            self,
+        ):
+            started.append(
+                (
+                    self.target,
+                    self.args,
+                )
+            )
+
+    monkeypatch.setattr(
+        web_server.threading,
+        "Thread",
+        FakeThread,
+    )
+
+    first = (
+        web_server
+        .start_artwork_current_state_scan(
+            "Series"
+        )
+    )
+
+    second = (
+        web_server
+        .start_artwork_current_state_scan(
+            "Series"
+        )
+    )
+
+    assert (
+        first["reused"]
+        is False
+    )
+
+    assert (
+        second["reused"]
+        is True
+    )
+
+    assert (
+        second["scan"]["scan_id"]
+        == first["scan"]["scan_id"]
+    )
+
+    assert (
+        first["scan"]["status"]
+        == "running"
+    )
+
+    assert len(
+        started
+    ) == 1
+
+
+def test_artwork_scan_worker_reports_progress_and_caches_success(
+    monkeypatch,
+):
+    config = {
+        "services": {
+            "artwork_manager": {
+                "enabled": True,
+            },
+        },
+    }
+
+    plex = object()
+
+    run = object()
+
+    class FakeWorkflow:
+        skipped = ()
+
+        def run_for_library(
+            self,
+            library,
+        ):
+            assert (
+                library
+                == "Series"
+            )
+
+            return run
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_SCANS",
+        {
+            "scan-1": {
+                "scan_id":
+                    "scan-1",
+
+                "library":
+                    "Series",
+
+                "status":
+                    "running",
+
+                "started_at":
+                    "start",
+
+                "updated_at":
+                    "start",
+
+                "scanned_at":
+                    None,
+
+                "progress":
+                    None,
+
+                "error":
+                    None,
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_ACTIVE_SCANS",
+        {
+            "Series":
+                "scan-1",
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "load_config",
+        lambda: config,
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "_connect_plex",
+        lambda value: plex,
+    )
+
+    def fake_build(
+        **kwargs,
+    ):
+        assert (
+            kwargs["plex"]
+            is plex
+        )
+
+        assert (
+            kwargs["config"]
+            is config
+        )
+
+        assert (
+            kwargs[
+                "selected_libraries"
+            ]
+            == "Series"
+        )
+
+        callback = (
+            kwargs[
+                "progress_callback"
+            ]
+        )
+
+        from artwork.progress import (
+            ArtworkScanPhase,
+            ArtworkScanProgress,
+        )
+
+        callback(
+            ArtworkScanProgress(
+                library="Series",
+                phase=(
+                    ArtworkScanPhase
+                    .PRIMARY_MANAGED
+                ),
+                completed=42,
+                total=100,
+                message=(
+                    "Checking managed artwork"
+                ),
+                current_title=(
+                    "Example Show"
+                ),
+            )
+        )
+
+        return FakeWorkflow()
+
+    monkeypatch.setattr(
+        web_server,
+        (
+            "build_configured_"
+            "artwork_manager_workflow"
+        ),
+        fake_build,
+    )
+
+    preview = {
+        "library":
+            "Series",
+
+        "output": {
+            "needs_apply":
+                False,
+        },
+    }
+
+    monkeypatch.setattr(
+        web_server,
+        "serialize_artwork_library",
+        lambda value:
+            preview,
+    )
+
+    written = {}
+
+    def fake_write(
+        *,
+        directory,
+        library,
+        preview,
+        scanned_at=None,
+    ):
+        written.update(
+            {
+                "directory":
+                    directory,
+
+                "library":
+                    library,
+
+                "preview":
+                    preview,
+            }
+        )
+
+        return {
+            "schema_version": 1,
+            "library": library,
+            "scanned_at":
+                "2026-08-18T18:00:00+00:00",
+            "preview": preview,
+        }
+
+    monkeypatch.setattr(
+        web_server,
+        "write_artwork_current_state",
+        fake_write,
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_HISTORY_DIR",
+        "/data/artwork-manager",
+    )
+
+    web_server._run_artwork_current_state_scan(
+        "scan-1",
+        "Series",
+    )
+
+    scan = (
+        web_server
+        .ARTWORK_SCANS[
+            "scan-1"
+        ]
+    )
+
+    assert (
+        scan["status"]
+        == "complete"
+    )
+
+    assert (
+        scan["progress"]["phase"]
+        == "complete"
+    )
+
+    assert (
+        scan["progress"]["fraction"]
+        == 1.0
+    )
+
+    assert (
+        scan["scanned_at"]
+        == (
+            "2026-08-18T18:00:00+00:00"
+        )
+    )
+
+    assert written == {
+        "directory":
+            "/data/artwork-manager",
+
+        "library":
+            "Series",
+
+        "preview":
+            preview,
+    }
+
+    assert (
+        "Series"
+        not in (
+            web_server
+            .ARTWORK_ACTIVE_SCANS
+        )
+    )
+
+
+def test_artwork_scan_failure_does_not_write_cache(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_SCANS",
+        {
+            "scan-1": {
+                "scan_id":
+                    "scan-1",
+
+                "library":
+                    "Series",
+
+                "status":
+                    "running",
+
+                "started_at":
+                    "start",
+
+                "updated_at":
+                    "start",
+
+                "scanned_at":
+                    None,
+
+                "progress":
+                    None,
+
+                "error":
+                    None,
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_ACTIVE_SCANS",
+        {
+            "Series":
+                "scan-1",
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "load_config",
+        lambda: {
+            "services": {
+                "artwork_manager": {
+                    "enabled": True,
+                },
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "_connect_plex",
+        lambda value: object(),
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        (
+            "build_configured_"
+            "artwork_manager_workflow"
+        ),
+        lambda **kwargs:
+            (_ for _ in ())
+            .throw(
+                RuntimeError(
+                    "provider unavailable"
+                )
+            ),
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "write_artwork_current_state",
+        lambda **kwargs:
+            (_ for _ in ())
+            .throw(
+                AssertionError(
+                    "failed scans must not replace cache"
+                )
+            ),
+    )
+
+    web_server._run_artwork_current_state_scan(
+        "scan-1",
+        "Series",
+    )
+
+    scan = (
+        web_server
+        .ARTWORK_SCANS[
+            "scan-1"
+        ]
+    )
+
+    assert (
+        scan["status"]
+        == "failed"
+    )
+
+    assert (
+        scan["error"]["type"]
+        == "RuntimeError"
+    )
+
+    assert (
+        scan["error"]["message"]
+        == "provider unavailable"
+    )
+
+    assert (
+        "Series"
+        not in (
+            web_server
+            .ARTWORK_ACTIVE_SCANS
+        )
+    )
+
+
+def test_artwork_scan_status_unknown_id_is_404(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_SCANS",
+        {},
+    )
+
+    with pytest.raises(
+        HTTPException,
+    ) as caught:
+        (
+            web_server
+            .get_artwork_current_state_scan(
+                "missing"
+            )
+        )
+
+    assert (
+        caught.value.status_code
+        == 404
+    )
