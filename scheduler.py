@@ -223,6 +223,142 @@ def run_tv_status_update():
             if 'SCHEDULER_MODE' in os.environ:
                 del os.environ['SCHEDULER_MODE']
 
+def run_artwork_manager_update():
+    """Run one configured Artwork Manager cycle."""
+    config = load_config()
+
+    if not config:
+        logger.error(
+            "Artwork Manager: failed to load configuration"
+        )
+        return False
+
+    service = (
+        config
+        .get('services', {})
+        .get('artwork_manager', {})
+        or {}
+    )
+
+    if not service.get(
+        'enabled',
+        False,
+    ):
+        logger.info(
+            "Artwork Manager is disabled; skipping update"
+        )
+        return True
+
+    plex_config = (
+        config.get(
+            'plex',
+            {},
+        )
+        or {}
+    )
+
+    plex_url = plex_config.get(
+        'url'
+    )
+    plex_token = plex_config.get(
+        'token'
+    )
+
+    if not plex_url or not plex_token:
+        logger.error(
+            "Artwork Manager requires Plex URL and token"
+        )
+        return False
+
+    history_directory = os.path.join(
+        DATA_DIR,
+        "artwork-manager",
+    )
+
+    try:
+        from plexapi.server import (
+            PlexServer,
+        )
+        from artwork.runtime import (
+            run_configured_artwork_manager,
+        )
+
+        logger.info(
+            "Running scheduled Artwork Manager update"
+        )
+
+        plex = PlexServer(
+            plex_url,
+            plex_token,
+        )
+
+        result = (
+            run_configured_artwork_manager(
+                plex=plex,
+                config=config,
+                history_directory=(
+                    history_directory
+                ),
+            )
+        )
+
+        if result is None:
+            logger.info(
+                "Artwork Manager became disabled; "
+                "nothing to run"
+            )
+            return True
+
+        logger.info(
+            "Artwork Manager complete: "
+            "%d applied, "
+            "%d no changes, "
+            "%d pending review, "
+            "%d blocked, "
+            "%d failed, "
+            "%d skipped",
+            result.applied_count,
+            result.no_changes_count,
+            result.pending_review_count,
+            result.blocked_count,
+            result.failed_count,
+            len(result.skipped),
+        )
+
+        for library in result.libraries:
+            logger.info(
+                "Artwork Manager library %s: %s",
+                library.library,
+                library.outcome.value,
+            )
+
+        for skipped in result.skipped:
+            logger.info(
+                "Artwork Manager library %s: skipped (%s)",
+                skipped.target.library,
+                skipped.reason.value,
+            )
+
+        return (
+            result.failed_count
+            == 0
+        )
+
+    except Exception as exc:
+        logger.error(
+            "Error running Artwork Manager: %s",
+            exc,
+        )
+
+        import traceback
+
+        logger.error(
+            traceback.format_exc()
+        )
+
+        return False
+
+
 def run_size_overlay_update():
     """Run the Size Overlay update job."""
     config = load_config()
@@ -520,6 +656,47 @@ def setup_scheduler():
         if setup_service_schedule('tv_status_tracker', service_scheduler, run_tv_status_update):
             services_configured = True
             logger.info("TV/Anime Status Tracker service scheduled successfully")
+
+    # Configure Artwork Manager service if enabled.
+    if (
+        config.get(
+            'services',
+            {},
+        )
+        .get(
+            'artwork_manager',
+            {},
+        )
+        .get(
+            'enabled',
+            False,
+        )
+    ):
+        service_scheduler = (
+            config.get(
+                'scheduler',
+                {},
+            )
+            .get(
+                'artwork_manager',
+                {},
+            )
+            or {
+                'type': 'daily',
+                'times': ['04:00'],
+            }
+        )
+
+        if setup_service_schedule(
+            'artwork_manager',
+            service_scheduler,
+            run_artwork_manager_update,
+        ):
+            services_configured = True
+
+            logger.info(
+                "Artwork Manager scheduled successfully"
+            )
 
     # Configure Size Overlay service if enabled
     if config.get('services', {}).get('size_overlay', {}).get('enabled', False):

@@ -132,6 +132,11 @@ services:
     enabled: false
 
 scheduler:
+  artwork_manager:
+    times:
+      - "04:00"
+    type: daily
+
   anime_episode_type:
     times:
       - "03:00"
