@@ -815,3 +815,169 @@ def test_tmdb_only_state_without_primary_keeps_fallback():
         provider.requests[0].kind
         is ArtworkSearchKind.DISCOVERY
     )
+
+
+def _selected_state_with_tmdb_fallback():
+    state = _state(
+        set_id="A",
+        episodes=2,
+    )
+
+    state.seasons[1].episodes[3] = (
+        EpisodeArtwork(
+            episode_number=3,
+            card=_tmdb_card(
+                "tmdb-3"
+            ),
+        )
+    )
+
+    state.seasons[1].episodes[4] = (
+        EpisodeArtwork(
+            episode_number=4,
+            card=_tmdb_card(
+                "tmdb-4"
+            ),
+        )
+    )
+
+    return state
+
+
+def test_complete_selected_set_with_fallback_refreshes_to_primary():
+    inventory = _inventory(
+        episodes=4,
+    )
+
+    state = (
+        _selected_state_with_tmdb_fallback()
+    )
+
+    # Episode coverage is numerically complete, but two positions are
+    # still lower-priority TMDB fallback.
+    provider = FakeProvider(
+        {
+            "1": [
+                _set(
+                    "A",
+                    4,
+                ),
+            ],
+        }
+    )
+
+    result = execute_managed_show(
+        inventory=inventory,
+        current_state=state,
+        provider=provider,
+    )
+
+    assert (
+        result.path
+        is ManagedExecutionPath.REEVALUATED
+    )
+
+    assert (
+        result.action
+        is SetAction.SET_REFRESH
+    )
+
+    assert (
+        result.reason
+        == "selected_set_gained_artwork"
+    )
+
+    assert (
+        result.provider_requested
+        is True
+    )
+
+    assert len(
+        provider.requests
+    ) == 1
+
+    assert (
+        provider.requests[0].kind
+        is ArtworkSearchKind.REEVALUATION
+    )
+
+    for number in range(
+        1,
+        5,
+    ):
+        assert (
+            result.state
+            .seasons[1]
+            .episodes[number]
+            .card
+            .source
+            is ArtworkSource.MEDIUX
+        )
+
+
+def test_complete_selected_set_with_unfilled_fallback_checks_without_churn():
+    inventory = _inventory(
+        episodes=4,
+    )
+
+    state = (
+        _selected_state_with_tmdb_fallback()
+    )
+
+    # The selected MediUX set still has no artwork for the fallback
+    # positions. We should check, preserve fallback, and produce no
+    # semantic state change.
+    provider = FakeProvider(
+        {
+            "1": [
+                _set(
+                    "A",
+                    2,
+                ),
+            ],
+        }
+    )
+
+    result = execute_managed_show(
+        inventory=inventory,
+        current_state=state,
+        provider=provider,
+    )
+
+    assert (
+        result.path
+        is ManagedExecutionPath.REEVALUATED
+    )
+
+    assert (
+        result.action
+        is SetAction.KEEP_CURRENT
+    )
+
+    assert (
+        result.reason
+        == "selected_set_unchanged"
+    )
+
+    assert (
+        result.provider_requested
+        is True
+    )
+
+    assert (
+        result.state
+        == state
+    )
+
+    assert (
+        result.state
+        .seasons[1]
+        .episodes[3]
+        .card
+        .source
+        is ArtworkSource.TMDB
+    )
+
+    assert len(
+        provider.requests
+    ) == 1

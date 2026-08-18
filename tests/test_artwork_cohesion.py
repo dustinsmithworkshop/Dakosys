@@ -24,10 +24,11 @@ EXPECTED = {
 def _asset(
     kind: ArtworkKind,
     asset_id: str,
+    source: ArtworkSource = ArtworkSource.MEDIUX,
 ) -> ArtworkAsset:
     return ArtworkAsset(
         kind=kind,
-        source=ArtworkSource.MEDIUX,
+        source=source,
         provider_asset_id=asset_id,
     )
 
@@ -677,4 +678,208 @@ def test_complete_challenger_never_regresses_expected_episode_cards():
     assert (
         compatibility.episode_card_regressions
         == ()
+    )
+
+
+
+@pytest.mark.parametrize(
+    "fallback_source",
+    (
+        ArtworkSource.TMDB,
+        ArtworkSource.TVDB,
+        ArtworkSource.PLEX,
+        ArtworkSource.GENERATED,
+    ),
+)
+def test_same_set_merge_replaces_upgradeable_fallback_asset(
+    fallback_source,
+):
+    stored = ArtworkSet(
+        provider=ArtworkSource.MEDIUX,
+        set_id="A",
+        seasons={
+            1: SeasonArtwork(
+                season_number=1,
+                episodes={
+                    1: EpisodeArtwork(
+                        episode_number=1,
+                        card=_asset(
+                            ArtworkKind.EPISODE_CARD,
+                            "fallback",
+                            source=fallback_source,
+                        ),
+                    ),
+                },
+            ),
+        },
+    )
+
+    live = ArtworkSet(
+        provider=ArtworkSource.MEDIUX,
+        set_id="A",
+        seasons={
+            1: SeasonArtwork(
+                season_number=1,
+                episodes={
+                    1: EpisodeArtwork(
+                        episode_number=1,
+                        card=_asset(
+                            ArtworkKind.EPISODE_CARD,
+                            "primary",
+                        ),
+                    ),
+                },
+            ),
+        },
+    )
+
+    merged = merge_same_artwork_set(
+        stored,
+        live,
+    )
+
+    card = (
+        merged
+        .seasons[1]
+        .episodes[1]
+        .card
+    )
+
+    assert (
+        card.source
+        is ArtworkSource.MEDIUX
+    )
+
+    assert (
+        card.provider_asset_id
+        == "primary"
+    )
+
+
+@pytest.mark.parametrize(
+    "protected_source",
+    (
+        ArtworkSource.POSTERDB,
+        ArtworkSource.MANUAL,
+    ),
+)
+def test_same_set_merge_preserves_curated_or_manual_asset(
+    protected_source,
+):
+    stored = ArtworkSet(
+        provider=ArtworkSource.MEDIUX,
+        set_id="A",
+        seasons={
+            1: SeasonArtwork(
+                season_number=1,
+                episodes={
+                    1: EpisodeArtwork(
+                        episode_number=1,
+                        card=_asset(
+                            ArtworkKind.EPISODE_CARD,
+                            "protected",
+                            source=protected_source,
+                        ),
+                    ),
+                },
+            ),
+        },
+    )
+
+    live = ArtworkSet(
+        provider=ArtworkSource.MEDIUX,
+        set_id="A",
+        seasons={
+            1: SeasonArtwork(
+                season_number=1,
+                episodes={
+                    1: EpisodeArtwork(
+                        episode_number=1,
+                        card=_asset(
+                            ArtworkKind.EPISODE_CARD,
+                            "primary",
+                        ),
+                    ),
+                },
+            ),
+        },
+    )
+
+    merged = merge_same_artwork_set(
+        stored,
+        live,
+    )
+
+    card = (
+        merged
+        .seasons[1]
+        .episodes[1]
+        .card
+    )
+
+    assert (
+        card.source
+        is protected_source
+    )
+
+    assert (
+        card.provider_asset_id
+        == "protected"
+    )
+
+
+def test_same_set_merge_upgrades_fallback_presentation_assets():
+    stored = ArtworkSet(
+        provider=ArtworkSource.MEDIUX,
+        set_id="A",
+        poster=_asset(
+            ArtworkKind.SHOW_POSTER,
+            "tmdb-show",
+            source=ArtworkSource.TMDB,
+        ),
+        seasons={
+            1: SeasonArtwork(
+                season_number=1,
+                poster=_asset(
+                    ArtworkKind.SEASON_POSTER,
+                    "plex-season",
+                    source=ArtworkSource.PLEX,
+                ),
+            ),
+        },
+    )
+
+    live = ArtworkSet(
+        provider=ArtworkSource.MEDIUX,
+        set_id="A",
+        poster=_asset(
+            ArtworkKind.SHOW_POSTER,
+            "mediux-show",
+        ),
+        seasons={
+            1: SeasonArtwork(
+                season_number=1,
+                poster=_asset(
+                    ArtworkKind.SEASON_POSTER,
+                    "mediux-season",
+                ),
+            ),
+        },
+    )
+
+    merged = merge_same_artwork_set(
+        stored,
+        live,
+    )
+
+    assert (
+        merged.poster.provider_asset_id
+        == "mediux-show"
+    )
+
+    assert (
+        merged.seasons[1]
+        .poster
+        .provider_asset_id
+        == "mediux-season"
     )

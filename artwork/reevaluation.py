@@ -16,6 +16,9 @@ from artwork.cohesion import (
     merge_same_artwork_set,
 )
 from artwork.models import SelectionMode
+from artwork.source_policy import (
+    artwork_set_upgradeable_fallback_count,
+)
 from artwork.policy import (
     SetAction,
     SetDecision,
@@ -95,7 +98,7 @@ def _same_set_gained_artwork(
     stored: ArtworkSetAssessment,
     effective: ArtworkSetAssessment,
 ) -> bool:
-    """Return whether additive same-set reconciliation gained artwork."""
+    """Return whether same-set reconciliation gained or upgraded artwork."""
 
     if (
         stored.artwork_set.provider
@@ -106,6 +109,19 @@ def _same_set_gained_artwork(
             "same-set gain comparison requires "
             "the same provider/set ID"
         )
+
+    # Coverage can remain numerically identical while a selected
+    # primary set replaces lower-priority fallback in existing slots.
+    if (
+        artwork_set_upgradeable_fallback_count(
+            effective.artwork_set
+        )
+        <
+        artwork_set_upgradeable_fallback_count(
+            stored.artwork_set
+        )
+    ):
+        return True
 
     if (
         effective

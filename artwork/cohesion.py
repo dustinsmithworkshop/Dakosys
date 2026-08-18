@@ -21,27 +21,24 @@ from artwork.models import (
     EpisodeArtwork,
     SeasonArtwork,
 )
+from artwork.source_policy import (
+    prefer_stored_or_primary_asset,
+)
 
 
 def _prefer_existing_asset(
     stored: ArtworkAsset | None,
     live: ArtworkAsset | None,
+    *,
+    primary_provider,
 ) -> ArtworkAsset | None:
-    """Keep a usable stored asset; otherwise accept the live asset."""
+    """Preserve durable art unless live primary upgrades fallback."""
 
-    if (
-        stored is not None
-        and stored.available
-    ):
-        return stored
-
-    if (
-        live is not None
-        and live.available
-    ):
-        return live
-
-    return stored or live
+    return prefer_stored_or_primary_asset(
+        stored,
+        live,
+        primary_provider=primary_provider,
+    )
 
 
 def merge_same_artwork_set(
@@ -147,6 +144,7 @@ def merge_same_artwork_set(
                 card=_prefer_existing_asset(
                     stored_card,
                     live_card,
+                    primary_provider=stored.provider,
                 ),
             )
 
@@ -157,6 +155,7 @@ def merge_same_artwork_set(
             poster=_prefer_existing_asset(
                 stored_poster,
                 live_poster,
+                primary_provider=stored.provider,
             ),
             episodes=episodes,
         )
@@ -175,10 +174,12 @@ def merge_same_artwork_set(
         poster=_prefer_existing_asset(
             stored.poster,
             live.poster,
+            primary_provider=stored.provider,
         ),
         background=_prefer_existing_asset(
             stored.background,
             live.background,
+            primary_provider=stored.provider,
         ),
         seasons=seasons,
     )

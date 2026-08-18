@@ -32,6 +32,10 @@ from artwork.reevaluation import (
 from artwork.resolution import (
     materialize_reevaluation_state,
 )
+from artwork.source_policy import (
+    UPGRADEABLE_FALLBACK_SOURCES,
+    artwork_set_has_upgradeable_fallback,
+)
 from artwork.search import (
     ArtworkSearchKind,
     ArtworkSearchRequest,
@@ -462,10 +466,10 @@ def _restore_split_presentation(
     return restored
 
 
-def _is_tmdb_fallback_only_state(
+def _is_upgradeable_fallback_only_state(
     state: ShowArtworkState,
 ) -> bool:
-    """Whether missing set context is valid TMDB fallback state."""
+    """Whether missing set context is valid upgradeable fallback state."""
 
     if (
         state.selected_set_id is not None
@@ -517,7 +521,7 @@ def _is_tmdb_fallback_only_state(
         bool(sources)
         and all(
             source
-            is ArtworkSource.TMDB
+            in UPGRADEABLE_FALLBACK_SOURCES
             for source in sources
         )
     )
@@ -629,13 +633,13 @@ def _merge_primary_over_fallback(
     return merged
 
 
-def _execute_tmdb_fallback_state(
+def _execute_fallback_state(
     *,
     inventory: ShowInventory,
     current_state: ShowArtworkState,
     provider: ArtworkProvider,
 ) -> ManagedShowExecution:
-    """Give a persisted TMDB-only state a primary-provider opportunity."""
+    """Give persisted fallback state a primary-provider opportunity."""
 
     discovery = (
         discover_unmanaged_show(
@@ -733,7 +737,10 @@ def execute_managed_show(
 ) -> ManagedShowExecution:
     """Reevaluate one already-managed Plex show.
 
-    Complete episode-card coverage does not query providers.
+    Complete primary artwork can skip provider queries.
+
+    Complete coverage that still contains upgradeable fallback remains
+    eligible for same-set primary-provider refresh.
 
     Provider failure preserves durable current state.
 
@@ -761,11 +768,11 @@ def execute_managed_show(
         or current_state.selected_set_source
         is None
     ):
-        if _is_tmdb_fallback_only_state(
+        if _is_upgradeable_fallback_only_state(
             current_state
         ):
             return (
-                _execute_tmdb_fallback_state(
+                _execute_fallback_state(
                     inventory=inventory,
                     current_state=current_state,
                     provider=provider,
@@ -829,6 +836,11 @@ def execute_managed_show(
         current_assessment
         .episode_coverage
         .complete
+        and not (
+            artwork_set_has_upgradeable_fallback(
+                current_set
+            )
+        )
     ):
         return ManagedShowExecution(
             inventory=inventory,
