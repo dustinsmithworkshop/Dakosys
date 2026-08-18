@@ -414,3 +414,279 @@ def test_artwork_preview_never_applies(
     assert result == {
         "safe": True,
     }
+
+
+def test_artwork_latest_history_returns_none_before_first_run(
+    monkeypatch,
+    tmp_path,
+):
+    history = (
+        tmp_path
+        / "artwork-manager"
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_HISTORY_DIR",
+        str(
+            history
+        ),
+    )
+
+    assert (
+        web_server
+        .get_artwork_history_latest()
+        == {
+            "run": None,
+        }
+    )
+
+
+def test_artwork_latest_history_returns_persisted_record(
+    monkeypatch,
+    tmp_path,
+):
+    import json
+
+    history = (
+        tmp_path
+        / "artwork-manager"
+    )
+
+    history.mkdir(
+        parents=True
+    )
+
+    record = {
+        "schema_version": 1,
+        "run_id": "example",
+        "generated_at":
+            "2026-08-18T10:00:00+00:00",
+        "apply_mode": "manual",
+        "summary": {
+            "library_count": 1,
+        },
+        "libraries": [],
+        "skipped": [],
+    }
+
+    (
+        history
+        / "latest.json"
+    ).write_text(
+        json.dumps(
+            record
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_HISTORY_DIR",
+        str(
+            history
+        ),
+    )
+
+    assert (
+        web_server
+        .get_artwork_history_latest()
+        == {
+            "run": record,
+        }
+    )
+
+
+def test_artwork_history_is_newest_first_and_limited(
+    monkeypatch,
+):
+    seen = {}
+
+    records = (
+        {
+            "run_id": "newest",
+        },
+        {
+            "run_id": "older",
+        },
+    )
+
+    def fake_history(
+        directory,
+        *,
+        limit,
+    ):
+        seen[
+            "directory"
+        ] = directory
+
+        seen[
+            "limit"
+        ] = limit
+
+        return records
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_HISTORY_DIR",
+        "/data/artwork-manager",
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "list_artwork_run_history",
+        fake_history,
+    )
+
+    result = (
+        web_server
+        .get_artwork_history(
+            limit=2
+        )
+    )
+
+    assert result == {
+        "runs": [
+            {
+                "run_id":
+                    "newest",
+            },
+            {
+                "run_id":
+                    "older",
+            },
+        ],
+        "count": 2,
+    }
+
+    assert seen == {
+        "directory":
+            "/data/artwork-manager",
+        "limit": 2,
+    }
+
+
+@pytest.mark.parametrize(
+    "limit",
+    (
+        0,
+        -1,
+        101,
+        True,
+    ),
+)
+def test_artwork_history_rejects_invalid_limit(
+    limit,
+):
+    with pytest.raises(
+        HTTPException,
+    ) as caught:
+        (
+            web_server
+            .get_artwork_history(
+                limit=limit
+            )
+        )
+
+    assert (
+        caught.value.status_code
+        == 400
+    )
+
+
+def test_artwork_history_invalid_record_is_server_error(
+    monkeypatch,
+    tmp_path,
+):
+    history = (
+        tmp_path
+        / "artwork-manager"
+    )
+
+    history.mkdir(
+        parents=True
+    )
+
+    (
+        history
+        / "latest.json"
+    ).write_text(
+        "{ definitely not json",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_HISTORY_DIR",
+        str(
+            history
+        ),
+    )
+
+    with pytest.raises(
+        HTTPException,
+    ) as caught:
+        (
+            web_server
+            .get_artwork_history_latest()
+        )
+
+    assert (
+        caught.value.status_code
+        == 500
+    )
+
+
+def test_artwork_history_does_not_contact_plex_or_providers(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_HISTORY_DIR",
+        str(
+            tmp_path
+            / "artwork-manager"
+        ),
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "_connect_plex",
+        lambda config:
+            (_ for _ in ())
+            .throw(
+                AssertionError(
+                    "history must not contact Plex"
+                )
+            ),
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "load_config",
+        lambda:
+            (_ for _ in ())
+            .throw(
+                AssertionError(
+                    "history must not load runtime config"
+                )
+            ),
+    )
+
+    assert (
+        web_server
+        .get_artwork_history_latest()
+        == {
+            "run": None,
+        }
+    )
+
+    assert (
+        web_server
+        .get_artwork_history()
+        == {
+            "runs": [],
+            "count": 0,
+        }
+    )

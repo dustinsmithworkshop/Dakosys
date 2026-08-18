@@ -20,6 +20,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from artwork.run_history import (
+    ArtworkRunHistoryError,
+    list_artwork_run_history,
+    load_latest_artwork_run,
+)
 from artwork.runtime import (
     build_configured_artwork_manager_workflow,
 )
@@ -46,6 +51,11 @@ LOG_FILE = os.path.join(DATA_DIR, "anime_trakt_manager.log")
 TV_STATUS_CACHE = os.path.join(DATA_DIR, "tv_status_cache.json")
 NEXT_AIRING_SNAPSHOT = os.path.join(DATA_DIR, "next_airing.json")
 PREVIOUS_SIZES_FILE = os.path.join(DATA_DIR, "previous_sizes.json")
+ARTWORK_HISTORY_DIR = os.path.join(
+    DATA_DIR,
+    "artwork-manager",
+)
+ARTWORK_HISTORY_LIMIT_MAX = 100
 
 
 def _expand_status(data: Dict[str, Any]) -> str:
@@ -1161,6 +1171,85 @@ def get_artwork_targets():
         raise
 
     except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        ) from exc
+
+
+@app.get("/api/artwork/history/latest")
+def get_artwork_history_latest():
+    """Return the latest persisted Artwork Manager run, if any."""
+
+    try:
+        return {
+            "run":
+                load_latest_artwork_run(
+                    ARTWORK_HISTORY_DIR
+                ),
+        }
+
+    except ArtworkRunHistoryError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        ) from exc
+
+
+@app.get("/api/artwork/history")
+def get_artwork_history(
+    limit: int = 20,
+):
+    """Return persisted Artwork Manager runs newest-first."""
+
+    if (
+        not isinstance(
+            limit,
+            int,
+        )
+        or isinstance(
+            limit,
+            bool,
+        )
+        or limit <= 0
+        or limit > ARTWORK_HISTORY_LIMIT_MAX
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Artwork Manager history "
+                "limit must be between 1 "
+                f"and {ARTWORK_HISTORY_LIMIT_MAX}"
+            ),
+        )
+
+    try:
+        runs = (
+            list_artwork_run_history(
+                ARTWORK_HISTORY_DIR,
+                limit=limit,
+            )
+        )
+
+        return {
+            "runs":
+                list(
+                    runs
+                ),
+
+            "count":
+                len(
+                    runs
+                ),
+        }
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    except ArtworkRunHistoryError as exc:
         raise HTTPException(
             status_code=500,
             detail=str(exc),
