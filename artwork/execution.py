@@ -24,6 +24,11 @@ from artwork.models import (
     ShowArtworkState,
 )
 from artwork.policy import SetAction
+from artwork.progress import (
+    ArtworkProgressCallback,
+    ArtworkScanPhase,
+    emit_artwork_progress,
+)
 from artwork.providers.base import ArtworkProvider
 from artwork.reevaluation import (
     ReevaluationResult,
@@ -1031,11 +1036,30 @@ def execute_managed_library(
     ],
     provider: ArtworkProvider,
     incomplete_migration_threshold: float = 0.25,
+    progress_callback: ArtworkProgressCallback | None = None,
 ) -> ManagedLibraryExecution:
     """Execute already-reconciled managed shows."""
 
-    results = tuple(
-        execute_managed_show(
+    item_tuple = tuple(
+        items
+    )
+
+    total = len(
+        item_tuple
+    )
+
+    results: list[
+        ManagedShowExecution
+    ] = []
+
+    for index, (
+        inventory,
+        current_state,
+    ) in enumerate(
+        item_tuple,
+        start=1,
+    ):
+        result = execute_managed_show(
             inventory=inventory,
             current_state=current_state,
             provider=provider,
@@ -1043,10 +1067,33 @@ def execute_managed_library(
                 incomplete_migration_threshold
             ),
         )
-        for inventory, current_state
-        in items
-    )
+
+        results.append(
+            result
+        )
+
+        emit_artwork_progress(
+            progress_callback,
+            library=(
+                inventory.identity.library
+            ),
+            phase=(
+                ArtworkScanPhase
+                .PRIMARY_MANAGED
+            ),
+            completed=index,
+            total=total,
+            message=(
+                "Checking managed artwork "
+                "with the primary provider"
+            ),
+            current_title=(
+                inventory.identity.title
+            ),
+        )
 
     return ManagedLibraryExecution(
-        results=results
+        results=tuple(
+            results
+        )
     )

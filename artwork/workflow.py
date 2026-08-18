@@ -38,6 +38,11 @@ from artwork.preview import (
     ArtworkTargetPreview,
     build_show_target_preview,
 )
+from artwork.progress import (
+    ArtworkProgressCallback,
+    ArtworkScanPhase,
+    emit_artwork_progress,
+)
 from artwork.providers.base import ArtworkProvider
 from artwork.providers.tmdb import TMDBArtworkClient
 from artwork.target_execution import (
@@ -256,6 +261,7 @@ def build_artwork_manager_workflow(
     ]
     | None = None,
     incomplete_migration_threshold: float = 0.25,
+    progress_callback: ArtworkProgressCallback | None = None,
 ) -> ArtworkManagerWorkflow:
     """Build the complete read-only Artwork Manager workflow.
 
@@ -382,13 +388,66 @@ def build_artwork_manager_workflow(
             target.library
         )
 
-        inventories = tuple(
-            build_show_inventory(
-                show,
-                target.library,
-            )
-            for show in section.all()
+        shows = tuple(
+            section.all()
         )
+
+        inventory_results = []
+
+        total_shows = len(
+            shows
+        )
+
+        for index, show in enumerate(
+            shows,
+            start=1,
+        ):
+            inventory = (
+                build_show_inventory(
+                    show,
+                    target.library,
+                )
+            )
+
+            inventory_results.append(
+                inventory
+            )
+
+            emit_artwork_progress(
+                progress_callback,
+                library=target.library,
+                phase=(
+                    ArtworkScanPhase
+                    .INVENTORY
+                ),
+                completed=index,
+                total=total_shows,
+                message=(
+                    "Reading Plex library inventory"
+                ),
+                current_title=(
+                    getattr(
+                        getattr(
+                            inventory,
+                            "identity",
+                            None,
+                        ),
+                        "title",
+                        None,
+                    )
+                ),
+            )
+
+        inventories = tuple(
+            inventory_results
+        )
+
+        execution_options = {}
+
+        if progress_callback is not None:
+            execution_options[
+                "progress_callback"
+            ] = progress_callback
 
         execution = execute_show_target(
             target=target,
@@ -399,14 +458,41 @@ def build_artwork_manager_workflow(
             incomplete_migration_threshold=(
                 incomplete_migration_threshold
             ),
+            **execution_options,
         )
 
         preview = build_show_target_preview(
             execution
         )
 
+        emit_artwork_progress(
+            progress_callback,
+            library=target.library,
+            phase=(
+                ArtworkScanPhase.PLANNING
+            ),
+            completed=1,
+            total=2,
+            message=(
+                "Evaluating safety and changes"
+            ),
+        )
+
         plan = build_show_item_store_plan(
             execution
+        )
+
+        emit_artwork_progress(
+            progress_callback,
+            library=target.library,
+            phase=(
+                ArtworkScanPhase.PLANNING
+            ),
+            completed=2,
+            total=2,
+            message=(
+                "Planning Artwork Manager output"
+            ),
         )
 
         library_runs.append(
@@ -417,6 +503,17 @@ def build_artwork_manager_workflow(
                 preview=preview,
                 plan=plan,
             )
+        )
+
+        emit_artwork_progress(
+            progress_callback,
+            library=target.library,
+            phase=(
+                ArtworkScanPhase.COMPLETE
+            ),
+            completed=1,
+            total=1,
+            message="Current-state scan complete",
         )
 
     return ArtworkManagerWorkflow(

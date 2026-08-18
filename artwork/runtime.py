@@ -24,6 +24,9 @@ from artwork.apply_policy import (
     ArtworkApplyMode,
     resolve_artwork_apply_mode,
 )
+from artwork.progress import (
+    ArtworkProgressCallback,
+)
 from artwork.providers.base import (
     ArtworkProvider,
 )
@@ -299,6 +302,10 @@ def build_configured_artwork_manager_workflow(
     incomplete_migration_threshold: (
         float
     ) = 0.25,
+    progress_callback: (
+        ArtworkProgressCallback
+        | None
+    ) = None,
 ) -> ArtworkManagerWorkflow:
     """Build a workflow using normal Dakosys configuration.
 
@@ -334,6 +341,9 @@ def build_configured_artwork_manager_workflow(
         ),
         incomplete_migration_threshold=(
             incomplete_migration_threshold
+        ),
+        progress_callback=(
+            progress_callback
         ),
     )
 

@@ -18,6 +18,11 @@ from artwork.models import (
     SelectionMode,
     ShowArtworkState,
 )
+from artwork.progress import (
+    ArtworkProgressCallback,
+    ArtworkScanPhase,
+    emit_artwork_progress,
+)
 from artwork.providers.base import ArtworkProvider
 from artwork.search import (
     ArtworkSearchKind,
@@ -550,17 +555,59 @@ def discover_unmanaged_library(
     *,
     inventories: Iterable[ShowInventory],
     provider: ArtworkProvider,
+    progress_callback: ArtworkProgressCallback | None = None,
 ) -> LibraryDiscoveryExecution:
     """Discover artwork for already-reconciled unmanaged shows."""
 
-    results = tuple(
-        discover_unmanaged_show(
-            inventory=inventory,
-            provider=provider,
-        )
-        for inventory in inventories
+    inventory_tuple = tuple(
+        inventories
     )
 
+    total = len(
+        inventory_tuple
+    )
+
+    results: list[
+        ShowDiscoveryExecution
+    ] = []
+
+    for index, inventory in enumerate(
+        inventory_tuple,
+        start=1,
+    ):
+        result = (
+            discover_unmanaged_show(
+                inventory=inventory,
+                provider=provider,
+            )
+        )
+
+        results.append(
+            result
+        )
+
+        emit_artwork_progress(
+            progress_callback,
+            library=(
+                inventory.identity.library
+            ),
+            phase=(
+                ArtworkScanPhase
+                .PRIMARY_DISCOVERY
+            ),
+            completed=index,
+            total=total,
+            message=(
+                "Discovering artwork "
+                "with the primary provider"
+            ),
+            current_title=(
+                inventory.identity.title
+            ),
+        )
+
     return LibraryDiscoveryExecution(
-        results=results
+        results=tuple(
+            results
+        )
     )

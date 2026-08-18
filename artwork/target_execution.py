@@ -23,6 +23,11 @@ from artwork.identity_enrichment import (
 )
 from artwork.inventory import ShowInventory
 from artwork.models import ShowArtworkState
+from artwork.progress import (
+    ArtworkProgressCallback,
+    ArtworkScanPhase,
+    emit_artwork_progress,
+)
 from artwork.providers.base import ArtworkProvider
 from artwork.providers.tmdb import (
     TMDBArtworkClient,
@@ -291,6 +296,7 @@ def execute_show_target(
     provider: ArtworkProvider,
     tmdb_client: TMDBArtworkClient | None = None,
     incomplete_migration_threshold: float = 0.25,
+    progress_callback: ArtworkProgressCallback | None = None,
 ) -> ShowTargetExecution:
     """Reconcile and execute one Plex show-library target.
 
@@ -333,13 +339,48 @@ def execute_show_target(
         )
 
     else:
-        identity_enrichment = tuple(
-            enrich_show_inventory_tvdb(
-                inventory=inventory,
-                tmdb_client=tmdb_client,
+        identity_results: list[
+            ShowIdentityEnrichment
+        ] = []
+
+        total_identity = len(
+            inventory_tuple
+        )
+
+        for index, inventory in enumerate(
+            inventory_tuple,
+            start=1,
+        ):
+            result = (
+                enrich_show_inventory_tvdb(
+                    inventory=inventory,
+                    tmdb_client=tmdb_client,
+                )
             )
-            for inventory
-            in inventory_tuple
+
+            identity_results.append(
+                result
+            )
+
+            emit_artwork_progress(
+                progress_callback,
+                library=target.library,
+                phase=(
+                    ArtworkScanPhase
+                    .IDENTITY
+                ),
+                completed=index,
+                total=total_identity,
+                message=(
+                    "Resolving exact show identities"
+                ),
+                current_title=(
+                    inventory.identity.title
+                ),
+            )
+
+        identity_enrichment = tuple(
+            identity_results
         )
 
         execution_inventories = tuple(
@@ -369,6 +410,9 @@ def execute_show_target(
         incomplete_migration_threshold=(
             incomplete_migration_threshold
         ),
+        progress_callback=(
+            progress_callback
+        ),
     )
 
     if (
@@ -385,6 +429,9 @@ def execute_show_target(
             reconciliation.unmanaged
         ),
         provider=provider,
+        progress_callback=(
+            progress_callback
+        ),
     )
 
     if (
@@ -414,14 +461,57 @@ def execute_show_target(
     # fallback to bypass durable-state safety requirements.
     # ------------------------------------------------------------------
 
-    managed_coverage = tuple(
-        resolve_episode_coverage(
-            inventory=result.inventory,
-            state=result.state,
-            tmdb_client=tmdb_client,
-        )
+    managed_candidates = tuple(
+        result
         for result in managed.results
         if result.state is not None
+    )
+
+    managed_coverage_results: list[
+        EpisodeCoverageResult
+    ] = []
+
+    managed_coverage_total = len(
+        managed_candidates
+    )
+
+    for index, result in enumerate(
+        managed_candidates,
+        start=1,
+    ):
+        coverage = (
+            resolve_episode_coverage(
+                inventory=result.inventory,
+                state=result.state,
+                tmdb_client=tmdb_client,
+            )
+        )
+
+        managed_coverage_results.append(
+            coverage
+        )
+
+        emit_artwork_progress(
+            progress_callback,
+            library=target.library,
+            phase=(
+                ArtworkScanPhase
+                .TMDB_MANAGED
+            ),
+            completed=index,
+            total=managed_coverage_total,
+            message=(
+                "Checking managed episode "
+                "gaps with TMDB"
+            ),
+            current_title=(
+                result.inventory
+                .identity.title
+            ),
+        )
+
+    managed_coverage = tuple(
+        managed_coverage_results
     )
 
     # ------------------------------------------------------------------
@@ -434,13 +524,51 @@ def execute_show_target(
     #   state == None  -> allow TMDB to create useful state
     # ------------------------------------------------------------------
 
-    discovery_coverage = tuple(
-        resolve_episode_coverage(
-            inventory=result.inventory,
-            state=result.state,
-            tmdb_client=tmdb_client,
+    discovery_coverage_results: list[
+        EpisodeCoverageResult
+    ] = []
+
+    discovery_coverage_total = len(
+        discovery.results
+    )
+
+    for index, result in enumerate(
+        discovery.results,
+        start=1,
+    ):
+        coverage = (
+            resolve_episode_coverage(
+                inventory=result.inventory,
+                state=result.state,
+                tmdb_client=tmdb_client,
+            )
         )
-        for result in discovery.results
+
+        discovery_coverage_results.append(
+            coverage
+        )
+
+        emit_artwork_progress(
+            progress_callback,
+            library=target.library,
+            phase=(
+                ArtworkScanPhase
+                .TMDB_DISCOVERY
+            ),
+            completed=index,
+            total=discovery_coverage_total,
+            message=(
+                "Checking unmanaged episode "
+                "gaps with TMDB"
+            ),
+            current_title=(
+                result.inventory
+                .identity.title
+            ),
+        )
+
+    discovery_coverage = tuple(
+        discovery_coverage_results
     )
 
     return ShowTargetExecution(
