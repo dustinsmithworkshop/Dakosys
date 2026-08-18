@@ -20,6 +20,17 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from artwork.runtime import (
+    build_configured_artwork_manager_workflow,
+)
+from artwork.serialization import (
+    serialize_artwork_workflow,
+)
+from artwork.targets import (
+    MediaType,
+    discover_artwork_targets,
+)
+
 IN_DOCKER = os.environ.get("RUNNING_IN_DOCKER") == "true"
 
 if IN_DOCKER:
@@ -57,6 +68,13 @@ def _expand_status(data: Dict[str, Any]) -> str:
 
 SECRETS_PATHS = [
     ["tmdb_api_key"],
+    [
+        "services",
+        "artwork_manager",
+        "providers",
+        "mediux",
+        "api_token",
+    ],
     [
         "services",
         "tv_status_tracker",
@@ -1034,6 +1052,180 @@ def test_trakt_connection():
         result["error"] = str(e)
 
     return result
+
+
+def _connect_plex(config: dict):
+    """Connect to Plex using only the configured server URL and token.
+
+    Library discovery remains the responsibility of the caller.
+    """
+
+    plex_cfg = config.get("plex", {}) or {}
+
+    url = str(
+        plex_cfg.get("url") or ""
+    ).strip()
+
+    token = str(
+        plex_cfg.get("token") or ""
+    ).strip()
+
+    if not url or not token:
+        raise ValueError(
+            "Plex URL and token are required"
+        )
+
+    from plexapi.server import PlexServer
+
+    return PlexServer(
+        url,
+        token,
+        timeout=15,
+    )
+
+
+@app.get("/api/artwork/targets")
+def get_artwork_targets():
+    """Discover Artwork Manager Plex targets without contacting providers."""
+
+    config = load_config()
+
+    if not config:
+        raise HTTPException(
+            status_code=500,
+            detail="Config file not found",
+        )
+
+    service = (
+        config.get("services", {})
+        .get("artwork_manager", {})
+        or {}
+    )
+
+    if not service.get(
+        "enabled",
+        False,
+    ):
+        return {
+            "enabled": False,
+            "targets": [],
+        }
+
+    try:
+        plex = _connect_plex(
+            config
+        )
+
+        targets = (
+            discover_artwork_targets(
+                plex,
+                config,
+            )
+        )
+
+        return {
+            "enabled": True,
+            "targets": [
+                {
+                    "library":
+                        target.library,
+                    "media_type":
+                        target.media_type.value,
+                    "output_path":
+                        str(
+                            target.output_path
+                        ),
+                    "supported":
+                        (
+                            target.media_type
+                            is MediaType.SHOW
+                        ),
+                    "status":
+                        (
+                            "ready"
+                            if (
+                                target.media_type
+                                is MediaType.SHOW
+                            )
+                            else (
+                                "movie_support_pending"
+                            )
+                        ),
+                }
+                for target
+                in targets
+            ],
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        ) from exc
+
+
+@app.get("/api/artwork/preview/{library}")
+def get_artwork_preview(
+    library: str,
+):
+    """Build a read-only Artwork Manager preview for one Plex library."""
+
+    config = load_config()
+
+    if not config:
+        raise HTTPException(
+            status_code=500,
+            detail="Config file not found",
+        )
+
+    try:
+        plex = _connect_plex(
+            config
+        )
+
+        workflow = (
+            build_configured_artwork_manager_workflow(
+                plex=plex,
+                config=config,
+                selected_libraries=library,
+            )
+        )
+
+        if (
+            not workflow.libraries
+            and not workflow.skipped
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "Artwork Manager library "
+                    f"{library!r} was not found"
+                ),
+            )
+
+        return (
+            serialize_artwork_workflow(
+                workflow
+            )
+        )
+
+    except HTTPException:
+        raise
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        ) from exc
 
 
 @app.get("/api/plex/shows")
