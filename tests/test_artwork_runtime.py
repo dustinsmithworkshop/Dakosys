@@ -359,3 +359,161 @@ def test_runtime_rejects_invalid_apply_mode(
             config,
             environ={},
         )
+
+
+def test_configured_runner_uses_runtime_apply_mode(
+    monkeypatch,
+):
+    from artwork.apply_policy import (
+        ArtworkApplyMode,
+    )
+    from artwork.runtime import (
+        run_configured_artwork_manager,
+    )
+
+    provider = object()
+    tmdb_client = object()
+
+    runtime = SimpleNamespace(
+        provider=provider,
+        tmdb_client=tmdb_client,
+        apply_mode=(
+            ArtworkApplyMode.MANUAL
+        ),
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "build_artwork_runtime",
+        lambda config, environ=None:
+            runtime,
+    )
+
+    workflow = object()
+
+    seen_build = {}
+
+    def fake_build(
+        **kwargs,
+    ):
+        seen_build.update(
+            kwargs
+        )
+
+        return workflow
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "build_artwork_manager_workflow",
+        fake_build,
+    )
+
+    expected = object()
+    seen_execute = {}
+
+    def fake_execute(
+        value,
+        *,
+        apply_mode,
+    ):
+        seen_execute[
+            "workflow"
+        ] = value
+
+        seen_execute[
+            "apply_mode"
+        ] = apply_mode
+
+        return expected
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "execute_artwork_manager_workflow",
+        fake_execute,
+    )
+
+    plex = object()
+    config = _config()
+
+    result = (
+        run_configured_artwork_manager(
+            plex=plex,
+            config=config,
+            environ={},
+            selected_libraries=(
+                "Series"
+            ),
+        )
+    )
+
+    assert result is expected
+
+    assert (
+        seen_build["plex"]
+        is plex
+    )
+
+    assert (
+        seen_build["provider"]
+        is provider
+    )
+
+    assert (
+        seen_build["tmdb_client"]
+        is tmdb_client
+    )
+
+    assert (
+        seen_build[
+            "selected_libraries"
+        ]
+        == "Series"
+    )
+
+    assert seen_execute == {
+        "workflow":
+            workflow,
+
+        "apply_mode":
+            ArtworkApplyMode.MANUAL,
+    }
+
+
+def test_disabled_configured_runner_returns_none(
+    monkeypatch,
+):
+    from artwork.runtime import (
+        run_configured_artwork_manager,
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "build_artwork_runtime",
+        lambda config, environ=None:
+            None,
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "build_artwork_manager_workflow",
+        lambda **kwargs:
+            (_ for _ in ())
+            .throw(
+                AssertionError(
+                    "disabled manager "
+                    "must not build workflow"
+                )
+            ),
+    )
+
+    result = (
+        run_configured_artwork_manager(
+            plex=object(),
+            config=_config(
+                enabled=False,
+            ),
+            environ={},
+        )
+    )
+
+    assert result is None

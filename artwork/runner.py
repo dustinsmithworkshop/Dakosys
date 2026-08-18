@@ -11,6 +11,9 @@ from artwork.apply_policy import (
 from artwork.item_store_apply import (
     ItemStoreApplyResult,
 )
+from artwork.review import (
+    build_artwork_review_fingerprint,
+)
 from artwork.workflow import (
     ArtworkLibraryWorkflow,
     ArtworkManagerWorkflow,
@@ -43,6 +46,8 @@ class ArtworkLibraryRunResult:
 
     error_type: str | None = None
     error_message: str | None = None
+
+    review_fingerprint: str | None = None
 
     @property
     def library(self) -> str:
@@ -191,6 +196,11 @@ def execute_artwork_manager_workflow(
                     outcome=(
                         ArtworkRunOutcome
                         .PENDING_REVIEW
+                    ),
+                    review_fingerprint=(
+                        build_artwork_review_fingerprint(
+                            run
+                        )
                     ),
                 )
             )

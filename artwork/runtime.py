@@ -34,6 +34,10 @@ from artwork.providers.mediux import (
 from artwork.providers.tmdb import (
     TMDBArtworkClient,
 )
+from artwork.runner import (
+    ArtworkManagerRunResult,
+    execute_artwork_manager_workflow,
+)
 from artwork.workflow import (
     ArtworkManagerWorkflow,
     build_artwork_manager_workflow,
@@ -329,3 +333,71 @@ def build_configured_artwork_manager_workflow(
             incomplete_migration_threshold
         ),
     )
+
+
+def run_configured_artwork_manager(
+    *,
+    plex,
+    config: dict,
+    environ: Mapping[str, str] | None = None,
+    selected_libraries: (
+        str
+        | Iterable[str]
+        | None
+    ) = None,
+    legacy_metadata_by_library: (
+        Mapping[
+            str,
+            str | Path,
+        ]
+        | None
+    ) = None,
+    incomplete_migration_threshold: (
+        float
+    ) = 0.25,
+) -> ArtworkManagerRunResult | None:
+    """Build and execute Artwork Manager using configured apply policy.
+
+    Returns ``None`` when Artwork Manager is disabled.
+
+    This function is intentionally not tied to the scheduler, CLI, or
+    web server. Those application surfaces may call it explicitly.
+    """
+
+    runtime = build_artwork_runtime(
+        config,
+        environ=environ,
+    )
+
+    if runtime is None:
+        return None
+
+    workflow = (
+        build_artwork_manager_workflow(
+            plex=plex,
+            config=config,
+            provider=runtime.provider,
+            tmdb_client=(
+                runtime.tmdb_client
+            ),
+            selected_libraries=(
+                selected_libraries
+            ),
+            legacy_metadata_by_library=(
+                legacy_metadata_by_library
+            ),
+            incomplete_migration_threshold=(
+                incomplete_migration_threshold
+            ),
+        )
+    )
+
+    return (
+        execute_artwork_manager_workflow(
+            workflow,
+            apply_mode=(
+                runtime.apply_mode
+            ),
+        )
+    )
+

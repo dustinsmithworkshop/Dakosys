@@ -87,6 +87,13 @@ def test_manual_mode_leaves_safe_changes_pending(
 
     monkeypatch.setattr(
         "artwork.runner."
+        "build_artwork_review_fingerprint",
+        lambda value:
+            "review-fingerprint",
+    )
+
+    monkeypatch.setattr(
+        "artwork.runner."
         "apply_artwork_library_workflow",
         lambda value: (
             (_ for _ in ())
@@ -118,6 +125,12 @@ def test_manual_mode_leaves_safe_changes_pending(
     assert (
         result.pending_review_count
         == 1
+    )
+
+    assert (
+        result.libraries[0]
+        .review_fingerprint
+        == "review-fingerprint"
     )
 
 
