@@ -350,3 +350,38 @@ def test_library_serialization_exposes_real_apply_requirement():
         result["output"]["needs_apply"]
         is True
     )
+
+
+def test_library_serialization_supports_blocked_workflow_without_plan():
+    from dataclasses import replace
+
+    run = replace(
+        _library_run(),
+        plan=None,
+    )
+
+    result = (
+        serialize_artwork_library(
+            run
+        )
+    )
+
+    assert (
+        result["output"]
+        ["plan_available"]
+        is False
+    )
+
+    assert result["output"]["desired"] == 0
+    assert result["output"]["added"] == 0
+    assert result["output"]["updated"] == 0
+    assert result["output"]["unchanged"] == 0
+    assert result["output"]["removed"] == 0
+    assert result["output"]["changed_files"] == 0
+    assert result["output"]["needs_apply"] is False
+
+    assert result["output"]["files"] == {
+        "added": [],
+        "updated": [],
+        "removed": [],
+    }

@@ -68,6 +68,10 @@ def serialize_artwork_library(
     plan = run.plan
     execution = run.execution
 
+    plan_available = (
+        plan is not None
+    )
+
     return {
         "library": run.library,
         "media_type": _value(
@@ -221,24 +225,28 @@ def serialize_artwork_library(
                 preview.rendered_yaml_bytes
             ),
             "desired": (
-                plan.desired_count
+                run.desired_count
             ),
             "added": (
-                plan.added_count
+                run.added_count
             ),
             "updated": (
-                plan.updated_count
+                run.updated_count
             ),
             "unchanged": (
                 plan.unchanged_count
+                if plan is not None
+                else 0
             ),
             "removed": (
-                plan.removed_count
+                run.removed_count
             ),
             "preserved_unowned": (
                 len(
                     plan.preserved_unowned
                 )
+                if plan is not None
+                else 0
             ),
             "changed_files": (
                 run.changed_file_count
@@ -246,15 +254,24 @@ def serialize_artwork_library(
             "needs_apply": (
                 run.needs_apply
             ),
+            "plan_available": (
+                plan_available
+            ),
             "files": {
-                "added": list(
-                    plan.added
+                "added": (
+                    list(plan.added)
+                    if plan is not None
+                    else []
                 ),
-                "updated": list(
-                    plan.updated
+                "updated": (
+                    list(plan.updated)
+                    if plan is not None
+                    else []
                 ),
-                "removed": list(
-                    plan.removed
+                "removed": (
+                    list(plan.removed)
+                    if plan is not None
+                    else []
                 ),
             },
         },
