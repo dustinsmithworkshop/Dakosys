@@ -14,6 +14,7 @@ from artwork.providers.mediux import (
     MediuxClient,
     MediuxProvider,
     MediuxResponseError,
+    MediuxUnavailableError,
     parse_mediux_show_sets,
 )
 from artwork.search import (
@@ -394,6 +395,34 @@ def test_client_raises_on_graphql_errors():
             549
         )
 
+
+
+def test_client_classifies_item_permission_denial_as_unavailable():
+    opener = RecordingOpener(
+        {
+            "errors": [
+                {
+                    "message": (
+                        "You don't have permission "
+                        "to access this."
+                    ),
+                }
+            ],
+        }
+    )
+
+    client = MediuxClient(
+        "valid-token",
+        opener=opener,
+    )
+
+    with pytest.raises(
+        MediuxUnavailableError,
+        match="permission",
+    ):
+        client.get_show_sets(
+            312266
+        )
 
 
 def test_mediux_asset_url_builds_public_url():

@@ -19,6 +19,9 @@ from artwork.models import (
     ShowArtworkState,
 )
 from artwork.policy import SetAction
+from artwork.providers.base import (
+    ArtworkProviderUnavailableError,
+)
 from artwork.search import (
     ArtworkSearchKind,
 )
@@ -452,6 +455,76 @@ def test_provider_error_preserves_durable_state():
     assert (
         result.error_message
         == "provider unavailable"
+    )
+
+
+def test_provider_unavailable_preserves_durable_state_nonfatally():
+    inventory = _inventory(
+        episodes=4,
+    )
+
+    state = _state(
+        set_id="A",
+        episodes=2,
+    )
+
+    provider = FakeProvider(
+        {
+            "1": (
+                ArtworkProviderUnavailableError(
+                    "item access denied"
+                )
+            ),
+        }
+    )
+
+    result = execute_managed_show(
+        inventory=inventory,
+        current_state=state,
+        provider=provider,
+    )
+
+    assert (
+        result.path
+        is
+        ManagedExecutionPath
+        .PROVIDER_UNAVAILABLE
+    )
+
+    assert (
+        result.action
+        is SetAction.KEEP_CURRENT
+    )
+
+    assert result.state is state
+    assert result.provider_requested is True
+
+    library = execute_managed_library(
+        items=(
+            (
+                inventory,
+                state,
+            ),
+        ),
+        provider=FakeProvider(
+            {
+                "1": (
+                    ArtworkProviderUnavailableError(
+                        "item access denied"
+                    )
+                ),
+            }
+        ),
+    )
+
+    assert (
+        library.provider_unavailable_count
+        == 1
+    )
+
+    assert (
+        library.provider_error_count
+        == 0
     )
 
 

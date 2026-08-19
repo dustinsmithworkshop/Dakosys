@@ -23,7 +23,10 @@ from artwork.progress import (
     ArtworkScanPhase,
     emit_artwork_progress,
 )
-from artwork.providers.base import ArtworkProvider
+from artwork.providers.base import (
+    ArtworkProvider,
+    ArtworkProviderUnavailableError,
+)
 from artwork.search import (
     ArtworkSearchKind,
     ArtworkSearchRequest,
@@ -41,6 +44,9 @@ class DiscoveryPath(str, Enum):
     NO_CANDIDATES = "no_candidates"
     NO_USABLE_CANDIDATE = (
         "no_usable_candidate"
+    )
+    PROVIDER_UNAVAILABLE = (
+        "provider_unavailable"
     )
     PROVIDER_ERROR = "provider_error"
 
@@ -137,6 +143,21 @@ class LibraryDiscoveryExecution:
             if (
                 result.path
                 is DiscoveryPath.NO_USABLE_CANDIDATE
+            )
+        )
+
+    @property
+    def provider_unavailable_count(
+        self,
+    ) -> int:
+        return sum(
+            1
+            for result in self.results
+            if (
+                result.path
+                is
+                DiscoveryPath
+                .PROVIDER_UNAVAILABLE
             )
         )
 
@@ -445,6 +466,18 @@ def discover_unmanaged_show(
     try:
         artwork_sets = provider.find_sets(
             request
+        )
+
+    except ArtworkProviderUnavailableError as exc:
+        return ShowDiscoveryExecution(
+            inventory=inventory,
+            state=None,
+            path=(
+                DiscoveryPath
+                .PROVIDER_UNAVAILABLE
+            ),
+            error_type=type(exc).__name__,
+            error_message=str(exc),
         )
 
     except Exception as exc:

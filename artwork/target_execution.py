@@ -276,6 +276,19 @@ class ShowTargetExecution:
         )
 
     @property
+    def provider_unavailable_count(
+        self,
+    ) -> int:
+        """Non-fatal item-level primary-provider unavailability."""
+
+        return (
+            self.managed
+            .provider_unavailable_count
+            + self.discovery
+            .provider_unavailable_count
+        )
+
+    @property
     def provider_error_count(
         self,
     ) -> int:

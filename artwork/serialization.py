@@ -172,6 +172,13 @@ def serialize_artwork_library(
             "primary_requests": (
                 execution.provider_request_count
             ),
+            "primary_unavailable": (
+                getattr(
+                    execution,
+                    "provider_unavailable_count",
+                    0,
+                )
+            ),
             "primary_errors": (
                 execution.provider_error_count
             ),

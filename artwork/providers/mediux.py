@@ -18,6 +18,9 @@ from urllib.request import (
     urlopen,
 )
 
+from artwork.providers.base import (
+    ArtworkProviderUnavailableError,
+)
 from artwork.models import (
     ArtworkAsset,
     ArtworkKind,
@@ -148,6 +151,41 @@ class MediuxAuthenticationError(MediuxError):
 
 class MediuxResponseError(MediuxError):
     """MediUX returned an invalid or unsuccessful response."""
+
+
+class MediuxUnavailableError(
+    MediuxError,
+    ArtworkProviderUnavailableError,
+):
+    """MediUX cannot expose one requested item to this credential."""
+
+
+def _graphql_item_unavailable(
+    messages: list[str],
+) -> bool:
+    """Whether all GraphQL errors are the known item access denial."""
+
+    expected = (
+        "you don't have permission "
+        "to access this"
+    )
+
+    normalized = [
+        str(message)
+        .strip()
+        .casefold()
+        .rstrip(".")
+        for message in messages
+        if str(message).strip()
+    ]
+
+    return (
+        bool(normalized)
+        and all(
+            message == expected
+            for message in normalized
+        )
+    )
 
 
 class MediuxClient:
@@ -294,9 +332,20 @@ class MediuxClient:
                         str(error)
                     )
 
-            raise MediuxResponseError(
+            message = (
                 "MediUX GraphQL error: "
                 + "; ".join(messages)
+            )
+
+            if _graphql_item_unavailable(
+                messages
+            ):
+                raise MediuxUnavailableError(
+                    message
+                )
+
+            raise MediuxResponseError(
+                message
             )
 
         return payload

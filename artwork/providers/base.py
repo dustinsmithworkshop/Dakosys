@@ -11,6 +11,17 @@ from artwork.models import ArtworkSet
 from artwork.search import ArtworkSearchRequest
 
 
+class ArtworkProviderUnavailableError(
+    RuntimeError
+):
+    """Provider cannot supply this specific item.
+
+    The provider itself may still be healthy. Callers should preserve
+    existing durable state or continue with configured fallback rather
+    than treating this as a library-wide provider failure.
+    """
+
+
 @runtime_checkable
 class ArtworkProvider(Protocol):
     """Provider capable of discovering cohesive artwork sets."""

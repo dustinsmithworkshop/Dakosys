@@ -648,6 +648,40 @@ function PreviewPanel({
 
               <div className="flex justify-between">
                 <span className="text-zinc-400">
+                  MediUX unavailable
+                </span>
+                <span className={
+                  preview.provider_activity
+                    .primary_unavailable > 0
+                    ? "text-yellow-400"
+                    : "text-zinc-200"
+                }>
+                  {
+                    preview.provider_activity
+                      .primary_unavailable ?? 0
+                  }
+                </span>
+              </div>
+
+              <div className="flex justify-between">
+                <span className="text-zinc-400">
+                  MediUX errors
+                </span>
+                <span className={
+                  preview.provider_activity
+                    .primary_errors > 0
+                    ? "text-red-400"
+                    : "text-zinc-200"
+                }>
+                  {
+                    preview.provider_activity
+                      .primary_errors
+                  }
+                </span>
+              </div>
+
+              <div className="flex justify-between">
+                <span className="text-zinc-400">
                   TMDB requests
                 </span>
                 <span className="text-zinc-200">

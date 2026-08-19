@@ -17,6 +17,9 @@ from artwork.models import (
     EpisodeArtwork,
     SeasonArtwork,
 )
+from artwork.providers.base import (
+    ArtworkProviderUnavailableError,
+)
 from artwork.search import (
     ArtworkSearchKind,
 )
@@ -406,6 +409,57 @@ def test_discovery_provider_error_is_reported():
     assert (
         result.error_message
         == "provider unavailable"
+    )
+
+
+def test_discovery_provider_unavailable_is_nonfatal():
+    inventory = _inventory()
+
+    provider = FakeProvider(
+        {
+            "1": (
+                ArtworkProviderUnavailableError(
+                    "item access denied"
+                )
+            ),
+        }
+    )
+
+    result = discover_unmanaged_show(
+        inventory=inventory,
+        provider=provider,
+    )
+
+    assert (
+        result.path
+        is
+        DiscoveryPath
+        .PROVIDER_UNAVAILABLE
+    )
+
+    assert result.state is None
+    assert result.resolved is False
+
+    assert (
+        result.error_type
+        == "ArtworkProviderUnavailableError"
+    )
+
+    library = discover_unmanaged_library(
+        inventories=(
+            inventory,
+        ),
+        provider=provider,
+    )
+
+    assert (
+        library.provider_unavailable_count
+        == 1
+    )
+
+    assert (
+        library.provider_error_count
+        == 0
     )
 
 

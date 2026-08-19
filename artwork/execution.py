@@ -29,7 +29,10 @@ from artwork.progress import (
     ArtworkScanPhase,
     emit_artwork_progress,
 )
-from artwork.providers.base import ArtworkProvider
+from artwork.providers.base import (
+    ArtworkProvider,
+    ArtworkProviderUnavailableError,
+)
 from artwork.reevaluation import (
     ReevaluationResult,
     reevaluate_artwork_selection,
@@ -55,6 +58,10 @@ class ManagedExecutionPath(str, Enum):
     )
 
     REEVALUATED = "reevaluated"
+
+    PROVIDER_UNAVAILABLE = (
+        "provider_unavailable"
+    )
 
     PROVIDER_ERROR = "provider_error"
 
@@ -149,6 +156,21 @@ class ManagedLibraryExecution:
             1
             for result in self.results
             if result.provider_requested
+        )
+
+    @property
+    def provider_unavailable_count(
+        self,
+    ) -> int:
+        return sum(
+            1
+            for result in self.results
+            if (
+                result.path
+                is
+                ManagedExecutionPath
+                .PROVIDER_UNAVAILABLE
+            )
         )
 
     @property
@@ -655,6 +677,37 @@ def _execute_fallback_state(
 
     if (
         discovery.path
+        is
+        DiscoveryPath
+        .PROVIDER_UNAVAILABLE
+    ):
+        return ManagedShowExecution(
+            inventory=inventory,
+            current_state=current_state,
+            state=current_state,
+            path=(
+                ManagedExecutionPath
+                .PROVIDER_UNAVAILABLE
+            ),
+            action=SetAction.KEEP_CURRENT,
+            reason=(
+                "fallback_primary_provider_unavailable"
+            ),
+            provider_requested=True,
+            provider_candidate_count=(
+                discovery
+                .provider_candidate_count
+            ),
+            error_type=(
+                discovery.error_type
+            ),
+            error_message=(
+                discovery.error_message
+            ),
+        )
+
+    if (
+        discovery.path
         is DiscoveryPath.PROVIDER_ERROR
     ):
         return ManagedShowExecution(
@@ -899,6 +952,31 @@ def execute_managed_show(
             provider.find_sets(
                 request
             )
+        )
+
+    except ArtworkProviderUnavailableError as exc:
+        # Item-level unavailability is non-fatal. Durable state wins
+        # and the library may continue safely.
+        return ManagedShowExecution(
+            inventory=inventory,
+            current_state=current_state,
+            state=current_state,
+            path=(
+                ManagedExecutionPath
+                .PROVIDER_UNAVAILABLE
+            ),
+            action=SetAction.KEEP_CURRENT,
+            reason="provider_unavailable",
+            current_assessment=(
+                current_assessment
+            ),
+            provider_requested=True,
+            error_type=(
+                type(exc).__name__
+            ),
+            error_message=str(
+                exc
+            ),
         )
 
     except Exception as exc:

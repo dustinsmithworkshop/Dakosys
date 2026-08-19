@@ -1166,3 +1166,43 @@ def test_unique_tvdb_candidate_collision_is_resolved_before_reconciliation():
         "first": 436780,
         "second": 188551,
     }
+
+
+
+def test_target_reports_provider_unavailable_separately_from_errors():
+    from artwork.providers.base import (
+        ArtworkProviderUnavailableError,
+    )
+
+    inventory = _inventory(
+        rating_key="unavailable",
+        tvdb_id=123456,
+        title="Unavailable Show",
+    )
+
+    result = execute_show_target(
+        target=_target(),
+        inventories=(
+            inventory,
+        ),
+        managed_shows=(),
+        provider=FakeProvider(
+            {
+                "unavailable": (
+                    ArtworkProviderUnavailableError(
+                        "item access denied"
+                    )
+                ),
+            }
+        ),
+    )
+
+    assert (
+        result.provider_unavailable_count
+        == 1
+    )
+
+    assert (
+        result.provider_error_count
+        == 0
+    )

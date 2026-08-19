@@ -372,6 +372,7 @@ export interface ArtworkLibraryPreview {
 
   provider_activity: {
     primary_requests: number;
+    primary_unavailable: number;
     primary_errors: number;
 
     identity_enrichment: {

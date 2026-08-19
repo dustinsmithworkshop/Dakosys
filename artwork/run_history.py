@@ -240,6 +240,7 @@ def _serialize_unavailable_library(
 
         "provider_activity": {
             "primary_requests": 0,
+            "primary_unavailable": 0,
             "primary_errors": 0,
             "identity_enrichment": {
                 "requests": 0,
