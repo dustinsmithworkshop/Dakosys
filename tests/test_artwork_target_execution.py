@@ -1093,3 +1093,76 @@ def test_split_episode_migration_preserves_presentation_family():
         .seasons[1]
         .episodes
     ) == 4
+
+
+def test_unique_tvdb_candidate_collision_is_resolved_before_reconciliation():
+    from tv_metadata.models import (
+        ShowIdentity,
+    )
+
+    def candidate_inventory(
+        *,
+        rating_key,
+        candidates,
+    ):
+        return ShowInventory(
+            identity=ShowIdentity(
+                title=(
+                    f"Candidate {rating_key}"
+                ),
+                year=2024,
+                library="TV",
+                plex_rating_key=(
+                    rating_key
+                ),
+                tvdb_id=188551,
+                tmdb_id=246862,
+                imdb_id="tt1727444",
+                tvdb_id_candidates=tuple(
+                    candidates
+                ),
+            ),
+            seasons=(
+                SeasonInventory(
+                    season_number=1,
+                    episode_numbers=frozenset(
+                        {
+                            1,
+                        }
+                    ),
+                ),
+            ),
+        )
+
+    result = execute_show_target(
+        target=_target(),
+        inventories=(
+            candidate_inventory(
+                rating_key="first",
+                candidates=(
+                    188551,
+                    436780,
+                ),
+            ),
+            candidate_inventory(
+                rating_key="second",
+                candidates=(
+                    188551,
+                ),
+            ),
+        ),
+        managed_shows=(),
+        provider=FakeProvider(),
+    )
+
+    resolved = {
+        item.identity.plex_rating_key:
+            item.identity.tvdb_id
+        for item
+        in result.reconciliation.unmanaged
+    }
+
+    assert resolved == {
+        "first": 436780,
+        "second": 188551,
+    }

@@ -21,6 +21,9 @@ from artwork.identity_enrichment import (
     ShowIdentityEnrichment,
     enrich_show_inventory_tvdb,
 )
+from artwork.identity_resolution import (
+    resolve_duplicate_tvdb_candidates,
+)
 from artwork.inventory import ShowInventory
 from artwork.models import ShowArtworkState
 from artwork.progress import (
@@ -388,6 +391,16 @@ def execute_show_target(
             for result
             in identity_enrichment
         )
+
+    # Plex may expose multiple exact TVDB GUIDs for one item.  Resolve
+    # existing canonical collisions only when those candidates imply one
+    # unique one-to-one assignment.  Ambiguous collisions are deliberately
+    # left unchanged for downstream safety checks to block.
+    execution_inventories = (
+        resolve_duplicate_tvdb_candidates(
+            execution_inventories
+        )
+    )
 
     reconciliation = reconcile_show_target(
         target=target,
