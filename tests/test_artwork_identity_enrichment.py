@@ -164,6 +164,18 @@ def test_exact_tmdb_bridge_recovers_tvdb_identity():
         "cartoons",
     )
 
+    assert identity.tmdb_id_candidates == (
+        39980,
+    )
+
+    assert identity.tvdb_id_candidates == (
+        339733,
+    )
+
+    assert identity.imdb_id_candidates == (
+        "tt1138300",
+    )
+
     assert (
         result.inventory.seasons
         == inventory.seasons

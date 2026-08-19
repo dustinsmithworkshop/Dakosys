@@ -99,6 +99,75 @@ class PlexIdentityTests(
             ("tv",),
         )
 
+    def test_preserves_multiple_external_id_candidates(
+        self,
+    ) -> None:
+        show = FakeShow(
+            guids=[
+                FakeGuid("tmdb://100"),
+                FakeGuid("tmdb://101"),
+                FakeGuid("tmdb://100"),
+                FakeGuid("tvdb://200"),
+                FakeGuid("tvdb://201"),
+                FakeGuid("tvdb://200"),
+                FakeGuid(
+                    "imdb://tt1234567"
+                ),
+                FakeGuid(
+                    "imdb://tt7654321"
+                ),
+                FakeGuid(
+                    "imdb://tt1234567"
+                ),
+            ]
+        )
+
+        result = build_show_identity(
+            show,
+            "Anime",
+        )
+
+        # Existing first-valid behavior remains unchanged.
+        self.assertEqual(
+            result.tmdb_id,
+            100,
+        )
+
+        self.assertEqual(
+            result.tvdb_id,
+            200,
+        )
+
+        self.assertEqual(
+            result.imdb_id,
+            "tt1234567",
+        )
+
+        # But all exact Plex candidates are retained.
+        self.assertEqual(
+            result.tmdb_id_candidates,
+            (
+                100,
+                101,
+            ),
+        )
+
+        self.assertEqual(
+            result.tvdb_id_candidates,
+            (
+                200,
+                201,
+            ),
+        )
+
+        self.assertEqual(
+            result.imdb_id_candidates,
+            (
+                "tt1234567",
+                "tt7654321",
+            ),
+        )
+
     def test_external_ids_are_individually_optional(
         self,
     ) -> None:

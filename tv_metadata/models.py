@@ -46,6 +46,27 @@ class ShowIdentity:
 
     library_roles: tuple[str, ...] = ()
 
+    # Plex may expose more than one external identifier for the same
+    # library item.  The scalar IDs above remain the current canonical
+    # choices for compatibility; these tuples preserve all exact Plex
+    # candidates so consumers can reason about ambiguity explicitly.
+    #
+    # Candidate evidence is intentionally excluded from dataclass
+    # equality.  Plex library + rating key remains the stable item
+    # identity, while external IDs are provider/matching evidence.
+    tmdb_id_candidates: tuple[int, ...] = field(
+        default_factory=tuple,
+        compare=False,
+    )
+    tvdb_id_candidates: tuple[int, ...] = field(
+        default_factory=tuple,
+        compare=False,
+    )
+    imdb_id_candidates: tuple[str, ...] = field(
+        default_factory=tuple,
+        compare=False,
+    )
+
 
 @dataclass(frozen=True)
 class NextEpisode:

@@ -94,6 +94,10 @@ def build_show_identity(
     tvdb_id: int | None = None
     imdb_id: str | None = None
 
+    tmdb_id_candidates: list[int] = []
+    tvdb_id_candidates: list[int] = []
+    imdb_id_candidates: list[str] = []
+
     guids = (
         getattr(show, "guids", None)
         or ()
@@ -116,23 +120,57 @@ def build_show_identity(
         if not value:
             continue
 
-        if (
-            source == "tmdb"
-            and tmdb_id is None
-        ):
-            tmdb_id = _integer_id(value)
+        if source == "tmdb":
+            parsed = _integer_id(
+                value
+            )
 
-        elif (
-            source == "tvdb"
-            and tvdb_id is None
-        ):
-            tvdb_id = _integer_id(value)
+            if (
+                parsed is not None
+                and parsed
+                not in tmdb_id_candidates
+            ):
+                tmdb_id_candidates.append(
+                    parsed
+                )
 
-        elif (
-            source == "imdb"
-            and imdb_id is None
-        ):
-            imdb_id = value
+            if (
+                tmdb_id is None
+                and parsed is not None
+            ):
+                tmdb_id = parsed
+
+        elif source == "tvdb":
+            parsed = _integer_id(
+                value
+            )
+
+            if (
+                parsed is not None
+                and parsed
+                not in tvdb_id_candidates
+            ):
+                tvdb_id_candidates.append(
+                    parsed
+                )
+
+            if (
+                tvdb_id is None
+                and parsed is not None
+            ):
+                tvdb_id = parsed
+
+        elif source == "imdb":
+            if (
+                value
+                not in imdb_id_candidates
+            ):
+                imdb_id_candidates.append(
+                    value
+                )
+
+            if imdb_id is None:
+                imdb_id = value
 
     roles = tuple(
         dict.fromkeys(
@@ -153,4 +191,13 @@ def build_show_identity(
         tvdb_id=tvdb_id,
         imdb_id=imdb_id,
         library_roles=roles,
+        tmdb_id_candidates=tuple(
+            tmdb_id_candidates
+        ),
+        tvdb_id_candidates=tuple(
+            tvdb_id_candidates
+        ),
+        imdb_id_candidates=tuple(
+            imdb_id_candidates
+        ),
     )

@@ -123,6 +123,70 @@ def enrich_show_inventory_tvdb(
             provider_requested=True,
         )
 
+    tmdb_id_candidates = list(
+        getattr(
+            identity,
+            "tmdb_id_candidates",
+            (),
+        )
+        or ()
+    )
+
+    if (
+        identity.tmdb_id is not None
+        and identity.tmdb_id
+        not in tmdb_id_candidates
+    ):
+        tmdb_id_candidates.insert(
+            0,
+            identity.tmdb_id,
+        )
+
+    tvdb_id_candidates = list(
+        getattr(
+            identity,
+            "tvdb_id_candidates",
+            (),
+        )
+        or ()
+    )
+
+    if (
+        external.tvdb_id
+        not in tvdb_id_candidates
+    ):
+        tvdb_id_candidates.append(
+            external.tvdb_id
+        )
+
+    imdb_id_candidates = list(
+        getattr(
+            identity,
+            "imdb_id_candidates",
+            (),
+        )
+        or ()
+    )
+
+    if (
+        identity.imdb_id
+        and identity.imdb_id
+        not in imdb_id_candidates
+    ):
+        imdb_id_candidates.insert(
+            0,
+            identity.imdb_id,
+        )
+
+    if (
+        external.imdb_id
+        and external.imdb_id
+        not in imdb_id_candidates
+    ):
+        imdb_id_candidates.append(
+            external.imdb_id
+        )
+
     enriched_identity = ShowIdentity(
         title=identity.title,
         year=identity.year,
@@ -143,6 +207,15 @@ def enrich_show_inventory_tvdb(
                 (),
             )
             or ()
+        ),
+        tmdb_id_candidates=tuple(
+            tmdb_id_candidates
+        ),
+        tvdb_id_candidates=tuple(
+            tvdb_id_candidates
+        ),
+        imdb_id_candidates=tuple(
+            imdb_id_candidates
         ),
     )
 
