@@ -258,3 +258,76 @@ def test_target_projection_uses_resolved_inventory_pairs():
         1,
         3,
     }
+
+
+def test_projection_drops_empty_current_plex_season():
+    inventory = ShowInventory(
+        identity=SimpleNamespace(
+            library="Anime",
+            plex_rating_key="135795",
+            title="Example",
+            tvdb_id=100,
+        ),
+        seasons=(
+            SeasonInventory(
+                season_number=0,
+                episode_numbers=frozenset(
+                    {
+                        1,
+                    }
+                ),
+            ),
+            SeasonInventory(
+                season_number=1,
+                episode_numbers=frozenset(
+                    {
+                        1,
+                    }
+                ),
+            ),
+        ),
+    )
+
+    state = ShowArtworkState(
+        title="Example",
+        tvdb_id=100,
+        seasons={
+            0: SeasonArtwork(
+                season_number=0,
+                poster=None,
+                episodes={},
+            ),
+            1: SeasonArtwork(
+                season_number=1,
+                episodes={
+                    1: EpisodeArtwork(
+                        episode_number=1,
+                        card=_card(
+                            "s1e1"
+                        ),
+                    ),
+                },
+            ),
+        },
+    )
+
+    projected = (
+        project_show_state_to_inventory(
+            inventory=inventory,
+            state=state,
+        )
+    )
+
+    assert set(
+        projected.seasons
+    ) == {
+        1,
+    }
+
+    assert (
+        projected
+        .seasons[1]
+        .episodes[1]
+        .card
+        .available
+    )

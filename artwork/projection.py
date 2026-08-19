@@ -77,6 +77,28 @@ def project_show_state_to_inventory(
             )
         }
 
+        poster_available = (
+            season.poster is not None
+            and season.poster.available
+        )
+
+        episode_artwork_available = any(
+            episode.card is not None
+            and episode.card.available
+            for episode
+            in season.episodes.values()
+        )
+
+        # Provider reevaluation can surface empty season shells for
+        # Plex-backed seasons such as Specials.  Those shells carry no
+        # durable artwork information and must not make an otherwise
+        # idempotent state store appear changed.
+        if not (
+            poster_available
+            or episode_artwork_available
+        ):
+            continue
+
         seasons[
             season_number
         ] = season
