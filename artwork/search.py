@@ -22,6 +22,7 @@ from artwork.planner import (
     PlanReason,
     TargetPlan,
 )
+from artwork.targets import MediaType
 
 
 class ArtworkSearchKind(str, Enum):
@@ -52,6 +53,8 @@ class ArtworkSearchRequest:
     seasons: tuple[SeasonInventory, ...]
 
     kind: ArtworkSearchKind
+
+    media_type: MediaType = MediaType.SHOW
 
     current_set_id: str | None = None
     current_set_source: ArtworkSource | None = None
@@ -183,6 +186,7 @@ def build_provider_search_requests(
                 imdb_id=item.imdb_id,
                 seasons=item.seasons,
                 kind=kind,
+                media_type=plan.target.media_type,
                 current_set_id=(
                     item.selected_set_id
                 ),

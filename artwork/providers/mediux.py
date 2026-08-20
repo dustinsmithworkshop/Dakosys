@@ -31,6 +31,7 @@ from artwork.models import (
     SeasonArtwork,
 )
 from artwork.search import ArtworkSearchRequest
+from artwork.targets import MediaType
 
 
 MEDIUX_GRAPHQL_ENDPOINT = (
@@ -118,6 +119,45 @@ query getShowItemSetsByTMDBID($tmdb_id: ID!) {
             season_number
           }
         }
+      }
+    }
+  }
+}
+"""
+
+
+MOVIE_SETS_QUERY = """
+query getMovieItemSetsByTMDBID($tmdb_id: ID!) {
+  movies_by_id(id: $tmdb_id) {
+    id
+    title
+    imdb_id
+
+    movie_sets(
+      filter: {
+        _or: [
+          { movie_poster: { id: { _nnull: true } } }
+          { movie_backdrop: { id: { _nnull: true } } }
+        ]
+      }
+    ) {
+      id
+      set_title
+
+      user_created {
+        username
+      }
+
+      movie_poster {
+        id
+        src
+        modified_on
+      }
+
+      movie_backdrop {
+        id
+        src
+        modified_on
       }
     }
   }
@@ -365,6 +405,24 @@ class MediuxClient:
             },
             query_name=(
                 "getShowItemSetsByTMDBID"
+            ),
+        )
+
+    def get_movie_sets(
+        self,
+        tmdb_id: int | str,
+    ) -> dict[str, Any]:
+        """Return the raw MediUX movie-set response."""
+
+        return self._graphql(
+            query=MOVIE_SETS_QUERY,
+            variables={
+                "tmdb_id": str(
+                    tmdb_id
+                ),
+            },
+            query_name=(
+                "getMovieItemSetsByTMDBID"
             ),
         )
 
@@ -847,6 +905,158 @@ def parse_mediux_show_sets(
     return results
 
 
+def parse_mediux_movie_sets(
+    payload: dict[str, Any],
+    *,
+    expected_tmdb_id: int | str | None = None,
+) -> list[ArtworkSet]:
+    """Convert MediUX GraphQL movie sets to Dakosys models."""
+
+    errors = payload.get(
+        "errors"
+    ) or []
+
+    if errors:
+        raise MediuxResponseError(
+            "Cannot parse MediUX response "
+            "containing GraphQL errors"
+        )
+
+    movie = (
+        payload
+        .get("data", {})
+        .get("movies_by_id")
+    )
+
+    if not movie:
+        return []
+
+    if not isinstance(
+        movie,
+        dict,
+    ):
+        raise MediuxResponseError(
+            "MediUX movies_by_id payload "
+            "is invalid"
+        )
+
+    if (
+        expected_tmdb_id is not None
+        and str(
+            movie.get("id")
+        )
+        != str(expected_tmdb_id)
+    ):
+        raise MediuxResponseError(
+            "TMDB ID mismatch in MediUX "
+            "movie response"
+        )
+
+    raw_sets = (
+        movie.get("movie_sets")
+        or []
+    )
+
+    if not isinstance(
+        raw_sets,
+        list,
+    ):
+        raise MediuxResponseError(
+            "MediUX movie_sets payload "
+            "is invalid"
+        )
+
+    results: list[
+        ArtworkSet
+    ] = []
+
+    for raw_set in raw_sets:
+        if not isinstance(
+            raw_set,
+            dict,
+        ):
+            continue
+
+        raw_set_id = raw_set.get(
+            "id"
+        )
+
+        if raw_set_id is None:
+            continue
+
+        set_id = str(
+            raw_set_id
+        ).strip()
+
+        if not set_id:
+            continue
+
+        user = (
+            raw_set.get(
+                "user_created"
+            )
+            or {}
+        )
+
+        creator = None
+
+        if isinstance(
+            user,
+            dict,
+        ):
+            raw_creator = (
+                user.get(
+                    "username"
+                )
+            )
+
+            if raw_creator:
+                creator = (
+                    str(
+                        raw_creator
+                    ).strip()
+                    or None
+                )
+
+        raw_title = raw_set.get(
+            "set_title"
+        )
+
+        title = (
+            str(raw_title).strip()
+            if raw_title is not None
+            else None
+        )
+
+        if title == "":
+            title = None
+
+        results.append(
+            ArtworkSet(
+                provider=(
+                    ArtworkSource.MEDIUX
+                ),
+                set_id=set_id,
+                creator=creator,
+                title=title,
+                poster=_first_asset(
+                    raw_set.get(
+                        "movie_poster"
+                    ),
+                    ArtworkKind.MOVIE_POSTER,
+                ),
+                background=_first_asset(
+                    raw_set.get(
+                        "movie_backdrop"
+                    ),
+                    ArtworkKind.MOVIE_BACKGROUND,
+                ),
+            )
+        )
+
+    return results
+
+
 class MediuxProvider:
     """MediUX implementation of ArtworkProvider."""
 
@@ -863,6 +1073,27 @@ class MediuxProvider:
         request: ArtworkSearchRequest,
     ) -> list[ArtworkSet]:
         tmdb_id = request.tmdb_id
+
+        if (
+            request.media_type
+            is MediaType.MOVIE
+        ):
+            if tmdb_id is None:
+                return []
+
+            payload = (
+                self.client
+                .get_movie_sets(
+                    tmdb_id
+                )
+            )
+
+            return (
+                parse_mediux_movie_sets(
+                    payload,
+                    expected_tmdb_id=tmdb_id,
+                )
+            )
 
         if (
             tmdb_id is None
@@ -889,3 +1120,4 @@ class MediuxProvider:
             payload,
             expected_tmdb_id=tmdb_id,
         )
+

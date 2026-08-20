@@ -12,6 +12,8 @@ class ArtworkKind(str, Enum):
     SHOW_BACKGROUND = "show_background"
     SEASON_POSTER = "season_poster"
     EPISODE_CARD = "episode_card"
+    MOVIE_POSTER = "movie_poster"
+    MOVIE_BACKGROUND = "movie_background"
 
 
 class ArtworkSource(str, Enum):
