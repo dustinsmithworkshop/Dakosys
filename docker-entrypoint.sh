@@ -12,6 +12,9 @@ if [ "$1" = "daemon" ]; then
     echo "Starting web server on port 8000..."
     exec uvicorn web_server:app --host 0.0.0.0 --port 8000
 
+elif [ "$1" = "artwork" ]; then
+    shift
+    exec python -m artwork.cli "$@"
 else
     exec python /app/anime_trakt_manager.py "$@"
 fi
