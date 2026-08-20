@@ -341,20 +341,10 @@ def status(
                         ),
 
                     "supported":
-                        (
-                            target.media_type
-                            is not MediaType.MOVIE
-                        ),
+                        True,
 
                     "skip_reason":
-                        (
-                            None
-                            if (
-                                target.media_type
-                                is not MediaType.MOVIE
-                            )
-                            else "movie_support_pending"
-                        ),
+                        None,
                 }
                 for target
                 in targets

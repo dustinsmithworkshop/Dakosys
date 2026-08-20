@@ -443,22 +443,6 @@ def run_configured_artwork_manager(
     )
 
     for target in execution_targets:
-        if (
-            target.media_type
-            is MediaType.MOVIE
-        ):
-            skipped.append(
-                SkippedArtworkWorkflowTarget(
-                    target=target,
-                    reason=(
-                        ArtworkWorkflowSkipReason
-                        .MOVIE_SUPPORT_PENDING
-                    ),
-                )
-            )
-
-            continue
-
         try:
             run = (
                 build_artwork_target_workflow(

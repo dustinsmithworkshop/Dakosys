@@ -258,6 +258,7 @@ def test_workflow_discovers_arbitrary_library_names(
     ] == [
         "Bob's Shows",
         "Kids & Family",
+        "Feature Films",
     ]
 
     assert [
@@ -272,24 +273,13 @@ def test_workflow_discovers_arbitrary_library_names(
             "/metadata/"
             "artwork-kids-family"
         ),
+        Path(
+            "/metadata/"
+            "artwork-feature-films"
+        ),
     ]
 
-    assert len(
-        workflow.skipped
-    ) == 1
-
-    assert (
-        workflow.skipped[0]
-        .target.library
-        == "Feature Films"
-    )
-
-    assert (
-        workflow.skipped[0]
-        .reason
-        is ArtworkWorkflowSkipReason
-        .MOVIE_SUPPORT_PENDING
-    )
+    assert workflow.skipped == ()
 
     assert calls["inventory"] == [
         "inventory:Bob's Shows:alpha",

@@ -194,6 +194,60 @@ class MovieTargetExecution:
         )
 
     @property
+    def identity_enrichment_request_count(
+        self,
+    ) -> int:
+        return 0
+
+    @property
+    def identity_enriched_count(
+        self,
+    ) -> int:
+        return 0
+
+    @property
+    def identity_enrichment_error_count(
+        self,
+    ) -> int:
+        return 0
+
+    @property
+    def tmdb_request_count(
+        self,
+    ) -> int:
+        return 0
+
+    @property
+    def tmdb_provider_error_count(
+        self,
+    ) -> int:
+        return 0
+
+    @property
+    def tmdb_created_count(
+        self,
+    ) -> int:
+        return 0
+
+    @property
+    def tmdb_changed_count(
+        self,
+    ) -> int:
+        return 0
+
+    @property
+    def tmdb_gap_fill_count(
+        self,
+    ) -> int:
+        return 0
+
+    @property
+    def tmdb_gap_remaining_count(
+        self,
+    ) -> int:
+        return 0
+
+    @property
     def resolved_items(
         self,
     ) -> tuple[

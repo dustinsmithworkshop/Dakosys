@@ -514,6 +514,7 @@ def test_configured_runner_processes_targets_independently(
 
     assert built == [
         "Series One",
+        "Cinema",
         "Series Two",
     ]
 
@@ -523,18 +524,16 @@ def test_configured_runner_processes_targets_independently(
             ArtworkApplyMode.MANUAL,
         ),
         (
+            "Cinema",
+            ArtworkApplyMode.MANUAL,
+        ),
+        (
             "Series Two",
             ArtworkApplyMode.MANUAL,
         ),
     ]
 
-    assert [
-        item.target.library
-        for item
-        in result.skipped
-    ] == [
-        "Cinema"
-    ]
+    assert result.skipped == ()
 
 
 

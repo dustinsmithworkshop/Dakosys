@@ -21,23 +21,41 @@ from enum import Enum
 from pathlib import Path
 
 from artwork.inventory import build_show_inventory
+from artwork.movie_inventory import (
+    build_movie_inventory,
+)
 from artwork.item_store import (
     ItemStorePlan,
     build_show_item_store_plan,
+)
+from artwork.movie_item_store import (
+    MovieItemStorePlan,
+    build_movie_item_store_plan,
 )
 from artwork.item_store_apply import (
     ItemStoreApplyResult,
     apply_show_item_store,
     item_store_plan_needs_apply,
 )
+from artwork.movie_item_store_apply import (
+    apply_movie_item_store,
+)
 from artwork.managed_state import (
     ManagedStateBaseline,
     load_show_managed_state_baseline,
+)
+from artwork.movie_managed_state import (
+    MovieManagedStateBaseline,
+    load_movie_managed_state_baseline,
 )
 from artwork.preview import (
     ArtworkTargetPreview,
     PreviewIssueCode,
     build_show_target_preview,
+)
+from artwork.movie_preview import (
+    MovieArtworkTargetPreview,
+    build_movie_target_preview,
 )
 from artwork.progress import (
     ArtworkProgressCallback,
@@ -49,6 +67,10 @@ from artwork.providers.tmdb import TMDBArtworkClient
 from artwork.target_execution import (
     ShowTargetExecution,
     execute_show_target,
+)
+from artwork.movie_execution import (
+    MovieTargetExecution,
+    execute_movie_target,
 )
 from artwork.targets import (
     ArtworkTarget,
@@ -76,10 +98,23 @@ class ArtworkLibraryWorkflow:
     """Complete reviewed state for one show-library execution."""
 
     target: ArtworkTarget
-    baseline: ManagedStateBaseline
-    execution: ShowTargetExecution
-    preview: ArtworkTargetPreview
-    plan: ItemStorePlan | None
+    baseline: (
+        ManagedStateBaseline
+        | MovieManagedStateBaseline
+    )
+    execution: (
+        ShowTargetExecution
+        | MovieTargetExecution
+    )
+    preview: (
+        ArtworkTargetPreview
+        | MovieArtworkTargetPreview
+    )
+    plan: (
+        ItemStorePlan
+        | MovieItemStorePlan
+        | None
+    )
 
     @property
     def library(self) -> str:
@@ -382,6 +417,172 @@ def resolve_artwork_workflow_targets(
     )
 
 
+def build_movie_artwork_target_workflow(
+    *,
+    plex,
+    target: ArtworkTarget,
+    provider: ArtworkProvider,
+    progress_callback: ArtworkProgressCallback | None = None,
+) -> ArtworkLibraryWorkflow:
+    """Build one already-discovered movie target read-only."""
+
+    if (
+        target.media_type
+        is not MediaType.MOVIE
+    ):
+        raise ValueError(
+            "movie Artwork Manager workflow "
+            "requires a movie target"
+        )
+
+    baseline = (
+        load_movie_managed_state_baseline(
+            directory=target.output_path,
+            library=target.library,
+        )
+    )
+
+    section = plex.library.section(
+        target.library
+    )
+
+    movies = tuple(
+        section.all()
+    )
+
+    inventory_results = []
+
+    total_movies = len(
+        movies
+    )
+
+    for index, movie in enumerate(
+        movies,
+        start=1,
+    ):
+        inventory = (
+            build_movie_inventory(
+                movie,
+                target.library,
+            )
+        )
+
+        inventory_results.append(
+            inventory
+        )
+
+        emit_artwork_progress(
+            progress_callback,
+            library=target.library,
+            phase=(
+                ArtworkScanPhase
+                .INVENTORY
+            ),
+            completed=index,
+            total=total_movies,
+            message=(
+                "Reading Plex movie inventory"
+            ),
+            current_title=(
+                inventory.identity.title
+            ),
+        )
+
+    execution = execute_movie_target(
+        target=target,
+        inventories=tuple(
+            inventory_results
+        ),
+        managed_items=baseline.items,
+        provider=provider,
+        progress_callback=(
+            progress_callback
+        ),
+    )
+
+    preview = (
+        build_movie_target_preview(
+            execution
+        )
+    )
+
+    emit_artwork_progress(
+        progress_callback,
+        library=target.library,
+        phase=(
+            ArtworkScanPhase.PLANNING
+        ),
+        completed=1,
+        total=2,
+        message=(
+            "Evaluating movie safety "
+            "and changes"
+        ),
+    )
+
+    unplannable_codes = {
+        PreviewIssueCode
+        .OUTPUT_IDENTITY_MISSING,
+        PreviewIssueCode
+        .KOMETA_RENDER_ERROR,
+    }
+
+    unplannable = any(
+        issue.code in unplannable_codes
+        for issue in preview.issues
+    )
+
+    plan = (
+        None
+        if unplannable
+        else build_movie_item_store_plan(
+            library=target.library,
+            directory=target.output_path,
+            items=(
+                execution
+                .resolved_items
+            ),
+        )
+    )
+
+    emit_artwork_progress(
+        progress_callback,
+        library=target.library,
+        phase=(
+            ArtworkScanPhase.PLANNING
+        ),
+        completed=2,
+        total=2,
+        message=(
+            "Planning Artwork Manager "
+            "movie output"
+        ),
+    )
+
+    run = ArtworkLibraryWorkflow(
+        target=target,
+        baseline=baseline,
+        execution=execution,
+        preview=preview,
+        plan=plan,
+    )
+
+    emit_artwork_progress(
+        progress_callback,
+        library=target.library,
+        phase=(
+            ArtworkScanPhase.COMPLETE
+        ),
+        completed=1,
+        total=1,
+        message=(
+            "Current-state movie scan complete"
+        ),
+    )
+
+    return run
+
+
 def build_artwork_target_workflow(
     *,
     plex,
@@ -392,15 +593,36 @@ def build_artwork_target_workflow(
     incomplete_migration_threshold: float = 0.25,
     progress_callback: ArtworkProgressCallback | None = None,
 ) -> ArtworkLibraryWorkflow:
-    """Build one already-discovered show target without rediscovery."""
+    """Build one already-discovered Artwork Manager target."""
+
+    if (
+        target.media_type
+        is MediaType.MOVIE
+    ):
+        if legacy_metadata is not None:
+            raise ValueError(
+                "legacy show metadata cannot "
+                "bootstrap a movie target"
+            )
+
+        return (
+            build_movie_artwork_target_workflow(
+                plex=plex,
+                target=target,
+                provider=provider,
+                progress_callback=(
+                    progress_callback
+                ),
+            )
+        )
 
     if (
         target.media_type
         is not MediaType.SHOW
     ):
         raise ValueError(
-            "Artwork Manager target workflow "
-            "currently supports show libraries only"
+            "unsupported Artwork Manager "
+            "target media type"
         )
 
     baseline = (
@@ -612,22 +834,6 @@ def build_artwork_manager_workflow(
     ] = []
 
     for target in execution_targets:
-        if (
-            target.media_type
-            is MediaType.MOVIE
-        ):
-            skipped.append(
-                SkippedArtworkWorkflowTarget(
-                    target=target,
-                    reason=(
-                        ArtworkWorkflowSkipReason
-                        .MOVIE_SUPPORT_PENDING
-                    ),
-                )
-            )
-
-            continue
-
         library_runs.append(
             build_artwork_target_workflow(
                 plex=plex,
@@ -671,6 +877,16 @@ def apply_artwork_library_workflow(
         raise RuntimeError(
             "Artwork Manager workflow has no "
             "safe filesystem plan"
+        )
+
+    if (
+        run.target.media_type
+        is MediaType.MOVIE
+    ):
+        return apply_movie_item_store(
+            execution=run.execution,
+            preview=run.preview,
+            plan=run.plan,
         )
 
     return apply_show_item_store(

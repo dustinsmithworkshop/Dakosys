@@ -128,8 +128,7 @@ def test_status_reports_dynamic_plex_targets(
         result.output
     )
     assert (
-        "Movies: movie - skipped "
-        "(movie_support_pending)"
+        "Movies: movie - supported"
         in result.output
     )
 
