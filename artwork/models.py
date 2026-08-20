@@ -119,6 +119,23 @@ class ArtworkSetSelection:
 
 
 @dataclass
+class MovieArtworkState:
+    """Durable semantic artwork state for one Plex movie."""
+
+    title: Optional[str]
+    tmdb_id: Optional[int] = None
+    imdb_id: Optional[str] = None
+
+    poster: Optional[ArtworkAsset] = None
+    background: Optional[ArtworkAsset] = None
+
+    selected_set_id: Optional[str] = None
+    selected_set_source: Optional[ArtworkSource] = None
+    selected_creator: Optional[str] = None
+    selection_mode: SelectionMode = SelectionMode.AUTO
+
+
+@dataclass
 class ShowArtworkState:
     title: Optional[str]
     tvdb_id: Optional[int]
