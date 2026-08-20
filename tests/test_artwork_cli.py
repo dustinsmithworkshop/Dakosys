@@ -208,6 +208,7 @@ def test_scan_is_read_only_and_forwards_library(
         plex,
         config,
         selected_libraries,
+        progress_callback=None,
     ):
         captured[
             "selected_libraries"
@@ -311,6 +312,7 @@ def test_scan_forwards_multiple_exact_library_names(
         plex,
         config,
         selected_libraries,
+        progress_callback=None,
     ):
         captured[
             "selected_libraries"

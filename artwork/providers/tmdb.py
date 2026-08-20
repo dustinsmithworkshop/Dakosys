@@ -34,6 +34,16 @@ class TMDBTVExternalIds:
     imdb_id: str | None = None
 
 
+@dataclass(frozen=True)
+class TMDBMovieArtwork:
+    """Primary TMDB presentation artwork for one movie."""
+
+    tmdb_id: int
+
+    poster: ArtworkAsset | None = None
+    background: ArtworkAsset | None = None
+
+
 class TMDBArtworkClient(
     MetadataTMDBProvider
 ):
@@ -164,6 +174,197 @@ class TMDBArtworkClient(
         return TMDBTVExternalIds(
             tvdb_id=tvdb_id,
             imdb_id=imdb_id,
+        )
+
+    def resolve_movie_tmdb_id(
+        self,
+        identity,
+    ) -> tuple[int | None, str | None]:
+        """Resolve a movie by direct TMDB or exact IMDb identity."""
+
+        tmdb_id = getattr(
+            identity,
+            "tmdb_id",
+            None,
+        )
+
+        if tmdb_id is not None:
+            return (
+                tmdb_id,
+                "tmdb",
+            )
+
+        imdb_id = getattr(
+            identity,
+            "imdb_id",
+            None,
+        )
+
+        if not imdb_id:
+            return None, None
+
+        response = self._get(
+            f"/find/{imdb_id}",
+            params={
+                "external_source":
+                    "imdb_id",
+            },
+        )
+
+        response.raise_for_status()
+
+        raw_results = (
+            response.json().get(
+                "movie_results"
+            )
+            or []
+        )
+
+        ids = tuple(
+            sorted(
+                {
+                    result.get(
+                        "id"
+                    )
+                    for result
+                    in raw_results
+                    if (
+                        isinstance(
+                            result,
+                            dict,
+                        )
+                        and isinstance(
+                            result.get(
+                                "id"
+                            ),
+                            int,
+                        )
+                        and not isinstance(
+                            result.get(
+                                "id"
+                            ),
+                            bool,
+                        )
+                        and result.get(
+                            "id"
+                        ) > 0
+                    )
+                }
+            )
+        )
+
+        if not ids:
+            return None, "not_found"
+
+        if len(ids) != 1:
+            return (
+                None,
+                "ambiguous_external_id",
+            )
+
+        return ids[0], "imdb"
+
+    def get_movie_artwork(
+        self,
+        *,
+        tmdb_id: int,
+    ) -> TMDBMovieArtwork:
+        """Return TMDB poster/background artwork for one movie."""
+
+        if (
+            not isinstance(
+                tmdb_id,
+                int,
+            )
+            or isinstance(
+                tmdb_id,
+                bool,
+            )
+            or tmdb_id <= 0
+        ):
+            raise ValueError(
+                "TMDB movie ID must be "
+                "a positive integer"
+            )
+
+        response = self._get(
+            f"/movie/{tmdb_id}"
+        )
+
+        if response.status_code == 404:
+            return TMDBMovieArtwork(
+                tmdb_id=tmdb_id
+            )
+
+        response.raise_for_status()
+
+        payload = response.json()
+
+        poster = None
+        background = None
+
+        poster_path = payload.get(
+            "poster_path"
+        )
+
+        if isinstance(
+            poster_path,
+            str,
+        ):
+            poster_path = (
+                poster_path.strip()
+            )
+
+            if poster_path:
+                poster = ArtworkAsset(
+                    kind=(
+                        ArtworkKind
+                        .MOVIE_POSTER
+                    ),
+                    source=(
+                        ArtworkSource.TMDB
+                    ),
+                    url=self._image_url(
+                        poster_path
+                    ),
+                    provider_asset_id=(
+                        poster_path
+                    ),
+                )
+
+        backdrop_path = payload.get(
+            "backdrop_path"
+        )
+
+        if isinstance(
+            backdrop_path,
+            str,
+        ):
+            backdrop_path = (
+                backdrop_path.strip()
+            )
+
+            if backdrop_path:
+                background = ArtworkAsset(
+                    kind=(
+                        ArtworkKind
+                        .MOVIE_BACKGROUND
+                    ),
+                    source=(
+                        ArtworkSource.TMDB
+                    ),
+                    url=self._image_url(
+                        backdrop_path
+                    ),
+                    provider_asset_id=(
+                        backdrop_path
+                    ),
+                )
+
+        return TMDBMovieArtwork(
+            tmdb_id=tmdb_id,
+            poster=poster,
+            background=background,
         )
 
     def get_season_episode_cards(

@@ -15,6 +15,11 @@ from artwork.models import (
 from artwork.movie_inventory import (
     MovieInventory,
 )
+from artwork.movie_tmdb_fallback import (
+    MovieTMDBFallbackResult,
+    resolve_movie_tmdb_coverage,
+    skip_movie_tmdb_missing_set_context,
+)
 from artwork.movie_reconciliation import (
     MovieTargetReconciliation,
     reconcile_movie_target,
@@ -33,6 +38,9 @@ from artwork.progress import (
 from artwork.providers.base import (
     ArtworkProvider,
     ArtworkProviderUnavailableError,
+)
+from artwork.providers.tmdb import (
+    TMDBArtworkClient,
 )
 from artwork.search import (
     ArtworkSearchKind,
@@ -114,6 +122,13 @@ class MovieTargetExecution:
         MovieExecutionResult,
         ...,
     ]
+
+    tmdb_coverage: tuple[
+        MovieTMDBFallbackResult,
+        ...,
+    ] = ()
+
+    coverage_enabled: bool = False
 
     @property
     def provider_request_count(
@@ -215,37 +230,63 @@ class MovieTargetExecution:
     def tmdb_request_count(
         self,
     ) -> int:
-        return 0
+        return sum(
+            result.request_count
+            for result
+            in self.tmdb_coverage
+        )
 
     @property
     def tmdb_provider_error_count(
         self,
     ) -> int:
-        return 0
+        return sum(
+            result.provider_error_count
+            for result
+            in self.tmdb_coverage
+        )
 
     @property
     def tmdb_created_count(
         self,
     ) -> int:
-        return 0
+        return sum(
+            1
+            for result
+            in self.tmdb_coverage
+            if result.created
+        )
 
     @property
     def tmdb_changed_count(
         self,
     ) -> int:
-        return 0
+        return sum(
+            1
+            for result
+            in self.tmdb_coverage
+            if result.changed
+        )
 
     @property
     def tmdb_gap_fill_count(
         self,
     ) -> int:
-        return 0
+        return sum(
+            result.gaps_filled
+            for result
+            in self.tmdb_coverage
+        )
 
     @property
     def tmdb_gap_remaining_count(
         self,
     ) -> int:
-        return 0
+        return sum(
+            result.gaps_remaining
+            for result
+            in self.tmdb_coverage
+        )
 
     @property
     def resolved_items(
@@ -257,6 +298,17 @@ class MovieTargetExecution:
         ],
         ...,
     ]:
+        if self.coverage_enabled:
+            return tuple(
+                (
+                    result.inventory,
+                    result.state,
+                )
+                for result
+                in self.tmdb_coverage
+                if result.state is not None
+            )
+
         return tuple(
             (
                 result.inventory,
@@ -434,8 +486,24 @@ def _request(
         title=identity.title,
         year=identity.year,
         tvdb_id=None,
-        tmdb_id=identity.tmdb_id,
-        imdb_id=identity.imdb_id,
+        tmdb_id=(
+            identity.tmdb_id
+            if identity.tmdb_id is not None
+            else (
+                current_state.tmdb_id
+                if current_state is not None
+                else None
+            )
+        ),
+        imdb_id=(
+            identity.imdb_id
+            if identity.imdb_id is not None
+            else (
+                current_state.imdb_id
+                if current_state is not None
+                else None
+            )
+        ),
         seasons=(),
         kind=kind,
         media_type=MediaType.MOVIE,
@@ -1152,6 +1220,7 @@ def execute_movie_target(
         StoredMovieArtworkState
     ],
     provider: ArtworkProvider,
+    tmdb_client: TMDBArtworkClient | None = None,
     progress_callback:
         ArtworkProgressCallback
         | None = None,
@@ -1250,9 +1319,109 @@ def execute_movie_target(
             ),
         )
 
+    primary_results = tuple(
+        results
+    )
+
+    if tmdb_client is None:
+        return MovieTargetExecution(
+            reconciliation=reconciliation,
+            results=primary_results,
+        )
+
+    coverage_results = []
+
+    managed_completed = 0
+    discovery_completed = 0
+
+    for result in primary_results:
+        is_managed = (
+            result.current_state
+            is not None
+        )
+
+        if (
+            result.path
+            is MovieExecutionPath
+            .MISSING_SET_CONTEXT
+        ):
+            coverage = (
+                skip_movie_tmdb_missing_set_context(
+                    inventory=(
+                        result.inventory
+                    ),
+                    state=result.state,
+                )
+            )
+
+        else:
+            coverage = (
+                resolve_movie_tmdb_coverage(
+                    inventory=(
+                        result.inventory
+                    ),
+                    state=result.state,
+                    client=tmdb_client,
+                )
+            )
+
+        coverage_results.append(
+            coverage
+        )
+
+        if is_managed:
+            managed_completed += 1
+
+            emit_artwork_progress(
+                progress_callback,
+                library=target.library,
+                phase=(
+                    ArtworkScanPhase
+                    .TMDB_MANAGED
+                ),
+                completed=(
+                    managed_completed
+                ),
+                total=managed_total,
+                message=(
+                    "Checking managed movie "
+                    "artwork gaps with TMDB"
+                ),
+                current_title=(
+                    result.inventory
+                    .identity.title
+                ),
+            )
+
+        else:
+            discovery_completed += 1
+
+            emit_artwork_progress(
+                progress_callback,
+                library=target.library,
+                phase=(
+                    ArtworkScanPhase
+                    .TMDB_DISCOVERY
+                ),
+                completed=(
+                    discovery_completed
+                ),
+                total=discovery_total,
+                message=(
+                    "Checking unmanaged movie "
+                    "artwork gaps with TMDB"
+                ),
+                current_title=(
+                    result.inventory
+                    .identity.title
+                ),
+            )
+
     return MovieTargetExecution(
         reconciliation=reconciliation,
-        results=tuple(
-            results
+        results=primary_results,
+        tmdb_coverage=tuple(
+            coverage_results
         ),
+        coverage_enabled=True,
     )

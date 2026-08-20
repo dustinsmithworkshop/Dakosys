@@ -160,12 +160,12 @@ def build_movie_target_preview(
         MovieArtworkState,
     ] = {}
 
-    for result in execution.results:
-        if result.state is None:
-            continue
-
+    for (
+        inventory,
+        state,
+    ) in execution.resolved_items:
         key = _key(
-            result.inventory
+            inventory
         )
 
         if key in proposed_states:
@@ -177,7 +177,7 @@ def build_movie_target_preview(
 
         proposed_states[
             key
-        ] = result.state
+        ] = state
 
     baseline_keys = set(
         baseline_states
@@ -276,6 +276,21 @@ def build_movie_target_preview(
                 message=(
                     f"{execution.provider_error_count} "
                     "primary artwork provider "
+                    "request(s) failed"
+                ),
+            )
+        )
+
+    if execution.tmdb_provider_error_count:
+        issues.append(
+            PreviewIssue(
+                code=(
+                    PreviewIssueCode
+                    .TMDB_PROVIDER_ERROR
+                ),
+                message=(
+                    f"{execution.tmdb_provider_error_count} "
+                    "TMDB movie artwork "
                     "request(s) failed"
                 ),
             )

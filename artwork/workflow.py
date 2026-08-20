@@ -422,6 +422,7 @@ def build_movie_artwork_target_workflow(
     plex,
     target: ArtworkTarget,
     provider: ArtworkProvider,
+    tmdb_client: TMDBArtworkClient | None = None,
     progress_callback: ArtworkProgressCallback | None = None,
 ) -> ArtworkLibraryWorkflow:
     """Build one already-discovered movie target read-only."""
@@ -495,6 +496,7 @@ def build_movie_artwork_target_workflow(
         ),
         managed_items=baseline.items,
         provider=provider,
+        tmdb_client=tmdb_client,
         progress_callback=(
             progress_callback
         ),
@@ -610,6 +612,7 @@ def build_artwork_target_workflow(
                 plex=plex,
                 target=target,
                 provider=provider,
+                tmdb_client=tmdb_client,
                 progress_callback=(
                     progress_callback
                 ),

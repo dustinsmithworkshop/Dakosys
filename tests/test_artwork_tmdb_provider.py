@@ -299,3 +299,126 @@ def test_tmdb_artwork_client_returns_empty_external_ids_for_404():
 
     assert external.tvdb_id is None
     assert external.imdb_id is None
+
+
+def test_tmdb_artwork_client_builds_movie_artwork():
+    session = FakeSession(
+        [
+            FakeResponse(
+                payload={
+                    "id": 78,
+                    "poster_path":
+                        "/blade-poster.jpg",
+                    "backdrop_path":
+                        "/blade-backdrop.jpg",
+                }
+            ),
+        ]
+    )
+
+    client = TMDBArtworkClient(
+        api_key="test-key",
+        base_url=(
+            "https://tmdb.example/3"
+        ),
+        session=session,
+    )
+
+    artwork = (
+        client.get_movie_artwork(
+            tmdb_id=78
+        )
+    )
+
+    assert (
+        artwork.poster.kind
+        is ArtworkKind.MOVIE_POSTER
+    )
+
+    assert (
+        artwork.poster.source
+        is ArtworkSource.TMDB
+    )
+
+    assert (
+        artwork.background.kind
+        is ArtworkKind.MOVIE_BACKGROUND
+    )
+
+    assert (
+        artwork.poster.url
+        == (
+            "https://image.tmdb.org/"
+            "t/p/original/"
+            "blade-poster.jpg"
+        )
+    )
+
+    assert session.calls == [
+        {
+            "url": (
+                "https://tmdb.example/3"
+                "/movie/78"
+            ),
+            "params": {
+                "api_key": "test-key",
+            },
+            "timeout": 30.0,
+        }
+    ]
+
+
+def test_tmdb_artwork_client_resolves_movie_imdb_identity():
+    from types import SimpleNamespace
+
+    session = FakeSession(
+        [
+            FakeResponse(
+                payload={
+                    "movie_results": [
+                        {
+                            "id": 78,
+                        },
+                    ],
+                }
+            ),
+        ]
+    )
+
+    client = TMDBArtworkClient(
+        api_key="test-key",
+        base_url=(
+            "https://tmdb.example/3"
+        ),
+        session=session,
+    )
+
+    identity = SimpleNamespace(
+        tmdb_id=None,
+        imdb_id="tt0083658",
+    )
+
+    tmdb_id, source = (
+        client.resolve_movie_tmdb_id(
+            identity
+        )
+    )
+
+    assert tmdb_id == 78
+    assert source == "imdb"
+
+    assert session.calls == [
+        {
+            "url": (
+                "https://tmdb.example/3"
+                "/find/tt0083658"
+            ),
+            "params": {
+                "external_source":
+                    "imdb_id",
+                "api_key":
+                    "test-key",
+            },
+            "timeout": 30.0,
+        }
+    ]

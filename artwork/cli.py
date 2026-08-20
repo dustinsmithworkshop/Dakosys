@@ -17,6 +17,9 @@ from artwork.run_history import (
     list_artwork_run_history,
     load_latest_artwork_run,
 )
+from artwork.progress import (
+    ArtworkScanProgress,
+)
 from artwork.runtime import (
     build_configured_artwork_manager_workflow,
     run_configured_artwork_manager,
@@ -125,6 +128,95 @@ def _json(payload) -> None:
             ensure_ascii=False,
         )
     )
+
+
+def _scan_progress_reporter():
+    """Build a quiet-but-visible CLI progress reporter."""
+
+    last_phase_by_library = {}
+
+    def report(
+        progress: ArtworkScanProgress,
+    ) -> None:
+        phase = progress.phase.value
+
+        previous_phase = (
+            last_phase_by_library.get(
+                progress.library
+            )
+        )
+
+        phase_changed = (
+            previous_phase != phase
+        )
+
+        last_phase_by_library[
+            progress.library
+        ] = phase
+
+        completed = (
+            progress.completed
+        )
+
+        total = progress.total
+
+        # Always show phase transitions and completion.
+        #
+        # For large phases, report every 25 items so
+        # long-running scans remain visibly alive without
+        # producing thousands of terminal lines.
+        should_print = (
+            phase_changed
+            or completed == total
+            or (
+                completed > 0
+                and completed % 25 == 0
+            )
+        )
+
+        if not should_print:
+            return
+
+        label = (
+            phase.replace(
+                "_",
+                " ",
+            )
+        )
+
+        if total > 0:
+            counter = (
+                f"{completed}/{total}"
+            )
+        else:
+            counter = str(
+                completed
+            )
+
+        line = (
+            f"{progress.library}: "
+            f"{label} "
+            f"{counter}"
+        )
+
+        if progress.current_title:
+            line += (
+                " - "
+                + progress.current_title
+            )
+
+        elif progress.message:
+            line += (
+                " - "
+                + progress.message
+            )
+
+        click.echo(
+            line,
+            err=True,
+        )
+
+    return report
 
 
 def _selected_libraries(
@@ -450,6 +542,9 @@ def scan(
                     _selected_libraries(
                         libraries
                     )
+                ),
+                progress_callback=(
+                    _scan_progress_reporter()
                 ),
             )
         )
