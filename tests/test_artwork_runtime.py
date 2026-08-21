@@ -448,11 +448,18 @@ def test_configured_runner_processes_targets_independently(
 
     built = []
 
+    progress_callback = object()
+
     def fake_build(
         **kwargs,
     ):
         built.append(
             kwargs["target"].library
+        )
+
+        assert (
+            kwargs["progress_callback"]
+            is progress_callback
         )
 
         return SimpleNamespace(
@@ -503,6 +510,9 @@ def test_configured_runner_processes_targets_independently(
             plex=plex,
             config=config,
             environ={},
+            progress_callback=(
+                progress_callback
+            ),
         )
     )
 

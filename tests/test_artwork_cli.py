@@ -390,6 +390,7 @@ def test_run_delegates_to_runtime_and_history(
         config,
         selected_libraries,
         history_directory,
+        progress_callback=None,
     ):
         captured[
             "selected_libraries"
@@ -398,6 +399,10 @@ def test_run_delegates_to_runtime_and_history(
         captured[
             "history_directory"
         ] = history_directory
+
+        captured[
+            "progress_callback"
+        ] = progress_callback
 
         return object()
 
@@ -440,6 +445,12 @@ def test_run_delegates_to_runtime_and_history(
         "history_directory"
     ] == Path(
         "/tmp/artwork-history"
+    )
+
+    assert callable(
+        captured[
+            "progress_callback"
+        ]
     )
 
     assert (

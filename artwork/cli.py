@@ -130,7 +130,7 @@ def _json(payload) -> None:
     )
 
 
-def _scan_progress_reporter():
+def _artwork_progress_reporter():
     """Build a quiet-but-visible CLI progress reporter."""
 
     last_phase_by_library = {}
@@ -544,7 +544,7 @@ def scan(
                     )
                 ),
                 progress_callback=(
-                    _scan_progress_reporter()
+                    _artwork_progress_reporter()
                 ),
             )
         )
@@ -660,6 +660,9 @@ def run_command(
                     _selected_libraries(
                         libraries
                     )
+                ),
+                progress_callback=(
+                    _artwork_progress_reporter()
                 ),
                 history_directory=(
                     history_directory

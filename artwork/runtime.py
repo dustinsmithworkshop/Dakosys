@@ -392,6 +392,10 @@ def run_configured_artwork_manager(
         | Path
         | None
     ) = None,
+    progress_callback: (
+        ArtworkProgressCallback
+        | None
+    ) = None,
 ) -> ArtworkManagerRunResult | None:
     """Execute configured Artwork Manager targets independently.
 
@@ -461,6 +465,9 @@ def run_configured_artwork_manager(
                     ),
                     incomplete_migration_threshold=(
                         incomplete_migration_threshold
+                    ),
+                    progress_callback=(
+                        progress_callback
                     ),
                 )
             )
