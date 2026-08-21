@@ -3,7 +3,7 @@
 #
 # IMPORTANT:
 # - Replace all example values before use.
-# - Do not commit real Plex, Sonarr, TMDB, Trakt, or Discord credentials.
+# - Do not commit real Plex, Sonarr, TMDB, MediUX, Trakt, or Discord credentials.
 # - Automatic anime scheduling generates config/scheduled-anime.yaml.
 #   A manually maintained anime schedule list is not used when
 #   scheduler.auto_schedule.enabled is true.
@@ -20,8 +20,8 @@ plex:
       - TV
 
 # TMDB v3 API key.
-# Used by TV Status metadata, Artwork Manager episode fallback and
-# identity enrichment, and by the web UI for artwork.
+# Used by TV Status metadata, Artwork Manager identity enrichment and
+# artwork fallback for supported shows/movies, and by the web UI.
 # TMDB_TOKEN may be supplied as an advanced environment-variable
 # bearer-token override.
 tmdb_api_key: REPLACE_WITH_TMDB_API_KEY
@@ -64,20 +64,24 @@ services:
   #
   #   <output_dir>/artwork-<plex-library>/
   #
-  # Each show is rendered to its own YAML file. Dakosys also maintains
-  # hidden ownership-manifest and durable-state files inside the store.
+  # Each managed show or movie is rendered to its own YAML file.
+  # Dakosys also maintains ownership-manifest and durable-state
+  # information used to preserve safe selections between runs.
   artwork_manager:
     enabled: false
 
     # Safe changes are applied automatically by default.
-    # Set this to "manual" to scan automatically but require review
-    # before writing Artwork Manager state.
+    # Safety is independent from apply mode: unsafe plans remain BLOCKED.
+    #
+    # Set this to "manual" to retain safe changes for review instead
+    # of writing them automatically.
     apply_mode: auto
 
     output_dir: /kometa/metadata
 
     providers:
       mediux:
+        # MediUX is the required primary Artwork Manager provider.
         # MEDIUX_API_TOKEN may be supplied through the container
         # environment and takes precedence over this value.
         api_token: REPLACE_WITH_MEDIUX_API_TOKEN

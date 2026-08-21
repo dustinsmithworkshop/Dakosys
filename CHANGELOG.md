@@ -6,6 +6,17 @@ All notable changes to this fork are documented here.
 
 ### Added
 
+- Autonomous Artwork Manager for configured Plex show and movie libraries.
+- MediUX primary artwork provider with cohesive show-set selection, refresh, and migration behavior.
+- TMDB artwork fallback and identity enrichment for show and movie coverage gaps.
+- Per-library Kometa metadata item stores with one generated YAML file per managed movie/show.
+- Durable Artwork Manager ownership/state tracking with transactional application.
+- Independent Artwork Manager safety policy with APPLIED, NO_CHANGES, PENDING_REVIEW, BLOCKED, and FAILED outcomes.
+- Automatic and manual Artwork Manager apply modes.
+- Artwork Manager CLI commands for status, read-only scan, run, and persistent history.
+- Live progress reporting for long-running Artwork Manager scans and runs.
+- Artwork Manager scheduler integration and web dashboard/current-state/history/progress support.
+
 - Hybrid TV metadata provider architecture using stable Plex external IDs with Sonarr, TMDB, and TVmaze providers.
 - Provider-independent normalization for TV lifecycle state and upcoming episodes.
 - Field-specific provider precedence:
@@ -22,6 +33,11 @@ All notable changes to this fork are documented here.
 - Regression coverage for provider identity, Sonarr, TMDB, TVmaze, resolver behavior, presentation, shadow comparison, local Next Airing, web Next Airing, Trakt dependency reporting, TV Status integration, and CLI provider setup.
 
 ### Changed
+
+- Artwork Manager discovers configured Plex libraries by media type instead of requiring hard-coded library names.
+- Artwork Manager prioritizes curated MediUX artwork and uses TMDB to fill eligible gaps without replacing usable MediUX assets.
+- Safe Artwork Manager plans default to automatic application; manual mode remains available for review-first operation.
+- Artwork Manager persists provider selection and ownership so later runs can safely refresh or migrate cohesive artwork sets.
 
 - TV / Anime Status Tracker now resolves normal metadata locally instead of requiring Trakt.
 - TV Status uses stable Plex external IDs rather than fuzzy title matching between providers.
@@ -48,6 +64,11 @@ All notable changes to this fork are documented here.
 - User-visible claims that TV Status or Next Airing require Trakt.
 
 ### Validation
+
+- Artwork Manager show and movie workflows were exercised end-to-end against real Plex and Kometa mounts.
+- Production-scale Movies processing managed 3,058 of 3,059 Plex movies using MediUX with TMDB fallback.
+- A full four-library automatic production run completed with zero blocked and zero failed libraries.
+- Production runs exercised provider migrations, set refreshes, TMDB gap filling, transactional writes, durable state, and no-change behavior.
 
 - Full TV metadata regression suite passes with 102 Python tests.
 - Next.js production build passes after provider setup and Next Airing UI migration.

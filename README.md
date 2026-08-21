@@ -1,10 +1,21 @@
 # DAKOSYS — Docker App Kometa Overlay System
 
-DAKOSYS is a Docker-based companion for **Plex**, **AnimeFillerList**, and **Kometa**, with optional **Trakt** integration for automatic anime scheduling and legacy episode-list publishing.
+DAKOSYS is a Docker-based companion for **Plex** and **Kometa** that automates artwork, AnimeFillerList episode classification, TV / Anime status, Next Airing, scheduling, overlays, and related media-management workflows.
 
-The current architecture keeps core Anime Episode Type, TV / Anime Status, and Next Airing generation independent of Trakt.
+**Trakt is optional.** Core Artwork Manager, Anime Episode Type, TV / Anime Status, and Next Airing workflows do not require Trakt.
 
 ```text
+Artwork Manager
+Plex show + movie libraries
+        ↓
+MediUX curated artwork
+        ↓
+cohesive selection + safety policy
+        ↓
+TMDB identity enrichment / gap fallback
+        ↓
+per-library Kometa metadata item stores
+
 Anime Episode Type
 Plex + AnimeFillerList
         ↓
@@ -38,9 +49,7 @@ Explicit opt-in compatibility mode
 >
 > This repository is a maintained fork of [sahara101/Dakosys](https://github.com/sahara101/Dakosys). The upstream project provides the original DAKOSYS architecture, dashboard, Anime Episode Type Tracker, TV/Anime Status Tracker, Size Overlay, scheduler, notifications, and management tools.
 >
-> This fork extends that foundation with Plex-aware episode mapping, conservative AnimeFillerList validation, automatic active/future scheduling, local Anime Episode Type generation, hybrid TV metadata providers, provider-derived Next Airing data, Trakt capability-aware behavior, safer batch processing, and additional management and diagnostic tools.
-
-![DAKOSYS dashboard](https://github.com/user-attachments/assets/03af3c98-39f2-4121-99e2-74390d90f87b)
+> This fork extends that foundation with Plex-aware episode mapping, conservative AnimeFillerList validation, automatic active/future scheduling, local Anime Episode Type generation, hybrid TV metadata providers, provider-derived Next Airing data, autonomous Plex artwork management, safer batch processing, and additional management and diagnostic tools.
 
 ---
 
@@ -48,6 +57,7 @@ Explicit opt-in compatibility mode
 
 | Feature | Trakt required | Personal Trakt lists | Main output |
 |---|---:|---:|---|
+| Artwork Manager | **No** | No | Per-library Kometa artwork metadata |
 | Anime Episode Type Tracker | **No** | No | Local Kometa episode collections/overlays |
 | Automatic Active/Future Schedule | Yes | No | Generated `scheduled-anime.yaml` |
 | TV / Anime Status Tracker | **No** | No | Status overlays + local Next Airing |
@@ -62,6 +72,196 @@ Trakt account limits are discovered from the authenticated Trakt API response at
 
 # Features
 
+## Artwork Manager
+
+> **Trakt is not required for Artwork Manager.**
+
+Artwork Manager discovers supported Plex **show and movie libraries** from the configured Plex library definitions and maintains Kometa metadata for their artwork. Plex library names are not hard-coded; installation-specific names such as `Movies`, `Films`, `TV`, `Series`, `Anime`, or `Cartoons` are handled according to their configured media type.
+
+The normal provider path is:
+
+```text
+Plex inventory
+      ↓
+MediUX
+      ↓
+cohesive curated artwork selection
+      ↓
+TMDB fallback for eligible gaps
+      ↓
+safety / apply policy
+      ↓
+per-library Kometa metadata store
+```
+
+### Provider behavior
+
+**MediUX is the required primary Artwork Manager provider.**
+
+For shows, DAKOSYS prefers cohesive MediUX artwork sets and can refresh or migrate a managed selection when a better, more complete, or more current set becomes available. This is especially useful for actively airing series where one MediUX set can later fall behind another.
+
+For movies, MediUX provides curated poster and background artwork when available.
+
+TMDB is a fallback rather than a competitor to already usable MediUX artwork:
+
+- show workflows can use TMDB identity enrichment and eligible episode-card fallback;
+- movie workflows use TMDB to fill missing poster/background slots;
+- existing usable MediUX artwork is preserved when TMDB fills a different missing slot.
+
+The top-level `tmdb_api_key` or the `TMDB_TOKEN` environment override enables TMDB coverage.
+
+Artwork Manager remains usable without TMDB, but coverage then depends entirely on MediUX.
+
+### Safe automatic application
+
+Artwork Manager separates **safety** from **apply mode**.
+
+With:
+
+```yaml
+services:
+  artwork_manager:
+    apply_mode: auto
+```
+
+safe plans with changes are applied automatically.
+
+With:
+
+```yaml
+services:
+  artwork_manager:
+    apply_mode: manual
+```
+
+safe plans are retained for review instead of being written automatically.
+
+Operational outcomes are:
+
+```text
+APPLIED
+NO_CHANGES
+PENDING_REVIEW
+BLOCKED
+FAILED
+```
+
+`BLOCKED` means the safety layer refused to perform a write. A blocked workflow does not modify the managed item store.
+
+Examples of conditions that can block a write include inconsistent durable state, ownership conflicts, managed-state loss, unsafe identity changes, or provider failures that make the proposed state unreliable.
+
+An individual title being unavailable from a provider is not automatically a library-wide failure. Unsupported or unavailable titles can remain unmanaged while the rest of the library continues safely.
+
+### Durable state and item stores
+
+Artwork Manager writes under:
+
+```yaml
+services:
+  artwork_manager:
+    output_dir: /kometa/metadata
+```
+
+Each Plex library receives an independent item-store directory, for example:
+
+```text
+/kometa/metadata/artwork-movies/
+/kometa/metadata/artwork-tv/
+/kometa/metadata/artwork-anime/
+/kometa/metadata/artwork-cartoons/
+```
+
+Directory names are derived from the Plex library name.
+
+Each managed movie or show is rendered to its own YAML file. DAKOSYS also maintains ownership and durable-state information used to detect unsafe changes and preserve provider selections between runs.
+
+Treat these directories as **generated state**. Do not manually edit their ownership/state files.
+
+### Kometa integration
+
+The generated directories are Kometa **Metadata Files**.
+
+If DAKOSYS sees the Kometa host directory as `/kometa` and Kometa sees the same host directory as `/config`, a generated DAKOSYS path such as:
+
+```text
+/kometa/metadata/artwork-movies
+```
+
+can be referenced by Kometa as:
+
+```yaml
+libraries:
+  Movies:
+    metadata_files:
+      - folder: config/metadata/artwork-movies
+```
+
+Add the corresponding Artwork Manager folder to every Kometa library that should consume managed artwork.
+
+### Scheduler
+
+Artwork Manager can run autonomously through the normal DAKOSYS scheduler:
+
+```yaml
+scheduler:
+  artwork_manager:
+    type: daily
+    times:
+      - "04:00"
+```
+
+The scheduler uses the same safety and apply policy as an explicit CLI run.
+
+### Artwork Manager CLI
+
+Show configuration and discovered Plex libraries:
+
+```bash
+docker compose run --rm dakosys artwork status
+```
+
+Build a read-only preview of all supported libraries:
+
+```bash
+docker compose run --rm dakosys artwork scan
+```
+
+Preview one exact Plex library:
+
+```bash
+docker compose run --rm dakosys artwork scan --library Movies
+```
+
+JSON output is available for automation:
+
+```bash
+docker compose run --rm dakosys artwork scan --library Movies --json
+```
+
+Execute using the configured `apply_mode`:
+
+```bash
+docker compose run --rm dakosys artwork run
+```
+
+Run one exact Plex library:
+
+```bash
+docker compose run --rm dakosys artwork run --library Movies
+```
+
+> `artwork run` can write when `apply_mode: auto`. Use `artwork scan` when a read-only operation is required.
+
+Show recent persisted run history:
+
+```bash
+docker compose run --rm dakosys artwork history
+```
+
+Long-running `scan` and `run` operations report progress to stderr so JSON output can remain machine-readable on stdout.
+
+---
+
 ## Anime Episode Type Tracker
 
 > **Trakt is not required for core Anime Episode Type generation.**
@@ -73,7 +273,7 @@ DAKOSYS reads episode classifications from [AnimeFillerList](https://www.animefi
 - Anime Canon
 - Mixed Canon/Filler
 
-The core 2.0 path is:
+The core path is:
 
 ```text
 Plex library
@@ -88,8 +288,6 @@ Kometa episode collections and overlays
 ```
 
 No Trakt OAuth session, personal Trakt list, or Trakt account is required for this workflow.
-
-![Anime episode type example](https://github.com/user-attachments/assets/5d90e452-173c-4665-b020-add2625ed261)
 
 ### Plex-aware episode mapping
 
@@ -154,9 +352,7 @@ The schedule is written to:
 config/scheduled-anime.yaml
 ```
 
-In DAKOSYS 2.0 this generated file is the authoritative automatic schedule source.
-
-The old manually maintained `scheduler.scheduled_anime` configuration has been retired.
+This generated file is the authoritative automatic schedule source. The old manually maintained `scheduler.scheduled_anime` configuration has been retired.
 
 Example:
 
@@ -195,21 +391,11 @@ A Trakt scheduling failure therefore cannot prevent the local Anime Episode Type
 
 `scheduled-anime.yaml` is runtime state and should not be edited manually or committed to Git.
 
-It records:
-
-- scheduled anime;
-- Plex and Trakt titles;
-- Trakt status and scheduling decisions;
-- unresolved entries under `review:`;
-- explicitly acknowledged AFL exceptions under `ignored:`;
-- discovery statistics;
-- Trakt request and retry statistics.
+It records scheduled anime, Plex/Trakt titles, Trakt status and scheduling decisions, unresolved review entries, ignored AFL entries, and discovery/request statistics.
 
 If discovery fails fatally, DAKOSYS preserves the previous generated schedule instead of replacing it with an empty result.
 
 ### Manual refresh
-
-With Docker Compose:
 
 ```bash
 docker compose run --rm dakosys refresh-schedule --force --no-notify
@@ -220,20 +406,6 @@ To allow a Discord notification when membership changes:
 ```bash
 docker compose run --rm dakosys refresh-schedule --force --notify
 ```
-
-Inside an already-running container:
-
-```bash
-python3 anime_trakt_manager.py refresh-schedule --force --no-notify
-```
-
-Inspect the result:
-
-```bash
-cat config/scheduled-anime.yaml
-```
-
-`always_include` and `always_exclude` are explicit scheduling overrides. They do not bypass Plex ownership or AnimeFillerList identity validation.
 
 ---
 
@@ -280,8 +452,6 @@ At least one primary TV metadata provider must be usable:
 
 TVmaze does not require credentials, but it is used as a fallback rather than as the only primary provider.
 
-![TV status example](https://github.com/user-attachments/assets/ce2e31fe-aeee-467f-b498-6ea36ac0139b)
-
 ---
 
 ## Size Overlay
@@ -289,8 +459,6 @@ TVmaze does not require credentials, but it is used as a fallback rather than as
 > **Trakt is not required** for this feature.
 
 Creates Kometa overlays showing media file sizes for movies and TV shows. Size history can be tracked over time and episode counts can optionally be displayed.
-
-![Size overlay example](https://github.com/user-attachments/assets/829cd5b1-2d67-456b-b41a-4a930b7a2b9a)
 
 ---
 
@@ -305,6 +473,7 @@ http://your-host:3000
 The dashboard provides:
 
 - service status and next scheduled runs;
+- Artwork Manager current state, automation status, run history, and progress;
 - local Anime Episode Type management;
 - automatic active/future schedule visibility and overrides;
 - media statistics;
@@ -321,21 +490,13 @@ The main dashboard does not perform a live Trakt request simply to render normal
 
 The Next Airing dashboard reads local provider-derived data and does not require Trakt.
 
-The Trakt page is capability-focused rather than a bulk personal-list manager and reports only features that actually depend on Trakt.
-
 ---
 
 ## Discord Notifications
 
 DAKOSYS supports Discord webhook notifications.
 
-Automatic anime scheduling can send a notification when generated schedule membership changes:
-
-- shows added;
-- shows removed;
-- new scheduled total.
-
-No schedule-change notification is sent when membership is unchanged.
+Automatic anime scheduling can send a notification when generated schedule membership changes. No schedule-change notification is sent when membership is unchanged.
 
 ---
 
@@ -343,7 +504,23 @@ No schedule-change notification is sent when membership is unchanged.
 
 Core requirements depend on which features you enable.
 
+### Artwork Manager
+
+Requires:
+
+- Plex Media Server
+- Docker with Docker Compose
+- Kometa
+- write access to the Kometa configuration directory
+- MediUX API token
+
+TMDB is optional but strongly recommended for fallback coverage and identity enrichment.
+
+Trakt is **not** required.
+
 ### Core Anime Episode Type
+
+Requires:
 
 - Plex Media Server
 - Docker with Docker Compose
@@ -385,6 +562,7 @@ Legacy publishing is disabled by default.
 ### Other
 
 - TMDB configuration is used by TV Status when the TMDB provider is enabled.
+- Artwork Manager can use the same top-level `tmdb_api_key` for identity enrichment and artwork fallback.
 - The top-level `tmdb_api_key` can also enrich dashboard poster artwork.
 - Missing TMDB poster credentials do not prevent local Next Airing data from displaying.
 
@@ -429,10 +607,6 @@ The interactive setup wizard is the recommended way to complete service configur
 docker compose run --rm dakosys setup
 ```
 
-When TV Status is enabled, setup can configure Sonarr, TMDB, and TVmaze metadata providers.
-
-Trakt authentication is requested only when Automatic Active/Future Schedule or legacy episode-list publishing is enabled.
-
 Start the updater/web service:
 
 ```bash
@@ -455,18 +629,18 @@ This fork publishes images to GitHub Container Registry:
 ghcr.io/dustinsmithworkshop/dakosys
 ```
 
-Semantic 2.x tags include:
+Semantic 3.x tags include:
 
 ```text
-ghcr.io/dustinsmithworkshop/dakosys:2.0.0   # exact 2.0.0 release
-ghcr.io/dustinsmithworkshop/dakosys:2.0     # latest 2.0.x
-ghcr.io/dustinsmithworkshop/dakosys:2       # latest compatible 2.x
+ghcr.io/dustinsmithworkshop/dakosys:3.0.0   # exact 3.0.0 release
+ghcr.io/dustinsmithworkshop/dakosys:3.0     # latest 3.0.x
+ghcr.io/dustinsmithworkshop/dakosys:3       # latest compatible 3.x
 ghcr.io/dustinsmithworkshop/dakosys:latest  # default latest release/build
 ```
 
 For the most reproducible installation, pin the exact version.
 
-Use `:2` only if you want compatible 2.x updates without manually changing the image tag for each release.
+Use `:3` only if you want compatible 3.x updates without manually changing the image tag for each release.
 
 ---
 
@@ -495,28 +669,135 @@ With that layout, common DAKOSYS paths are:
 ```text
 Assets:      /kometa/assets
 Collections: /kometa/collections
+Metadata:    /kometa/metadata
 Overlays:    /kometa/overlays
 ```
 
 Kometa may see the exact same host directory as `/config` inside the Kometa container. That is normal.
 
-For example, DAKOSYS may write:
+---
+
+# Upgrading from 2.x
+
+DAKOSYS 3.0 adds Artwork Manager as a major new automation subsystem while retaining the 2.x Anime Episode Type and TV metadata architecture.
+
+Before upgrading, back up:
 
 ```text
-/kometa/collections/anime_episode_type.yml
+config/config.yaml
+config/mappings.yaml
+data/
+your Kometa configuration directory
 ```
 
-while Kometa references the same file as:
+## 1. Configure Artwork Manager deliberately
+
+The starter configuration keeps Artwork Manager disabled until explicitly configured:
+
+```yaml
+services:
+  artwork_manager:
+    enabled: false
+```
+
+To enable it:
+
+```yaml
+services:
+  artwork_manager:
+    enabled: true
+    apply_mode: auto
+    output_dir: /kometa/metadata
+
+    providers:
+      mediux:
+        api_token: REPLACE_WITH_MEDIUX_API_TOKEN
+```
+
+`MEDIUX_API_TOKEN` may be supplied through the container environment instead of YAML and takes precedence over the configured token.
+
+## 2. Reuse the existing TMDB credential
+
+Artwork Manager reuses the top-level TMDB configuration:
+
+```yaml
+tmdb_api_key: REPLACE_WITH_TMDB_API_KEY
+```
+
+or the advanced environment override:
 
 ```text
-config/collections/anime_episode_type.yml
+TMDB_TOKEN
 ```
+
+No separate Artwork Manager TMDB credential is required.
+
+## 3. Preview before the first write
+
+Check discovered libraries:
+
+```bash
+docker compose run --rm dakosys artwork status
+```
+
+Build a read-only preview:
+
+```bash
+docker compose run --rm dakosys artwork scan
+```
+
+A specific Plex library can be selected exactly:
+
+```bash
+docker compose run --rm dakosys artwork scan --library Movies
+```
+
+`scan` never applies the proposed Artwork Manager changes.
+
+## 4. Choose automatic or manual application
+
+The normal 3.0 mode is:
+
+```yaml
+apply_mode: auto
+```
+
+Safe changes are written automatically. Unsafe changes remain blocked.
+
+For explicit review-first operation:
+
+```yaml
+apply_mode: manual
+```
+
+Safe changes become `PENDING_REVIEW` instead of being written automatically.
+
+## 5. Add generated metadata folders to Kometa
+
+Artwork Manager creates one generated metadata directory per configured Plex library.
+
+For example, if DAKOSYS writes:
+
+```text
+/kometa/metadata/artwork-movies
+```
+
+and Kometa sees that same host directory as `/config`, configure:
+
+```yaml
+libraries:
+  Movies:
+    metadata_files:
+      - folder: config/metadata/artwork-movies
+```
+
+Use the folder corresponding to each Plex library.
 
 ---
 
 # Upgrading from 1.x
 
-DAKOSYS 2.x intentionally changes the Anime Episode Type, scheduling, TV Status, and Next Airing architecture.
+DAKOSYS 2.x and later intentionally changed the Anime Episode Type, scheduling, TV Status, and Next Airing architecture.
 
 Before upgrading, back up:
 
@@ -530,7 +811,7 @@ data/
 
 In 1.x, Anime Episode Type classifications were commonly published to many personal Trakt lists and Kometa consumed that workflow.
 
-In 2.x, the normal path is local:
+The normal path is now local:
 
 ```text
 Plex + AnimeFillerList
@@ -554,20 +835,7 @@ scheduler:
 
 is no longer used.
 
-If automatic active/future scheduling is desired, configure:
-
-```yaml
-scheduler:
-  auto_schedule:
-    enabled: true
-    file: config/scheduled-anime.yaml
-    refresh_hours: 24
-    notify_on_change: true
-    always_include: []
-    always_exclude: []
-```
-
-`config/scheduled-anime.yaml` is generated runtime state and should not be committed.
+Use `scheduler.auto_schedule` instead.
 
 ## 3. Legacy episode-list publishing is opt-in
 
@@ -581,27 +849,21 @@ trakt:
 
 Leave it disabled for normal local Anime Episode Type operation.
 
-Enable it only if you intentionally want DAKOSYS to continue creating/updating personal Trakt filler/canon lists.
-
 ## 4. Trakt configuration is feature-dependent
 
-You may omit Trakt credentials when using:
+Trakt may be omitted when using:
 
+- Artwork Manager;
 - core Anime Episode Type;
 - TV / Anime Status Tracker;
 - Next Airing;
 - Size Overlay.
 
-Trakt is required only for:
-
-- Automatic Active/Future Schedule;
-- legacy episode-list publishing.
+Trakt is required only for Automatic Active/Future Schedule and optional legacy episode-list publishing.
 
 ## 5. TV Status uses local metadata providers
 
-TV Status no longer requires Trakt metadata.
-
-A typical provider configuration is:
+TV Status no longer requires Trakt metadata. A typical provider configuration is:
 
 ```yaml
 tmdb_api_key: REPLACE_WITH_TMDB_API_KEY
@@ -631,8 +893,6 @@ SONARR_API_KEY
 TMDB_TOKEN
 ```
 
-Environment values take precedence over their YAML credential equivalents.
-
 ## 6. Next Airing is local
 
 TV Status resolves upcoming episodes through Sonarr, TMDB, and TVmaze and generates Next Airing locally.
@@ -645,71 +905,56 @@ data/next_airing.json
 <collections_dir>/*-next-airing.yml
 ```
 
-Kometa consumes the ordered local text files, while the DAKOSYS dashboard consumes `data/next_airing.json`.
-
 A personal Trakt `Next Airing` list is no longer part of the normal TV Status workflow.
-
-## 7. Remove old episode-type lists if desired
-
-Preview legacy DAKOSYS episode lists:
-
-```bash
-docker compose run --rm dakosys prune-legacy-lists
-```
-
-Apply the cleanup:
-
-```bash
-docker compose run --rm dakosys prune-legacy-lists --apply
-```
-
-The cleanup classifier protects `Next Airing` and unrelated personal lists. This protection is useful for installations that still have an old Next Airing list from a previous DAKOSYS version.
-
-Always review the dry run before using `--apply`.
-
-## 8. Re-run setup when changing enabled features
-
-The setup wizard is feature-aware.
-
-Anime Episode Type, TV Status, Next Airing, and Size Overlay do not require Trakt credentials.
-
-Enabling Automatic Active/Future Schedule or legacy episode-list publishing does.
-
-When TV Status is enabled, setup can configure Sonarr, TMDB, and TVmaze metadata providers instead.
 
 ---
 
 # Kometa Integration
 
-Add the files generated by DAKOSYS to the appropriate Kometa libraries.
-
-A typical configuration looks like:
+Artwork Manager item stores belong under `metadata_files`. For example:
 
 ```yaml
-TV:
-  collection_files:
-    - file: config/collections/tv-next-airing.yml
-  overlay_files:
-    - file: config/overlays/size-overlays-tv.yml
-    - file: config/overlays/overlay_tv_status_tv.yml
+libraries:
+  Movies:
+    metadata_files:
+      - folder: config/metadata/artwork-movies
 
-Anime:
-  collection_files:
-    - file: config/collections/anime-next-airing.yml
-    - file: config/collections/anime_episode_type.yml
-
-  overlay_files:
-    - file: config/overlays/size-overlays-anime.yml
-    - file: config/overlays/fillers.yml
-    - file: config/overlays/manga_canon.yml
-    - file: config/overlays/anime_canon.yml
-    - file: config/overlays/mixed.yml
-    - file: config/overlays/overlay_tv_status_anime.yml
+  TV:
+    metadata_files:
+      - folder: config/metadata/artwork-tv
 ```
 
-Library names and generated filenames can vary with configuration. Use the files produced by your installation.
+Other DAKOSYS collection and overlay outputs remain configured through `collection_files` and `overlay_files`.
 
-Next Airing collection YAML uses Kometa `text_file` membership with `collection_order: custom`, so provider-derived air-date order is preserved.
+A typical configuration may look like:
+
+```yaml
+libraries:
+  TV:
+    metadata_files:
+      - folder: config/metadata/artwork-tv
+    collection_files:
+      - file: config/collections/tv-next-airing.yml
+    overlay_files:
+      - file: config/overlays/size-overlays-tv.yml
+      - file: config/overlays/overlay_tv_status_tv.yml
+
+  Anime:
+    metadata_files:
+      - folder: config/metadata/artwork-anime
+    collection_files:
+      - file: config/collections/anime-next-airing.yml
+      - file: config/collections/anime_episode_type.yml
+    overlay_files:
+      - file: config/overlays/size-overlays-anime.yml
+      - file: config/overlays/fillers.yml
+      - file: config/overlays/manga_canon.yml
+      - file: config/overlays/anime_canon.yml
+      - file: config/overlays/mixed.yml
+      - file: config/overlays/overlay_tv_status_anime.yml
+```
+
+Library names and generated filenames vary with configuration. Use the files produced by your installation.
 
 ---
 
@@ -720,7 +965,8 @@ Next Airing collection YAML uses Kometa `text_file` membership with `collection_
 Contains service and deployment configuration such as:
 
 - Plex URL and token
-- Plex library names
+- configured Plex library names/media types
+- Artwork Manager provider, apply-mode, filtering, and output configuration
 - optional Trakt configuration for Trakt-backed features
 - Sonarr/TMDB/TVmaze TV metadata provider configuration
 - top-level TMDB API key
@@ -734,6 +980,61 @@ Starter:
 ```text
 config.example.yaml
 ```
+
+### Artwork Manager example
+
+```yaml
+tmdb_api_key: REPLACE_WITH_TMDB_API_KEY
+
+services:
+  artwork_manager:
+    enabled: true
+
+    # auto = apply safe plans automatically
+    # manual = retain safe plans for review
+    apply_mode: auto
+
+    output_dir: /kometa/metadata
+
+    providers:
+      mediux:
+        api_token: REPLACE_WITH_MEDIUX_API_TOKEN
+
+scheduler:
+  artwork_manager:
+    type: daily
+    times:
+      - "04:00"
+```
+
+MediUX is the required primary Artwork Manager provider.
+
+Credential precedence is:
+
+```text
+MediUX: MEDIUX_API_TOKEN -> services.artwork_manager.providers.mediux.api_token
+TMDB:   TMDB_TOKEN       -> top-level tmdb_api_key
+```
+
+Optional library filtering is based on configured Plex library names:
+
+```yaml
+services:
+  artwork_manager:
+    libraries:
+      include:
+        - Movies
+        - TV
+
+      exclude:
+        - Home Videos
+
+      overrides:
+        Movies:
+          output: /kometa/metadata/custom-movie-artwork
+```
+
+Library names are installation-specific; DAKOSYS does not require `Movies`, `TV`, `Anime`, or `Cartoons` as literal names.
 
 ### TV metadata provider example
 
@@ -751,11 +1052,9 @@ services:
         url: http://192.168.1.100:8989
         api_key: REPLACE_WITH_SONARR_API_KEY
 
-      # Uses the top-level tmdb_api_key.
       tmdb:
         enabled: true
 
-      # Public credential-free fallback.
       tvmaze:
         enabled: true
 ```
@@ -775,8 +1074,6 @@ SONARR_API_KEY
 TMDB_TOKEN
 ```
 
-Explicit `enabled: false` still disables a provider even when its credentials are present.
-
 ## `config/mappings.yaml`
 
 Contains installation-specific anime identity and mapping exceptions.
@@ -787,7 +1084,7 @@ Starter:
 mappings.example.yaml
 ```
 
-Do not blindly copy another user's `mappings.yaml`. Plex titles, TVDb IDs, metadata agents, ordering, and library contents can differ.
+Do not blindly copy another installation's `mappings.yaml`. Plex titles, TVDb IDs, metadata agents, ordering, and library contents can differ.
 
 ## Local / Generated Files
 
@@ -798,13 +1095,22 @@ config/config.yaml
 config/mappings.yaml
 config/scheduled-anime.yaml
 data/next_airing.json
+data/artwork-manager/
 ```
+
+Artwork Manager also writes generated per-library item stores under its configured `output_dir`, commonly:
+
+```text
+/kometa/metadata/artwork-*/
+```
+
+Those item stores contain generated Kometa YAML plus DAKOSYS ownership/durable-state information and should not be edited manually.
 
 ---
 
 # Anime Mapping and AFL Controls
 
-DAKOSYS provides several different mapping mechanisms. They solve different problems and should not be treated as interchangeable.
+DAKOSYS provides several mapping mechanisms. They solve different problems and should not be treated as interchangeable.
 
 | Key | Purpose |
 |---|---|
@@ -830,11 +1136,7 @@ The key is the DAKOSYS/AnimeFillerList slug. The value should be the **exact Ple
 
 Do not map a slug to a different reboot, remake, sequel, or adaptation simply to make validation pass.
 
----
-
 ## AnimeFillerList slug overrides
-
-Sometimes the correct AFL page exists under a different URL slug:
 
 ```yaml
 afl_mappings:
@@ -845,11 +1147,7 @@ afl_mappings:
 
 This changes only the AnimeFillerList source URL. The original DAKOSYS/Plex key continues to be used elsewhere.
 
----
-
 ## AnimeFillerList identity aliases
-
-Sometimes the correct AFL page has a substantially different display title:
 
 ```yaml
 afl_identity_aliases:
@@ -857,15 +1155,9 @@ afl_identity_aliases:
     - "Hajime no Ippo: The Fighting!"
 ```
 
-Identity aliases add another explicitly trusted identity to the existing validator.
-
-They do **not** lower or bypass the AFL identity threshold.
-
----
+Identity aliases add another explicitly trusted identity to the existing validator. They do **not** lower or bypass the AFL identity threshold.
 
 ## Ignoring known AFL failures
-
-If an AFL catalog entry is known to be permanently unsupported or consistently resolves to unusable data, it can be explicitly ignored:
 
 ```yaml
 afl_ignored:
@@ -874,17 +1166,7 @@ afl_ignored:
   - mobile-suit-zeta-gundam
 ```
 
-Ignored entries:
-
-- are not fetched from AnimeFillerList during automatic schedule discovery;
-- do not repeatedly flood the identity-error log;
-- do not consume Trakt schedule lookups;
-- are not automatically scheduled;
-- appear under `ignored:` instead of `review:` in `scheduled-anime.yaml`.
-
 Use `afl_ignored` for acknowledged source limitations, not as a way to suppress a mapping problem that can actually be fixed.
-
----
 
 ## TVDb overrides
 
@@ -897,20 +1179,6 @@ tvdb_mappings:
 ```
 
 TVDb overrides are authoritative. If the requested TVDb series cannot be found in the configured Plex anime libraries, DAKOSYS will not silently fall back to an unrelated title.
-
----
-
-## Episode-title overrides
-
-`title_mappings.special_matches` is retained as a compatibility schema name, but the mapped values are used by the local Anime Episode Type loader as well as the optional legacy Trakt matching path.
-
-Conceptually, treat these entries as:
-
-```text
-source episode title → mapped episode title
-```
-
-rather than as a Trakt-only mapping.
 
 ---
 
@@ -933,6 +1201,11 @@ Example:
 
 ```yaml
 scheduler:
+  artwork_manager:
+    type: daily
+    times:
+      - "04:00"
+
   anime_episode_type:
     type: daily
     times:
@@ -958,30 +1231,6 @@ scheduler:
 ```
 
 Automatic Schedule refresh is independent of core Anime Episode Type generation.
-
----
-
-# TV Status Custom Labels
-
-Status text can be customized in `config.yaml`.
-
-```yaml
-services:
-  tv_status_tracker:
-    labels:
-      ended: "ENDED"
-      cancelled: "CANCELED"
-      returning: "RETURNING"
-      airing: "AIRING"
-      season_finale: "SEASON FINALE"
-      mid_season_finale: "MID-SEASON FINALE"
-      final_episode: "FINAL EPISODE"
-      season_premiere: "SEASON PREMIERE"
-```
-
-All label keys are optional.
-
-Air-date-capable labels retain the TV Status Tracker's normal date behavior.
 
 ---
 
@@ -1020,7 +1269,16 @@ List available commands from the exact image/version you are running:
 docker compose run --rm dakosys --help
 ```
 
-You can also append `--help` to individual commands.
+## Artwork Manager
+
+```bash
+docker compose run --rm dakosys artwork status
+docker compose run --rm dakosys artwork scan
+docker compose run --rm dakosys artwork scan --library Movies
+docker compose run --rm dakosys artwork run
+docker compose run --rm dakosys artwork run --library Movies
+docker compose run --rm dakosys artwork history
+```
 
 ## Core Anime Episode Type
 
@@ -1055,10 +1313,6 @@ Refresh automatic scheduling:
 ```bash
 docker compose run --rm dakosys refresh-schedule --force --no-notify
 ```
-
-The generated `config/scheduled-anime.yaml` file is the only automatic schedule source in 2.0.
-
-There is no manually maintained `scheduler.scheduled_anime` workflow.
 
 ## Service Updates
 
@@ -1096,332 +1350,33 @@ JSON output:
 docker compose run --rm dakosys trakt-capabilities --json
 ```
 
-Inspect list-capacity information:
-
-```bash
-docker compose run --rm dakosys trakt-list-capacity --json
-```
-
-Inspect current personal-list usage:
-
-```bash
-docker compose run --rm dakosys trakt-list-usage --json
-```
-
-General Trakt diagnostics:
-
-```bash
-docker compose run --rm dakosys test-trakt
-```
-
-## Legacy Episode-List Publishing
-
-These commands belong to the optional compatibility publisher and require:
-
-```yaml
-trakt:
-  episode_list_publishing:
-    enabled: true
-```
-
-Create one personal Trakt episode-type list:
-
-```bash
-docker compose run --rm dakosys create "naruto-shippuden" FILLER
-```
-
-Create all available episode-type lists for one anime:
-
-```bash
-docker compose run --rm dakosys create-all "one-piece"
-```
-
-Interactively repair mapping errors from the legacy Trakt publishing workflow:
-
-```bash
-docker compose run --rm dakosys fix-mappings
-```
-
-List personal Trakt lists:
-
-```bash
-docker compose run --rm dakosys list-lists
-```
-
-Delete legacy lists with the dedicated cleanup workflow:
-
-```bash
-docker compose run --rm dakosys prune-legacy-lists
-docker compose run --rm dakosys prune-legacy-lists --apply
-```
-
-DAKOSYS checks Trakt's runtime-reported list and per-list limits before creating or growing legacy personal lists.
-
 ---
 
-# Logs
+# Release Notes — 3.0
 
-Service logs are written under `data/`.
+DAKOSYS 3.0 introduces Artwork Manager as a first-class production subsystem.
 
-Common logs include:
+Highlights include:
+
+- dynamic configured Plex show/movie library support;
+- MediUX curated artwork discovery;
+- cohesive show artwork-set selection and migration;
+- TMDB identity enrichment and artwork gap fallback;
+- movie poster/background support;
+- per-item Kometa metadata stores;
+- durable ownership and provider state;
+- transactional apply with rollback-aware behavior;
+- independent safety and apply-mode policy;
+- AUTO and MANUAL operation;
+- persistent run history;
+- CLI status/scan/run/history commands;
+- live progress reporting for long scans/runs;
+- scheduler integration;
+- Artwork Manager dashboard/current-state/history/progress UI;
+- continued Trakt-independent operation for core local workflows.
+
+For release builds, the recommended exact image pin is:
 
 ```text
-data/anime_trakt_manager.log
-data/tv_status_tracker.log
-data/size_overlay.log
-data/notifications.log
-data/auto_update.log
-data/scheduler.log
-data/failed_episodes.log
+ghcr.io/dustinsmithworkshop/dakosys:3.0.0
 ```
-
-Follow the updater/web container:
-
-```bash
-docker compose logs -f dakosys-updater
-```
-
----
-
-# Troubleshooting
-
-## Trakt authentication
-
-Trakt authentication is only required when at least one Trakt-backed feature is enabled:
-
-- Automatic Active/Future Schedule;
-- legacy episode-list publishing.
-
-Run:
-
-```bash
-docker compose run --rm dakosys test-trakt
-```
-
-For account/list capability information:
-
-```bash
-docker compose run --rm dakosys trakt-capabilities --json
-docker compose run --rm dakosys trakt-list-usage --json
-```
-
-If no valid token is available, run setup again or reconnect through the web UI.
-
-Missing Trakt credentials should not prevent Anime Episode Type, TV Status, Next Airing, Size Overlay, or other non-Trakt services from running.
-
----
-
-## TV metadata providers
-
-If TV Status reports that no metadata resolver is configured, verify that at least one primary provider is usable.
-
-For Sonarr:
-
-```yaml
-services:
-  tv_status_tracker:
-    metadata:
-      sonarr:
-        enabled: true
-        url: http://sonarr:8989
-        api_key: YOUR_SONARR_API_KEY
-```
-
-Or configure:
-
-```text
-SONARR_URL
-SONARR_API_KEY
-```
-
-For TMDB:
-
-```yaml
-tmdb_api_key: YOUR_TMDB_API_KEY
-
-services:
-  tv_status_tracker:
-    metadata:
-      tmdb:
-        enabled: true
-```
-
-Or use the advanced bearer override:
-
-```text
-TMDB_TOKEN
-```
-
-TVmaze is a credential-free fallback and does not replace the requirement for at least one usable Sonarr or TMDB primary provider.
-
----
-
-## Next Airing
-
-Next Airing is generated when the TV Status Tracker runs.
-
-DAKOSYS writes:
-
-```text
-data/next_airing.json
-<collections_dir>/*-next-airing.txt
-<collections_dir>/*-next-airing.yml
-```
-
-If the web page reports that Next Airing data is missing, run the TV Status Tracker and verify that `data/next_airing.json` is created.
-
-Poster artwork is optional enrichment. Missing TMDB artwork credentials do not prevent the underlying Next Airing entries from displaying.
-
----
-
-## Scheduler configuration
-
-```bash
-docker compose run --rm dakosys test-scheduler
-```
-
----
-
-## AnimeFillerList identity errors
-
-If DAKOSYS reports that an AFL page belongs to a different show, do **not** disable the safety check globally.
-
-Determine which case applies:
-
-- wrong AFL URL slug → use `afl_mappings`;
-- correct page with a different legitimate display title → use `afl_identity_aliases`;
-- ambiguous Plex title → use `mappings` or `tvdb_mappings`;
-- known unusable AFL source you intentionally accept → use `afl_ignored`.
-
----
-
-## Automatic schedule review
-
-Inspect:
-
-```bash
-cat config/scheduled-anime.yaml
-```
-
-Pay particular attention to:
-
-```yaml
-review:
-ignored:
-stats:
-```
-
-- `review:` contains unresolved candidates worth investigating.
-- `ignored:` contains explicitly acknowledged AFL exceptions.
-- `stats:` helps verify that the complete Plex/AFL candidate set was accounted for.
-
-A scheduling failure should not stop core local Anime Episode Type generation.
-
----
-
-## Missing or incorrectly mapped local episodes
-
-The Plex-aware mapper intentionally leaves unsafe matches unresolved rather than guessing.
-
-Check:
-
-- the Anime Episode Type / mapping logs;
-- `config/mappings.yaml`;
-- the web Mappings page;
-- `mappings`;
-- `tvdb_mappings`;
-- `afl_mappings`;
-- `afl_identity_aliases`;
-- `title_mappings`.
-
-`title_mappings.special_matches` is retained as a compatibility schema name but is used as a generic episode-title override by the local mapper as well as by legacy Trakt matching.
-
-The CLI `fix-mappings` command is specifically for the optional legacy Trakt episode-list publishing workflow.
-
----
-
-## Run setup for one service
-
-```bash
-docker compose run --rm dakosys setup anime_episode_type
-docker compose run --rm dakosys setup tv_status_tracker
-docker compose run --rm dakosys setup size_overlay
-```
-
----
-
-# Development Validation
-
-For source changes to the Anime Episode Type, scheduler, TV metadata, or web path:
-
-```bash
-python3 -m py_compile \
-  anime_trakt_manager.py \
-  asset_manager.py \
-  auto_update.py \
-  mappings_manager.py \
-  scheduled_anime_manager.py \
-  scheduler.py \
-  setup.py \
-  shared_utils.py \
-  tv_status_tracker.py \
-  web_server.py
-
-git diff --check
-```
-
-Run the Python tests:
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-Frontend validation:
-
-```bash
-cd web
-npm run build
-cd ..
-```
-
-## Release Validation
-
-A release should also be tested using the exact Docker image intended for publication.
-
-For changes that touch the TV metadata architecture, validate at minimum:
-
-- container startup under the supported Python runtime;
-- TV Status initialization without a `trakt:` section when no Trakt-backed feature is enabled;
-- Sonarr/TMDB/TVmaze provider configuration and resolver startup;
-- a full provider-backed TV Status run against real Plex libraries;
-- provider-derived status overlays;
-- local Next Airing `.txt` / `.yml` Kometa outputs;
-- `data/next_airing.json`;
-- Next Airing dashboard operation without Trakt;
-- actual Kometa ingestion of the generated Next Airing collection files;
-- preservation of expected provider conflict behavior and warnings;
-- Automatic Active/Future Schedule when that Trakt-backed path is changed;
-- legacy episode-list publishing and Trakt capacity checks when that path is changed;
-- CLI and web setup behavior;
-- Python test suite;
-- frontend production build.
-
-Do not infer Docker correctness solely from local Python/TypeScript tests.
-
----
-
-# Upstream Project and Credits
-
-DAKOSYS was originally created by **sahara101**.
-
-Upstream repository:
-
-[https://github.com/sahara101/Dakosys](https://github.com/sahara101/Dakosys)
-
-This fork preserves the upstream project's major service concepts while substantially reworking the anime/Plex mapping, scheduling, TV metadata, Next Airing, Trakt integration, and dashboard paths.
-
----
-
-# Releases
-
-See [`CHANGELOG.md`](CHANGELOG.md) for release history, upgrade notes, fixes, and release-specific validation.

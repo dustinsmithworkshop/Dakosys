@@ -1,6 +1,6 @@
 services:
   dakosys:
-    image: ghcr.io/dustinsmithworkshop/dakosys:1
+    image: ghcr.io/dustinsmithworkshop/dakosys:3
     container_name: dakosys-cli
     profiles:
       - cli
@@ -14,7 +14,7 @@ services:
     tty: true
 
   dakosys-updater:
-    image: ghcr.io/dustinsmithworkshop/dakosys:1
+    image: ghcr.io/dustinsmithworkshop/dakosys:3
     container_name: dakosys-web
     volumes:
       - ./config:/app/config
