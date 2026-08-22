@@ -1206,3 +1206,395 @@ def test_target_reports_provider_unavailable_separately_from_errors():
         result.provider_error_count
         == 0
     )
+
+
+def test_generator_only_coverage_can_create_unmanaged_state_without_writes(
+    tmp_path,
+):
+    from artwork.episode_coverage import (
+        EpisodeGeneratorOptions,
+    )
+    from artwork.inventory import (
+        EpisodeInventory,
+    )
+
+    identity = SimpleNamespace(
+        library="TV",
+        plex_rating_key="generator-only",
+        title="Generator Only Show",
+        year=2026,
+        tvdb_id=500,
+        tmdb_id=None,
+        imdb_id=None,
+    )
+
+    inventory = ShowInventory(
+        identity=identity,
+        seasons=(
+            SeasonInventory(
+                season_number=1,
+                episode_numbers=frozenset(
+                    {
+                        1,
+                    }
+                ),
+                episodes=(
+                    EpisodeInventory(
+                        episode_number=1,
+                        title="Pilot",
+                        plex_thumb=(
+                            "/library/metadata/"
+                            "500/thumb"
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    local_root = (
+        tmp_path
+        / "generated"
+    )
+
+    result = execute_show_target(
+        target=_target(),
+        inventories=(
+            inventory,
+        ),
+        managed_shows=(),
+        provider=FakeProvider(),
+        tmdb_client=None,
+        generator_options=(
+            EpisodeGeneratorOptions(
+                enabled=True,
+                font_key="marcellus",
+                local_root=local_root,
+                kometa_root=(
+                    "/config/assets/generated"
+                ),
+                plex_base_url=(
+                    "http://plex:32400"
+                ),
+                plex_token="token",
+            )
+        ),
+    )
+
+    assert result.coverage_enabled
+    assert result.generator_enabled
+
+    assert result.tmdb_request_count == 0
+    assert result.tmdb_created_count == 0
+    assert result.tmdb_changed_count == 0
+
+    assert (
+        result.generator_created_count
+        == 1
+    )
+
+    assert (
+        result.generator_changed_count
+        == 1
+    )
+
+    assert (
+        result.generator_plan_count
+        == 1
+    )
+
+    assert (
+        result.generator_cached_count
+        == 0
+    )
+
+    assert (
+        result.generator_materialization_needed_count
+        == 1
+    )
+
+    assert (
+        result.generator_failure_count
+        == 0
+    )
+
+    assert len(
+        result.generation_plans
+    ) == 1
+
+    assert (
+        result.resolved_count
+        == 1
+    )
+
+    card = (
+        result.resolved_states[0]
+        .seasons[1]
+        .episodes[1]
+        .card
+    )
+
+    assert (
+        card.source
+        is ArtworkSource.GENERATED
+    )
+
+    assert card.file_path.startswith(
+        "/config/assets/generated/"
+    )
+
+    # Target execution is part of read-only preview construction.
+    assert not local_root.exists()
+
+
+def test_disabled_generator_without_tmdb_preserves_old_coverage_behavior(
+    tmp_path,
+):
+    from artwork.episode_coverage import (
+        EpisodeGeneratorOptions,
+    )
+
+    inventory = _inventory(
+        rating_key="old-behavior",
+        tvdb_id=1,
+        title="Old Behavior",
+    )
+
+    state = _state(
+        tvdb_id=1,
+        episodes=2,
+    )
+
+    result = execute_show_target(
+        target=_target(),
+        inventories=(
+            inventory,
+        ),
+        managed_shows=(
+            state,
+        ),
+        provider=FakeProvider(),
+        tmdb_client=None,
+        generator_options=(
+            EpisodeGeneratorOptions(
+                enabled=False,
+                font_key="marcellus",
+                local_root=(
+                    tmp_path
+                    / "generated"
+                ),
+                kometa_root=(
+                    "/config/assets/generated"
+                ),
+            )
+        ),
+    )
+
+    assert not result.coverage_enabled
+    assert not result.generator_enabled
+
+    assert (
+        result.managed_coverage
+        == ()
+    )
+
+    assert (
+        result.discovery_coverage
+        == ()
+    )
+
+
+def test_generator_only_coverage_can_create_unmanaged_state_without_writes(
+    tmp_path,
+):
+    from artwork.episode_coverage import (
+        EpisodeGeneratorOptions,
+    )
+    from artwork.inventory import (
+        EpisodeInventory,
+    )
+
+    identity = SimpleNamespace(
+        library="TV",
+        plex_rating_key="generator-only",
+        title="Generator Only Show",
+        year=2026,
+        tvdb_id=500,
+        tmdb_id=None,
+        imdb_id=None,
+    )
+
+    inventory = ShowInventory(
+        identity=identity,
+        seasons=(
+            SeasonInventory(
+                season_number=1,
+                episode_numbers=frozenset(
+                    {
+                        1,
+                    }
+                ),
+                episodes=(
+                    EpisodeInventory(
+                        episode_number=1,
+                        title="Pilot",
+                        plex_thumb=(
+                            "/library/metadata/"
+                            "500/thumb"
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    local_root = (
+        tmp_path
+        / "generated"
+    )
+
+    result = execute_show_target(
+        target=_target(),
+        inventories=(
+            inventory,
+        ),
+        managed_shows=(),
+        provider=FakeProvider(),
+        tmdb_client=None,
+        generator_options=(
+            EpisodeGeneratorOptions(
+                enabled=True,
+                font_key="marcellus",
+                local_root=local_root,
+                kometa_root=(
+                    "/config/assets/generated"
+                ),
+                plex_base_url=(
+                    "http://plex:32400"
+                ),
+                plex_token="token",
+            )
+        ),
+    )
+
+    assert result.coverage_enabled
+    assert result.generator_enabled
+
+    assert result.tmdb_request_count == 0
+    assert result.tmdb_created_count == 0
+    assert result.tmdb_changed_count == 0
+
+    assert (
+        result.generator_created_count
+        == 1
+    )
+
+    assert (
+        result.generator_changed_count
+        == 1
+    )
+
+    assert (
+        result.generator_plan_count
+        == 1
+    )
+
+    assert (
+        result.generator_cached_count
+        == 0
+    )
+
+    assert (
+        result.generator_materialization_needed_count
+        == 1
+    )
+
+    assert (
+        result.generator_failure_count
+        == 0
+    )
+
+    assert len(
+        result.generation_plans
+    ) == 1
+
+    assert (
+        result.resolved_count
+        == 1
+    )
+
+    card = (
+        result.resolved_states[0]
+        .seasons[1]
+        .episodes[1]
+        .card
+    )
+
+    assert (
+        card.source
+        is ArtworkSource.GENERATED
+    )
+
+    assert card.file_path.startswith(
+        "/config/assets/generated/"
+    )
+
+    # Target execution is part of read-only preview construction.
+    assert not local_root.exists()
+
+
+def test_disabled_generator_without_tmdb_preserves_old_coverage_behavior(
+    tmp_path,
+):
+    from artwork.episode_coverage import (
+        EpisodeGeneratorOptions,
+    )
+
+    inventory = _inventory(
+        rating_key="old-behavior",
+        tvdb_id=1,
+        title="Old Behavior",
+    )
+
+    state = _state(
+        tvdb_id=1,
+        episodes=2,
+    )
+
+    result = execute_show_target(
+        target=_target(),
+        inventories=(
+            inventory,
+        ),
+        managed_shows=(
+            state,
+        ),
+        provider=FakeProvider(),
+        tmdb_client=None,
+        generator_options=(
+            EpisodeGeneratorOptions(
+                enabled=False,
+                font_key="marcellus",
+                local_root=(
+                    tmp_path
+                    / "generated"
+                ),
+                kometa_root=(
+                    "/config/assets/generated"
+                ),
+            )
+        ),
+    )
+
+    assert not result.coverage_enabled
+    assert not result.generator_enabled
+
+    assert (
+        result.managed_coverage
+        == ()
+    )
+
+    assert (
+        result.discovery_coverage
+        == ()
+    )

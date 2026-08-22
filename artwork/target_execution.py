@@ -11,6 +11,7 @@ from artwork.discovery import (
 )
 from artwork.episode_coverage import (
     EpisodeCoverageResult,
+    EpisodeGeneratorOptions,
     resolve_episode_coverage,
 )
 from artwork.execution import (
@@ -74,6 +75,21 @@ class ShowTargetExecution:
     ] = ()
 
     coverage_enabled: bool = False
+
+    generator_options: (
+        EpisodeGeneratorOptions
+        | None
+    ) = None
+
+    @property
+    def generator_enabled(
+        self,
+    ) -> bool:
+        return bool(
+            self.generator_options
+            is not None
+            and self.generator_options.enabled
+        )
 
     @property
     def identity_enriched_count(
@@ -146,13 +162,17 @@ class ShowTargetExecution:
 
     @property
     def tmdb_created_count(self) -> int:
-        """Previously unresolved shows made useful by TMDB alone."""
+        """Previously unresolved shows made useful by TMDB."""
 
         return sum(
             1
             for result
             in self.discovery_coverage
-            if result.created
+            if (
+                result.initial_state is None
+                and result.tmdb is not None
+                and result.tmdb.changed
+            )
         )
 
     @property
@@ -166,7 +186,10 @@ class ShowTargetExecution:
                 self.managed_coverage
                 + self.discovery_coverage
             )
-            if result.changed
+            if (
+                result.tmdb is not None
+                and result.tmdb.changed
+            )
         )
 
     @property
@@ -221,6 +244,124 @@ class ShowTargetExecution:
                 self.managed_coverage
                 + self.discovery_coverage
             )
+        )
+
+    @property
+    def generator_created_count(
+        self,
+    ) -> int:
+        """Previously unresolved shows made useful by generation."""
+
+        return sum(
+            1
+            for result
+            in self.discovery_coverage
+            if (
+                result.initial_state is None
+                and result.generator is not None
+                and result.generator.changed
+                and not (
+                    result.tmdb is not None
+                    and result.tmdb.changed
+                )
+            )
+        )
+
+    @property
+    def generator_changed_count(
+        self,
+    ) -> int:
+        """Shows where generator planning changed prospective state."""
+
+        return sum(
+            1
+            for result
+            in (
+                self.managed_coverage
+                + self.discovery_coverage
+            )
+            if (
+                result.generator is not None
+                and result.generator.changed
+            )
+        )
+
+    @property
+    def generator_plan_count(
+        self,
+    ) -> int:
+        """Total generated episode-card plans."""
+
+        return sum(
+            result.generator_plan_count
+            for result
+            in (
+                self.managed_coverage
+                + self.discovery_coverage
+            )
+        )
+
+    @property
+    def generator_cached_count(
+        self,
+    ) -> int:
+        """Generated plans already satisfied by cache."""
+
+        return sum(
+            result.generator_cached_count
+            for result
+            in (
+                self.managed_coverage
+                + self.discovery_coverage
+            )
+        )
+
+    @property
+    def generator_materialization_needed_count(
+        self,
+    ) -> int:
+        """Generated plans that APPLY must materialize."""
+
+        return sum(
+            result.generator_materialization_needed_count
+            for result
+            in (
+                self.managed_coverage
+                + self.discovery_coverage
+            )
+        )
+
+    @property
+    def generator_failure_count(
+        self,
+    ) -> int:
+        """Non-fatal generator planning failures."""
+
+        return sum(
+            result.generator_failure_count
+            for result
+            in (
+                self.managed_coverage
+                + self.discovery_coverage
+            )
+        )
+
+    @property
+    def generation_plans(
+        self,
+    ):
+        """All reviewed generated-card plans for later APPLY."""
+
+        return tuple(
+            plan
+            for result
+            in (
+                self.managed_coverage
+                + self.discovery_coverage
+            )
+            if result.generator is not None
+            for plan
+            in result.generator.generation_plans
         )
 
     @property
@@ -311,6 +452,10 @@ def execute_show_target(
     managed_shows: Iterable[ShowArtworkState],
     provider: ArtworkProvider,
     tmdb_client: TMDBArtworkClient | None = None,
+    generator_options: (
+        EpisodeGeneratorOptions
+        | None
+    ) = None,
     incomplete_migration_threshold: float = 0.25,
     progress_callback: ArtworkProgressCallback | None = None,
 ) -> ShowTargetExecution:
@@ -469,13 +614,26 @@ def execute_show_target(
             "match reconciliation"
         )
 
-    if tmdb_client is None:
+    generator_enabled = bool(
+        generator_options is not None
+        and generator_options.enabled
+    )
+
+    coverage_enabled = (
+        tmdb_client is not None
+        or generator_enabled
+    )
+
+    if not coverage_enabled:
         return ShowTargetExecution(
             reconciliation=reconciliation,
             managed=managed,
             discovery=discovery,
             identity_enrichment=(
                 identity_enrichment
+            ),
+            generator_options=(
+                generator_options
             ),
         )
 
@@ -510,6 +668,9 @@ def execute_show_target(
                 inventory=result.inventory,
                 state=result.state,
                 tmdb_client=tmdb_client,
+                generator_options=(
+                    generator_options
+                ),
             )
         )
 
@@ -522,13 +683,21 @@ def execute_show_target(
             library=target.library,
             phase=(
                 ArtworkScanPhase
+                .EPISODE_COVERAGE_MANAGED
+                if generator_enabled
+                else ArtworkScanPhase
                 .TMDB_MANAGED
             ),
             completed=index,
             total=managed_coverage_total,
             message=(
-                "Checking managed episode "
-                "gaps with TMDB"
+                "Planning managed episode "
+                "artwork coverage"
+                if generator_enabled
+                else (
+                    "Checking managed episode "
+                    "gaps with TMDB"
+                )
             ),
             current_title=(
                 result.inventory
@@ -567,6 +736,9 @@ def execute_show_target(
                 inventory=result.inventory,
                 state=result.state,
                 tmdb_client=tmdb_client,
+                generator_options=(
+                    generator_options
+                ),
             )
         )
 
@@ -579,13 +751,21 @@ def execute_show_target(
             library=target.library,
             phase=(
                 ArtworkScanPhase
+                .EPISODE_COVERAGE_DISCOVERY
+                if generator_enabled
+                else ArtworkScanPhase
                 .TMDB_DISCOVERY
             ),
             completed=index,
             total=discovery_coverage_total,
             message=(
-                "Checking unmanaged episode "
-                "gaps with TMDB"
+                "Planning unmanaged episode "
+                "artwork coverage"
+                if generator_enabled
+                else (
+                    "Checking unmanaged episode "
+                    "gaps with TMDB"
+                )
             ),
             current_title=(
                 result.inventory
@@ -611,4 +791,7 @@ def execute_show_target(
             discovery_coverage
         ),
         coverage_enabled=True,
+        generator_options=(
+            generator_options
+        ),
     )

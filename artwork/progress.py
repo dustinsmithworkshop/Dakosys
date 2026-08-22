@@ -16,6 +16,8 @@ class ArtworkScanPhase(str, Enum):
     PRIMARY_DISCOVERY = "primary_discovery"
     TMDB_MANAGED = "tmdb_managed"
     TMDB_DISCOVERY = "tmdb_discovery"
+    EPISODE_COVERAGE_MANAGED = "episode_coverage_managed"
+    EPISODE_COVERAGE_DISCOVERY = "episode_coverage_discovery"
     PLANNING = "planning"
     COMPLETE = "complete"
 
