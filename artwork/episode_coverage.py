@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from artwork.generator_config import (
+    ArtworkGeneratorConfig,
+)
 from artwork.generator_enrichment import (
     GeneratorEnrichmentResult,
     enrich_show_with_generated_episode_cards,
@@ -25,10 +28,21 @@ class EpisodeGeneratorOptions:
 
     enabled: bool
 
-    font_key: str
-
     local_root: str | Path
     kometa_root: str
+
+    creative_config: (
+        ArtworkGeneratorConfig
+    ) = field(
+        default_factory=(
+            ArtworkGeneratorConfig
+        )
+    )
+
+    # Explicit compatibility/testing override.
+    # Normal configured runtime should leave this unset and use
+    # creative_config so Show > Library > Global inheritance applies.
+    font_key: str | None = None
 
     plex_base_url: str | None = None
     plex_token: str | None = None
@@ -328,10 +342,6 @@ def resolve_episode_coverage(
                 inventory=inventory,
                 state=resolved_state,
                 enabled=True,
-                font_key=(
-                    generator_options
-                    .font_key
-                ),
                 local_root=(
                     generator_options
                     .local_root
@@ -339,6 +349,14 @@ def resolve_episode_coverage(
                 kometa_root=(
                     generator_options
                     .kometa_root
+                ),
+                creative_config=(
+                    generator_options
+                    .creative_config
+                ),
+                font_key=(
+                    generator_options
+                    .font_key
                 ),
                 tmdb_client=tmdb_client,
             )

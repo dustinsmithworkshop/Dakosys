@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from artwork.generator_config import (
+    ArtworkGeneratorConfig,
+)
 from artwork.generator_inputs import (
     EpisodeGenerationPath,
     resolve_episode_generation_input,
@@ -148,9 +151,13 @@ def enrich_show_with_generated_episode_cards(
     inventory: ShowInventory,
     state: ShowArtworkState | None,
     enabled: bool,
-    font_key: str,
     local_root: str | Path,
     kometa_root: str,
+    creative_config: (
+        ArtworkGeneratorConfig
+        | None
+    ) = None,
+    font_key: str | None = None,
     tmdb_client: (
         TMDBArtworkClient
         | None
@@ -255,6 +262,35 @@ def enrich_show_with_generated_episode_cards(
         inventory=inventory,
         tmdb_id=resolved_tmdb_id,
     )
+
+    if font_key is None:
+        creative_config = (
+            creative_config
+            or ArtworkGeneratorConfig()
+        )
+
+        resolved_style = (
+            creative_config
+            .resolve_style(
+                library=(
+                    inventory
+                    .identity
+                    .library
+                ),
+                show_id=show_key,
+            )
+        )
+
+        resolved_font_key = (
+            resolved_style.font
+        )
+
+    else:
+        # Explicit override retained for focused tests and direct
+        # low-level callers. Configured runtime uses creative_config.
+        resolved_font_key = (
+            font_key
+        )
 
     tmdb_request_count = 0
 
@@ -436,7 +472,9 @@ def enrich_show_with_generated_episode_cards(
                         season_number=(
                             season_number
                         ),
-                        font_key=font_key,
+                        font_key=(
+                            resolved_font_key
+                        ),
                         local_root=local_root,
                         kometa_root=(
                             kometa_root

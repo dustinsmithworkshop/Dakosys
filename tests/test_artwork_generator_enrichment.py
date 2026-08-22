@@ -763,3 +763,181 @@ def test_real_enrichment_plans_without_writing_files(
 
     # Preview/planning must not create the cache root, let alone a JPEG.
     assert not local_root.exists()
+
+
+def test_library_font_override_is_used_for_generation_plan(
+    tmp_path: Path,
+):
+    from artwork.generator_config import (
+        parse_artwork_generator_config,
+    )
+
+    creative = (
+        parse_artwork_generator_config(
+            {
+                "defaults": {
+                    "font": "marcellus",
+                },
+                "libraries": {
+                    "TV": {
+                        "font": (
+                            "cormorant_garamond"
+                        ),
+                    },
+                },
+            }
+        )
+    )
+
+    calls = []
+
+    result = (
+        enrich_show_with_generated_episode_cards(
+            inventory=_inventory(
+                episodes=(1,)
+            ),
+            state=_state(),
+            enabled=True,
+            local_root=(
+                tmp_path
+                / "generated"
+            ),
+            kometa_root=(
+                "/config/assets/generated"
+            ),
+            creative_config=creative,
+            tmdb_client=None,
+            plan_card=(
+                _planner(
+                    calls
+                )
+            ),
+        )
+    )
+
+    assert result.changed
+
+    assert (
+        calls[0]["font_key"]
+        == "cormorant_garamond"
+    )
+
+
+def test_show_font_override_beats_library_override(
+    tmp_path: Path,
+):
+    from artwork.generator_config import (
+        parse_artwork_generator_config,
+    )
+
+    creative = (
+        parse_artwork_generator_config(
+            {
+                "defaults": {
+                    "font": "marcellus",
+                },
+                "libraries": {
+                    "TV": {
+                        "font": "cinzel",
+                    },
+                },
+                "shows": {
+                    "tmdb:200": {
+                        "font": "prata",
+                    },
+                },
+            }
+        )
+    )
+
+    calls = []
+
+    result = (
+        enrich_show_with_generated_episode_cards(
+            inventory=_inventory(
+                episodes=(1,)
+            ),
+            state=_state(),
+            enabled=True,
+            local_root=(
+                tmp_path
+                / "generated"
+            ),
+            kometa_root=(
+                "/config/assets/generated"
+            ),
+            creative_config=creative,
+            tmdb_client=None,
+            plan_card=(
+                _planner(
+                    calls
+                )
+            ),
+        )
+    )
+
+    assert result.changed
+
+    assert (
+        calls[0]["show_key"]
+        == "tmdb:200"
+    )
+
+    assert (
+        calls[0]["font_key"]
+        == "prata"
+    )
+
+
+def test_global_font_is_used_when_no_override_matches(
+    tmp_path: Path,
+):
+    from artwork.generator_config import (
+        parse_artwork_generator_config,
+    )
+
+    creative = (
+        parse_artwork_generator_config(
+            {
+                "defaults": {
+                    "font": (
+                        "libre_baskerville"
+                    ),
+                },
+                "libraries": {
+                    "Anime": {
+                        "font": "cinzel",
+                    },
+                },
+            }
+        )
+    )
+
+    calls = []
+
+    enrich_show_with_generated_episode_cards(
+        inventory=_inventory(
+            episodes=(1,)
+        ),
+        state=_state(),
+        enabled=True,
+        local_root=(
+            tmp_path
+            / "generated"
+        ),
+        kometa_root=(
+            "/config/assets/generated"
+        ),
+        creative_config=creative,
+        tmdb_client=None,
+        plan_card=(
+            _planner(
+                calls
+            )
+        ),
+    )
+
+    assert (
+        calls[0]["font_key"]
+        == "libre_baskerville"
+    )
