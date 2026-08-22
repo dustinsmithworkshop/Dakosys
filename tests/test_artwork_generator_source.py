@@ -1,0 +1,421 @@
+from pathlib import Path
+
+import pytest
+
+from artwork.generator_inputs import (
+    EpisodeGenerationInput,
+    EpisodeGenerationPath,
+)
+from artwork.generator_source import (
+    ArtworkGeneratorSourceError,
+    materialize_generation_source,
+)
+from artwork.models import (
+    ArtworkSource,
+)
+
+
+class FakeResponse:
+    def __init__(
+        self,
+        *,
+        body=b"image-bytes",
+        status_code=200,
+        content_type="image/jpeg",
+    ):
+        self.body = body
+        self.status_code = status_code
+        self.headers = {
+            "Content-Type":
+                content_type,
+        }
+
+    def raise_for_status(
+        self,
+    ):
+        if self.status_code >= 400:
+            raise RuntimeError(
+                f"HTTP {self.status_code}"
+            )
+
+    def iter_content(
+        self,
+        chunk_size,
+    ):
+        for index in range(
+            0,
+            len(self.body),
+            chunk_size,
+        ):
+            yield self.body[
+                index:
+                index + chunk_size
+            ]
+
+
+class FakeSession:
+    def __init__(
+        self,
+        response,
+    ):
+        self.response = response
+        self.calls = []
+
+    def get(
+        self,
+        url,
+        *,
+        headers,
+        stream,
+        timeout,
+    ):
+        self.calls.append(
+            {
+                "url": url,
+                "headers": headers,
+                "stream": stream,
+                "timeout": timeout,
+            }
+        )
+
+        return self.response
+
+
+def _input(
+    *,
+    source=ArtworkSource.TMDB,
+    image_ref=(
+        "https://image.tmdb.org/"
+        "t/p/original/episode.jpg"
+    ),
+    provider_asset_id="/episode.jpg",
+):
+    return EpisodeGenerationInput(
+        episode_number=1,
+        path=(
+            EpisodeGenerationPath
+            .GENERATE_MISSING
+        ),
+        title="Pilot",
+        title_source=(
+            ArtworkSource.PLEX
+        ),
+        image_ref=image_ref,
+        image_source=source,
+        image_provider_asset_id=(
+            provider_asset_id
+        ),
+    )
+
+
+def test_downloads_tmdb_image_without_plex_auth(
+    tmp_path: Path,
+):
+    session = FakeSession(
+        FakeResponse(
+            body=b"tmdb-image",
+        )
+    )
+
+    destination = (
+        tmp_path
+        / "source.jpg"
+    )
+
+    result = materialize_generation_source(
+        generation_input=_input(),
+        destination=destination,
+        session=session,
+        timeout=12.0,
+    )
+
+    assert destination.read_bytes() == (
+        b"tmdb-image"
+    )
+
+    assert result.path == destination
+    assert (
+        result.source
+        is ArtworkSource.TMDB
+    )
+    assert result.byte_count == 10
+
+    assert session.calls == [
+        {
+            "url": (
+                "https://image.tmdb.org/"
+                "t/p/original/"
+                "episode.jpg"
+            ),
+            "headers": None,
+            "stream": True,
+            "timeout": 12.0,
+        }
+    ]
+
+
+def test_tmdb_provider_path_can_be_materialized(
+    tmp_path: Path,
+):
+    session = FakeSession(
+        FakeResponse()
+    )
+
+    generation_input = _input(
+        image_ref="/episode.jpg",
+        provider_asset_id=(
+            "/episode.jpg"
+        ),
+    )
+
+    materialize_generation_source(
+        generation_input=(
+            generation_input
+        ),
+        destination=(
+            tmp_path
+            / "source.jpg"
+        ),
+        tmdb_image_root=(
+            "https://images.example/"
+            "original"
+        ),
+        session=session,
+    )
+
+    assert session.calls[0][
+        "url"
+    ] == (
+        "https://images.example/"
+        "original/episode.jpg"
+    )
+
+
+def test_downloads_plex_thumbnail_with_scoped_auth(
+    tmp_path: Path,
+):
+    session = FakeSession(
+        FakeResponse(
+            body=b"plex-image",
+        )
+    )
+
+    generation_input = _input(
+        source=ArtworkSource.PLEX,
+        image_ref=(
+            "/library/metadata/"
+            "123/thumb/456"
+        ),
+        provider_asset_id=None,
+    )
+
+    result = materialize_generation_source(
+        generation_input=(
+            generation_input
+        ),
+        destination=(
+            tmp_path
+            / "source.jpg"
+        ),
+        plex_base_url=(
+            "http://192.168.1.10:32400"
+        ),
+        plex_token="secret-token",
+        session=session,
+    )
+
+    assert (
+        result.source
+        is ArtworkSource.PLEX
+    )
+
+    assert session.calls == [
+        {
+            "url": (
+                "http://192.168.1.10:32400"
+                "/library/metadata/"
+                "123/thumb/456"
+            ),
+            "headers": {
+                "X-Plex-Token":
+                    "secret-token",
+            },
+            "stream": True,
+            "timeout": 30.0,
+        }
+    ]
+
+
+def test_rejects_absolute_plex_url_for_different_host(
+    tmp_path: Path,
+):
+    generation_input = _input(
+        source=ArtworkSource.PLEX,
+        image_ref=(
+            "https://evil.example/"
+            "image.jpg"
+        ),
+        provider_asset_id=None,
+    )
+
+    with pytest.raises(
+        ArtworkGeneratorSourceError,
+        match="does not match",
+    ):
+        materialize_generation_source(
+            generation_input=(
+                generation_input
+            ),
+            destination=(
+                tmp_path
+                / "source.jpg"
+            ),
+            plex_base_url=(
+                "http://plex.local:32400"
+            ),
+            plex_token="secret-token",
+            session=FakeSession(
+                FakeResponse()
+            ),
+        )
+
+
+def test_non_image_response_is_rejected(
+    tmp_path: Path,
+):
+    destination = (
+        tmp_path
+        / "source.jpg"
+    )
+
+    session = FakeSession(
+        FakeResponse(
+            body=b"<html>nope</html>",
+            content_type="text/html",
+        )
+    )
+
+    with pytest.raises(
+        ArtworkGeneratorSourceError,
+        match="non-image",
+    ):
+        materialize_generation_source(
+            generation_input=_input(),
+            destination=destination,
+            session=session,
+        )
+
+    assert not destination.exists()
+
+
+def test_empty_image_is_rejected(
+    tmp_path: Path,
+):
+    destination = (
+        tmp_path
+        / "source.jpg"
+    )
+
+    session = FakeSession(
+        FakeResponse(
+            body=b"",
+        )
+    )
+
+    with pytest.raises(
+        ArtworkGeneratorSourceError,
+        match="empty",
+    ):
+        materialize_generation_source(
+            generation_input=_input(),
+            destination=destination,
+            session=session,
+        )
+
+    assert not destination.exists()
+
+
+def test_oversized_image_is_rejected_and_removed(
+    tmp_path: Path,
+):
+    destination = (
+        tmp_path
+        / "source.jpg"
+    )
+
+    session = FakeSession(
+        FakeResponse(
+            body=b"123456",
+        )
+    )
+
+    with pytest.raises(
+        ArtworkGeneratorSourceError,
+        match="maximum size",
+    ):
+        materialize_generation_source(
+            generation_input=_input(),
+            destination=destination,
+            session=session,
+            max_bytes=5,
+        )
+
+    assert not destination.exists()
+
+
+def test_http_failure_is_wrapped_and_partial_file_removed(
+    tmp_path: Path,
+):
+    destination = (
+        tmp_path
+        / "source.jpg"
+    )
+
+    session = FakeSession(
+        FakeResponse(
+            status_code=503,
+        )
+    )
+
+    with pytest.raises(
+        ArtworkGeneratorSourceError,
+        match="could not download",
+    ):
+        materialize_generation_source(
+            generation_input=_input(),
+            destination=destination,
+            session=session,
+        )
+
+    assert not destination.exists()
+
+
+def test_non_generation_input_is_rejected(
+    tmp_path: Path,
+):
+    generation_input = (
+        EpisodeGenerationInput(
+            episode_number=1,
+            path=(
+                EpisodeGenerationPath
+                .KEEP_PRIMARY
+            ),
+        )
+    )
+
+    with pytest.raises(
+        ArtworkGeneratorSourceError,
+        match="not eligible",
+    ):
+        materialize_generation_source(
+            generation_input=(
+                generation_input
+            ),
+            destination=(
+                tmp_path
+                / "source.jpg"
+            ),
+            session=FakeSession(
+                FakeResponse()
+            ),
+        )
