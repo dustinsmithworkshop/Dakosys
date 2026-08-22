@@ -8,8 +8,15 @@ from pathlib import Path
 import yaml
 from PIL import Image
 
+from artwork.apply_policy import (
+    ArtworkApplyMode,
+)
 from artwork.models import (
     ArtworkSource,
+)
+from artwork.runner import (
+    ArtworkRunOutcome,
+    execute_artwork_library_workflow,
 )
 from artwork.runtime import (
     build_configured_artwork_manager_workflow,
@@ -606,3 +613,224 @@ shows:
         == generation_plan
         .fingerprint
     )
+
+
+    # --------------------------------------------------------------
+    # SECOND PREVIEW: CACHE HIT + NO CHURN
+    # --------------------------------------------------------------
+
+    cached_workflow = (
+        build_configured_artwork_manager_workflow(
+            plex=plex,
+            config=config,
+            environ={},
+        )
+    )
+
+    cached_run = (
+        cached_workflow
+        .libraries[0]
+    )
+
+    assert cached_run.safe_to_apply
+
+    assert (
+        cached_run
+        .execution
+        .generator_plan_count
+        == 1
+    )
+
+    assert (
+        cached_run
+        .execution
+        .generator_cached_count
+        == 1
+    )
+
+    assert (
+        cached_run
+        .execution
+        .generator_materialization_needed_count
+        == 0
+    )
+
+    assert not (
+        cached_run.needs_apply
+    )
+
+    cached_result = (
+        execute_artwork_library_workflow(
+            cached_run,
+            apply_mode=(
+                ArtworkApplyMode.AUTO
+            ),
+        )
+    )
+
+    assert (
+        cached_result.outcome
+        is ArtworkRunOutcome.NO_CHANGES
+    )
+
+    assert (
+        cached_result.apply_result
+        is None
+    )
+
+    # --------------------------------------------------------------
+    # THIRD PREVIEW: DURABLE GENERATED STATE, MISSING CACHE
+    # --------------------------------------------------------------
+
+    generation_plan.local_path.unlink()
+
+    assert not (
+        generation_plan
+        .local_path
+        .exists()
+    )
+
+    repair_workflow = (
+        build_configured_artwork_manager_workflow(
+            plex=plex,
+            config=config,
+            environ={},
+        )
+    )
+
+    repair_run = (
+        repair_workflow
+        .libraries[0]
+    )
+
+    assert repair_run.safe_to_apply
+
+    assert (
+        repair_run
+        .execution
+        .generator_plan_count
+        == 1
+    )
+
+    assert (
+        repair_run
+        .execution
+        .generator_cached_count
+        == 0
+    )
+
+    assert (
+        repair_run
+        .execution
+        .generator_materialization_needed_count
+        == 1
+    )
+
+    # Semantic YAML/state are already current. The missing JPEG alone
+    # must still make the workflow actionable.
+    assert (
+        repair_run.added_count
+        == 0
+    )
+
+    assert (
+        repair_run.updated_count
+        == 0
+    )
+
+    assert (
+        repair_run.removed_count
+        == 0
+    )
+
+    assert repair_run.needs_apply
+
+    repair_plan = (
+        repair_run
+        .execution
+        .generation_plans[0]
+    )
+
+    assert (
+        repair_plan.fingerprint
+        == generation_plan.fingerprint
+    )
+
+    assert (
+        repair_plan.local_path
+        == generation_plan.local_path
+    )
+
+    repair_session = (
+        FakeImageSession(
+            _source_jpeg()
+        )
+    )
+
+    monkeypatch.setattr(
+        "artwork.generator_source."
+        "requests.Session",
+        lambda: repair_session,
+    )
+
+    repair_result = (
+        execute_artwork_library_workflow(
+            repair_run,
+            apply_mode=(
+                ArtworkApplyMode.AUTO
+            ),
+        )
+    )
+
+    assert (
+        repair_result.outcome
+        is ArtworkRunOutcome.APPLIED
+    )
+
+    assert (
+        repair_result.needs_apply
+    )
+
+    assert (
+        repair_result.apply_result
+        is not None
+    )
+
+    assert (
+        repair_result
+        .apply_result
+        .generated_materialized_count
+        == 1
+    )
+
+    assert (
+        repair_result
+        .apply_result
+        .added_count
+        == 0
+    )
+
+    assert (
+        repair_result
+        .apply_result
+        .updated_count
+        == 0
+    )
+
+    assert (
+        repair_plan
+        .local_path
+        .is_file()
+    )
+
+    assert (
+        repair_plan
+        .local_path
+        .stat()
+        .st_size
+        > 0
+    )
+
+    assert len(
+        repair_session.requests
+    ) == 1

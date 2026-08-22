@@ -172,8 +172,29 @@ class ArtworkLibraryWorkflow:
         )
 
     @property
+    def generator_materialization_needed_count(
+        self,
+    ) -> int:
+        """Generated files that reviewed APPLY still needs to create."""
+
+        if (
+            self.target.media_type
+            is not MediaType.SHOW
+        ):
+            return 0
+
+        return int(
+            getattr(
+                self.execution,
+                "generator_materialization_needed_count",
+                0,
+            )
+            or 0
+        )
+
+    @property
     def needs_apply(self) -> bool:
-        """Whether transactional persistence would change durable state."""
+        """Whether reviewed APPLY still has durable work to perform."""
 
         if self.plan is None:
             return False
@@ -181,6 +202,10 @@ class ArtworkLibraryWorkflow:
         return (
             item_store_plan_needs_apply(
                 self.plan
+            )
+            or (
+                self.generator_materialization_needed_count
+                > 0
             )
         )
 
