@@ -22,6 +22,10 @@ from uuid import uuid4
 
 import yaml
 
+from artwork.generator_apply import (
+    GeneratedArtworkApplyError,
+    materialize_reviewed_generation_plans,
+)
 from artwork.item_store import (
     MANIFEST_NAME,
     ItemStorePlan,
@@ -76,6 +80,9 @@ class ItemStoreApplyResult:
     updated_count: int
     unchanged_count: int
     removed_count: int
+
+    generated_materialized_count: int = 0
+    generated_reused_count: int = 0
 
     retained_rollback_path: Path | None = None
 
@@ -531,6 +538,53 @@ def apply_show_item_store(
             "item-store plan is stale"
         )
 
+    generation_plans = tuple(
+        getattr(
+            execution,
+            "generation_plans",
+            (),
+        )
+        or ()
+    )
+
+    generator_options = getattr(
+        execution,
+        "generator_options",
+        None,
+    )
+
+    generated_materialized_count = 0
+    generated_reused_count = 0
+
+    if generation_plans:
+        if generator_options is None:
+            raise ItemStoreApplyError(
+                "reviewed Artwork Generator plans "
+                "exist without generator runtime options"
+            )
+
+        try:
+            generated = (
+                materialize_reviewed_generation_plans(
+                    plans=generation_plans,
+                    options=generator_options,
+                )
+            )
+
+        except GeneratedArtworkApplyError as exc:
+            raise ItemStoreApplyError(
+                "could not materialize reviewed "
+                "Artwork Generator output"
+            ) from exc
+
+        generated_materialized_count = (
+            generated.materialized_count
+        )
+
+        generated_reused_count = (
+            generated.reused_count
+        )
+
     needs_apply = (
         item_store_plan_needs_apply(
             current_plan
@@ -545,7 +599,10 @@ def apply_show_item_store(
             manifest_path=(
                 current_plan.manifest_path
             ),
-            changed=False,
+            changed=(
+                generated_materialized_count
+                > 0
+            ),
             desired_count=(
                 current_plan.desired_count
             ),
@@ -560,6 +617,12 @@ def apply_show_item_store(
             ),
             removed_count=(
                 current_plan.removed_count
+            ),
+            generated_materialized_count=(
+                generated_materialized_count
+            ),
+            generated_reused_count=(
+                generated_reused_count
             ),
         )
 
@@ -676,6 +739,12 @@ def apply_show_item_store(
             ),
             removed_count=(
                 current_plan.removed_count
+            ),
+            generated_materialized_count=(
+                generated_materialized_count
+            ),
+            generated_reused_count=(
+                generated_reused_count
             ),
             retained_rollback_path=(
                 retained_rollback

@@ -1093,3 +1093,517 @@ def test_complete_store_with_durable_state_is_true_noop(
     assert result.updated_count == 0
     assert result.removed_count == 0
     assert result.unchanged_count == 2
+
+
+def test_generation_runs_after_preview_and_plan_validation(
+    tmp_path,
+    monkeypatch,
+):
+    from artwork import item_store_apply
+
+    execution = (
+        _two_show_execution(
+            tmp_path
+        )
+    )
+
+    execution = SimpleNamespace(
+        **execution.__dict__,
+        generation_plans=(
+            SimpleNamespace(),
+        ),
+        generator_options=(
+            SimpleNamespace(
+                enabled=True
+            )
+        ),
+    )
+
+    preview = _safe_preview(
+        execution
+    )
+
+    _patch_preview(
+        monkeypatch,
+        preview,
+    )
+
+    plan = (
+        build_show_item_store_plan(
+            execution
+        )
+    )
+
+    calls = []
+
+    def fake_generation(
+        *,
+        plans,
+        options,
+    ):
+        calls.append(
+            (
+                plans,
+                options,
+            )
+        )
+
+        return SimpleNamespace(
+            materialized_count=1,
+            reused_count=0,
+        )
+
+    monkeypatch.setattr(
+        item_store_apply,
+        "materialize_reviewed_generation_plans",
+        fake_generation,
+    )
+
+    result = apply_show_item_store(
+        execution=execution,
+        preview=preview,
+        plan=plan,
+    )
+
+    assert len(calls) == 1
+
+    assert (
+        result.generated_materialized_count
+        == 1
+    )
+
+    assert (
+        result.generated_reused_count
+        == 0
+    )
+
+    assert result.changed
+
+
+def test_unsafe_preview_blocks_generation_before_io(
+    tmp_path,
+    monkeypatch,
+):
+    from artwork import item_store_apply
+
+    execution = (
+        _two_show_execution(
+            tmp_path
+        )
+    )
+
+    execution = SimpleNamespace(
+        **execution.__dict__,
+        generation_plans=(
+            SimpleNamespace(),
+        ),
+        generator_options=(
+            SimpleNamespace(
+                enabled=True
+            )
+        ),
+    )
+
+    issue = PreviewIssue(
+        code=(
+            PreviewIssueCode
+            .PRIMARY_PROVIDER_ERROR
+        ),
+        message="provider failed",
+    )
+
+    preview = _safe_preview(
+        execution,
+        issues=(
+            issue,
+        ),
+    )
+
+    _patch_preview(
+        monkeypatch,
+        preview,
+    )
+
+    plan = (
+        build_show_item_store_plan(
+            execution
+        )
+    )
+
+    def forbidden_generation(
+        **_kwargs,
+    ):
+        raise AssertionError(
+            "unsafe preview must not "
+            "materialize artwork"
+        )
+
+    monkeypatch.setattr(
+        item_store_apply,
+        "materialize_reviewed_generation_plans",
+        forbidden_generation,
+    )
+
+    with pytest.raises(
+        UnsafeItemStorePreviewError,
+    ):
+        apply_show_item_store(
+            execution=execution,
+            preview=preview,
+            plan=plan,
+        )
+
+
+def test_stale_item_store_plan_blocks_generation_before_io(
+    tmp_path,
+    monkeypatch,
+):
+    from artwork import item_store_apply
+
+    execution = (
+        _two_show_execution(
+            tmp_path
+        )
+    )
+
+    execution = SimpleNamespace(
+        **execution.__dict__,
+        generation_plans=(
+            SimpleNamespace(),
+        ),
+        generator_options=(
+            SimpleNamespace(
+                enabled=True
+            )
+        ),
+    )
+
+    preview = _safe_preview(
+        execution
+    )
+
+    _patch_preview(
+        monkeypatch,
+        preview,
+    )
+
+    plan = (
+        build_show_item_store_plan(
+            execution
+        )
+    )
+
+    directory = (
+        tmp_path
+        / "artwork-tv"
+    )
+
+    directory.mkdir()
+
+    (
+        directory
+        / "manual-notes.yaml"
+    ).write_text(
+        "appeared later\n",
+        encoding="utf-8",
+    )
+
+    def forbidden_generation(
+        **_kwargs,
+    ):
+        raise AssertionError(
+            "stale plan must not "
+            "materialize artwork"
+        )
+
+    monkeypatch.setattr(
+        item_store_apply,
+        "materialize_reviewed_generation_plans",
+        forbidden_generation,
+    )
+
+    with pytest.raises(
+        StaleItemStorePlanError,
+    ):
+        apply_show_item_store(
+            execution=execution,
+            preview=preview,
+            plan=plan,
+        )
+
+
+def test_generation_failure_blocks_item_store_activation(
+    tmp_path,
+    monkeypatch,
+):
+    from artwork import item_store_apply
+    from artwork.generator_apply import (
+        GeneratedArtworkApplyError,
+    )
+
+    execution = (
+        _two_show_execution(
+            tmp_path
+        )
+    )
+
+    execution = SimpleNamespace(
+        **execution.__dict__,
+        generation_plans=(
+            SimpleNamespace(),
+        ),
+        generator_options=(
+            SimpleNamespace(
+                enabled=True
+            )
+        ),
+    )
+
+    preview = _safe_preview(
+        execution
+    )
+
+    _patch_preview(
+        monkeypatch,
+        preview,
+    )
+
+    plan = (
+        build_show_item_store_plan(
+            execution
+        )
+    )
+
+    def fail_generation(
+        **_kwargs,
+    ):
+        raise GeneratedArtworkApplyError(
+            "render failed"
+        )
+
+    monkeypatch.setattr(
+        item_store_apply,
+        "materialize_reviewed_generation_plans",
+        fail_generation,
+    )
+
+    with pytest.raises(
+        ItemStoreApplyError,
+        match="Artwork Generator",
+    ):
+        apply_show_item_store(
+            execution=execution,
+            preview=preview,
+            plan=plan,
+        )
+
+    assert not (
+        tmp_path
+        / "artwork-tv"
+    ).exists()
+
+
+def test_missing_generated_file_can_be_repaired_when_item_store_is_current(
+    tmp_path,
+    monkeypatch,
+):
+    from artwork import item_store_apply
+
+    base_execution = (
+        _two_show_execution(
+            tmp_path
+        )
+    )
+
+    preview = _safe_preview(
+        base_execution
+    )
+
+    _patch_preview(
+        monkeypatch,
+        preview,
+    )
+
+    # First create a fully current item-store snapshot with no
+    # generator involvement.
+    apply_show_item_store(
+        execution=base_execution,
+        preview=preview,
+        plan=(
+            build_show_item_store_plan(
+                base_execution
+            )
+        ),
+    )
+
+    execution = SimpleNamespace(
+        **base_execution.__dict__,
+        generation_plans=(
+            SimpleNamespace(),
+        ),
+        generator_options=(
+            SimpleNamespace(
+                enabled=True
+            )
+        ),
+    )
+
+    current_preview = (
+        _safe_preview(
+            execution
+        )
+    )
+
+    _patch_preview(
+        monkeypatch,
+        current_preview,
+    )
+
+    current_plan = (
+        build_show_item_store_plan(
+            execution
+        )
+    )
+
+    assert (
+        current_plan.added_count
+        == 0
+    )
+
+    assert (
+        current_plan.updated_count
+        == 0
+    )
+
+    calls = []
+
+    def repair_generation(
+        **_kwargs,
+    ):
+        calls.append(
+            True
+        )
+
+        return SimpleNamespace(
+            materialized_count=1,
+            reused_count=0,
+        )
+
+    monkeypatch.setattr(
+        item_store_apply,
+        "materialize_reviewed_generation_plans",
+        repair_generation,
+    )
+
+    # A truly metadata-current item store still gets its reviewed
+    # missing generated artwork repaired.
+    result = apply_show_item_store(
+        execution=execution,
+        preview=current_preview,
+        plan=current_plan,
+    )
+
+    assert calls == [
+        True,
+    ]
+
+    assert result.changed
+
+    assert (
+        result.generated_materialized_count
+        == 1
+    )
+
+    assert result.added_count == 0
+    assert result.updated_count == 0
+    assert result.removed_count == 0
+
+
+def test_cached_generation_with_current_item_store_is_noop(
+    tmp_path,
+    monkeypatch,
+):
+    from artwork import item_store_apply
+
+    base_execution = (
+        _two_show_execution(
+            tmp_path
+        )
+    )
+
+    preview = _safe_preview(
+        base_execution
+    )
+
+    _patch_preview(
+        monkeypatch,
+        preview,
+    )
+
+    apply_show_item_store(
+        execution=base_execution,
+        preview=preview,
+        plan=(
+            build_show_item_store_plan(
+                base_execution
+            )
+        ),
+    )
+
+    execution = SimpleNamespace(
+        **base_execution.__dict__,
+        generation_plans=(
+            SimpleNamespace(),
+        ),
+        generator_options=(
+            SimpleNamespace(
+                enabled=True
+            )
+        ),
+    )
+
+    current_preview = (
+        _safe_preview(
+            execution
+        )
+    )
+
+    _patch_preview(
+        monkeypatch,
+        current_preview,
+    )
+
+    current_plan = (
+        build_show_item_store_plan(
+            execution
+        )
+    )
+
+    monkeypatch.setattr(
+        item_store_apply,
+        "materialize_reviewed_generation_plans",
+        lambda **_kwargs: (
+            SimpleNamespace(
+                materialized_count=0,
+                reused_count=1,
+            )
+        ),
+    )
+
+    result = apply_show_item_store(
+        execution=execution,
+        preview=current_preview,
+        plan=current_plan,
+    )
+
+    assert not result.changed
+
+    assert (
+        result.generated_materialized_count
+        == 0
+    )
+
+    assert (
+        result.generated_reused_count
+        == 1
+    )
