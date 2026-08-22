@@ -1425,3 +1425,77 @@ This fork preserves the upstream project's major service concepts while substant
 # Releases
 
 See [`CHANGELOG.md`](CHANGELOG.md) for release history, upgrade notes, fixes, and release-specific validation.
+
+
+
+---
+
+# Dakosys 3.0 Release Notes
+
+## Artwork Manager
+
+Dakosys 3.0 introduces the Artwork Manager, a complete artwork discovery, reconciliation, and application system.
+
+New capabilities:
+
+- Plex library artwork inventory
+- Artwork coverage analysis
+- MediUX-first artwork selection
+- TMDB artwork fallback support
+- Movie artwork management
+- TV/show artwork management
+- Persistent artwork state tracking
+- Safe preview and reconciliation before applying changes
+- Legacy artwork migration support
+
+Artwork provider priority:
+
+1. MediUX artwork when available
+2. TMDB artwork fallback
+3. Existing artwork preserved when no better source exists
+
+The Artwork Manager is designed to improve artwork quality without destructive replacements. Items that cannot be confidently resolved remain available for review.
+
+## Artwork Manager Commands
+
+Check artwork configuration:
+
+```bash
+python -m artwork.cli --config /app/config/config.yaml status
+```
+
+Preview artwork changes:
+
+```bash
+python -m artwork.cli --config /app/config/config.yaml scan
+```
+
+Review previous artwork runs:
+
+```bash
+python -m artwork.cli --config /app/config/config.yaml history
+```
+
+## 3.0 Release Validation
+
+Dakosys 3.0 was validated with:
+
+- 542 Python tests passing
+- Web production build completed successfully
+- Docker image smoke testing completed
+- Artwork Manager production migration verified
+
+## Upgrading to 3.0
+
+Before upgrading:
+
+- Backup your Dakosys configuration
+- Preserve existing Kometa paths
+- Update your Docker image tag to `3.0.0`
+- Allow the Artwork Manager to complete its initial inventory scan
+
+Example:
+
+```yaml
+image: ghcr.io/dustinsmithworkshop/dakosys:3.0.0
+```
