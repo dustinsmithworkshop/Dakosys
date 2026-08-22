@@ -286,6 +286,11 @@ def resolve_episode_coverage(
 
     tmdb_result = None
 
+    shared_tmdb_episode_artwork = {}
+    shared_tmdb_attempted_seasons = (
+        frozenset()
+    )
+
     # ------------------------------------------------------------------
     # Existing v3.0 TMDB fallback stage.
     # ------------------------------------------------------------------
@@ -305,6 +310,16 @@ def resolve_episode_coverage(
                 state=working_state,
                 client=tmdb_client,
             )
+        )
+
+        shared_tmdb_episode_artwork = (
+            tmdb_result
+            .episode_artwork_by_season
+        )
+
+        shared_tmdb_attempted_seasons = (
+            tmdb_result
+            .attempted_seasons
         )
 
         # Existing durable state is always preserved regardless of
@@ -359,6 +374,12 @@ def resolve_episode_coverage(
                     .font_key
                 ),
                 tmdb_client=tmdb_client,
+                tmdb_episode_artwork_by_season=(
+                    shared_tmdb_episode_artwork
+                ),
+                tmdb_attempted_seasons=(
+                    shared_tmdb_attempted_seasons
+                ),
             )
         )
 

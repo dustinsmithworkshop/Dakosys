@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 from artwork.inventory import ShowInventory
@@ -14,6 +14,7 @@ from artwork.models import (
 )
 from artwork.providers.tmdb import (
     TMDBArtworkClient,
+    TMDBEpisodeArtwork,
 )
 
 
@@ -56,6 +57,26 @@ class TMDBFallbackResult:
         TMDBSeasonFailure,
         ...,
     ] = ()
+
+    # Rich TMDB metadata fetched while filling fallback gaps.
+    # Coverage may reuse this during generator planning so one season
+    # is not requested twice in the same workflow build.
+    episode_artwork_by_season: dict[
+        int,
+        dict[
+            int,
+            TMDBEpisodeArtwork,
+        ],
+    ] = field(
+        default_factory=dict
+    )
+
+    # Includes both successful and failed TMDB season requests.
+    # A failed request must not immediately be retried by the next
+    # coverage stage.
+    attempted_seasons: frozenset[
+        int
+    ] = frozenset()
 
     @property
     def changed(self) -> bool:
@@ -135,6 +156,60 @@ def _missing_expected_episodes(
             ] = gaps
 
     return missing
+
+
+def _load_season_episode_artwork(
+    *,
+    client: TMDBArtworkClient,
+    tmdb_id: int,
+    season_number: int,
+) -> dict[
+    int,
+    TMDBEpisodeArtwork,
+]:
+    """Load rich TMDB episode metadata with 3.0 compatibility."""
+
+    rich_loader = getattr(
+        client,
+        "get_season_episode_artwork",
+        None,
+    )
+
+    if callable(
+        rich_loader
+    ):
+        return dict(
+            rich_loader(
+                tmdb_id=tmdb_id,
+                season_number=(
+                    season_number
+                ),
+            )
+        )
+
+    cards = (
+        client
+        .get_season_episode_cards(
+            tmdb_id=tmdb_id,
+            season_number=(
+                season_number
+            ),
+        )
+    )
+
+    return {
+        episode_number:
+            TMDBEpisodeArtwork(
+                episode_number=(
+                    episode_number
+                ),
+                card=card,
+            )
+        for (
+            episode_number,
+            card,
+        ) in cards.items()
+    }
 
 
 def fill_tmdb_episode_gaps(
@@ -241,21 +316,40 @@ def fill_tmdb_episode_gaps(
         TMDBSeasonFailure
     ] = []
 
+    episode_artwork_by_season: dict[
+        int,
+        dict[
+            int,
+            TMDBEpisodeArtwork,
+        ],
+    ] = {}
+
+    attempted_seasons: set[
+        int
+    ] = set()
+
     for season_number in sorted(
         missing
     ):
         requests += 1
+        attempted_seasons.add(
+            season_number
+        )
 
         try:
-            candidates = (
-                client
-                .get_season_episode_cards(
+            episode_artwork = (
+                _load_season_episode_artwork(
+                    client=client,
                     tmdb_id=tmdb_id,
                     season_number=(
                         season_number
                     ),
                 )
             )
+
+            episode_artwork_by_season[
+                season_number
+            ] = episode_artwork
 
         except Exception as exc:
             failures.append(
@@ -277,8 +371,16 @@ def fill_tmdb_episode_gaps(
         for episode_number in sorted(
             missing[season_number]
         ):
-            card = candidates.get(
-                episode_number
+            candidate = (
+                episode_artwork.get(
+                    episode_number
+                )
+            )
+
+            card = (
+                candidate.card
+                if candidate is not None
+                else None
             )
 
             if (
@@ -379,5 +481,11 @@ def fill_tmdb_episode_gaps(
         season_request_count=requests,
         failures=tuple(
             failures
+        ),
+        episode_artwork_by_season=(
+            episode_artwork_by_season
+        ),
+        attempted_seasons=frozenset(
+            attempted_seasons
         ),
     )

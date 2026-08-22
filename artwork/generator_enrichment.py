@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
@@ -29,6 +30,7 @@ from artwork.models import (
 )
 from artwork.providers.tmdb import (
     TMDBArtworkClient,
+    TMDBEpisodeArtwork,
 )
 
 
@@ -162,6 +164,19 @@ def enrich_show_with_generated_episode_cards(
         TMDBArtworkClient
         | None
     ) = None,
+    tmdb_episode_artwork_by_season: (
+        Mapping[
+            int,
+            Mapping[
+                int,
+                TMDBEpisodeArtwork,
+            ],
+        ]
+        | None
+    ) = None,
+    tmdb_attempted_seasons: (
+        frozenset[int]
+    ) = frozenset(),
     plan_card=(
         plan_generated_episode_card
     ),
@@ -322,12 +337,41 @@ def enrich_show_with_generated_episode_cards(
         inventory.expected_episodes()
     )
 
+    preloaded_tmdb = (
+        tmdb_episode_artwork_by_season
+        or {}
+    )
+
+    attempted_tmdb_seasons = (
+        frozenset(
+            tmdb_attempted_seasons
+        )
+    )
+
     for season_number in sorted(
         expected
     ):
         tmdb_episodes = {}
 
         if (
+            season_number
+            in preloaded_tmdb
+        ):
+            tmdb_episodes = dict(
+                preloaded_tmdb[
+                    season_number
+                ]
+            )
+
+        elif (
+            season_number
+            in attempted_tmdb_seasons
+        ):
+            # A preceding coverage stage already tried this season
+            # and failed. Do not immediately duplicate the request.
+            tmdb_episodes = {}
+
+        elif (
             tmdb_client is not None
             and resolved_tmdb_id
             is not None
