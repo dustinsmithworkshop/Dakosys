@@ -422,3 +422,116 @@ def test_tmdb_artwork_client_resolves_movie_imdb_identity():
             "timeout": 30.0,
         }
     ]
+
+
+def test_tmdb_artwork_client_returns_episode_generation_metadata():
+    session = FakeSession(
+        [
+            FakeResponse(
+                payload={
+                    "episodes": [
+                        {
+                            "episode_number": 1,
+                            "name": (
+                                "  The Journey's End  "
+                            ),
+                            "still_path": (
+                                "/one.jpg"
+                            ),
+                        },
+                        {
+                            "episode_number": 2,
+                            "name": (
+                                "No Still Available"
+                            ),
+                            "still_path": None,
+                        },
+                        {
+                            "episode_number": 3,
+                            "name": "   ",
+                            "still_path": (
+                                "/three.jpg"
+                            ),
+                        },
+                        {
+                            "episode_number": "4",
+                            "name": "Invalid Number",
+                            "still_path": (
+                                "/four.jpg"
+                            ),
+                        },
+                    ],
+                }
+            ),
+        ]
+    )
+
+    client = TMDBArtworkClient(
+        api_key="test-key",
+        base_url=(
+            "https://tmdb.example/3"
+        ),
+        session=session,
+        timeout=12.0,
+    )
+
+    artwork = (
+        client
+        .get_season_episode_artwork(
+            tmdb_id=100,
+            season_number=1,
+        )
+    )
+
+    assert set(artwork) == {
+        1,
+        2,
+        3,
+    }
+
+    first = artwork[1]
+
+    assert first.episode_number == 1
+    assert (
+        first.title
+        == "The Journey's End"
+    )
+    assert first.card is not None
+    assert (
+        first.card.source
+        is ArtworkSource.TMDB
+    )
+    assert (
+        first.card.quality
+        is ArtworkQuality.RAW_STILL
+    )
+    assert (
+        first.card.provider_asset_id
+        == "/one.jpg"
+    )
+
+    second = artwork[2]
+
+    assert (
+        second.title
+        == "No Still Available"
+    )
+    assert second.card is None
+
+    third = artwork[3]
+
+    assert third.title is None
+    assert third.card is not None
+
+    assert session.calls == [
+        {
+            "url": (
+                "https://tmdb.example/3"
+                "/tv/100/season/1"
+            ),
+            "params": {
+                "api_key": "test-key",
+            },
+            "timeout": 12.0,
+        }
+    ]

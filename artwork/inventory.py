@@ -10,11 +10,36 @@ from tv_metadata.models import ShowIdentity
 
 
 @dataclass(frozen=True)
+class EpisodeInventory:
+    """Generation-relevant metadata for one Plex episode."""
+
+    episode_number: int
+    title: str | None = None
+    plex_thumb: str | None = None
+
+
+@dataclass(frozen=True)
 class SeasonInventory:
     """Episodes currently present in one Plex season."""
 
     season_number: int
     episode_numbers: frozenset[int]
+    episodes: tuple[EpisodeInventory, ...] = ()
+
+    def episode(
+        self,
+        episode_number: int,
+    ) -> EpisodeInventory | None:
+        """Return metadata for one episode when present."""
+
+        for episode in self.episodes:
+            if (
+                episode.episode_number
+                == episode_number
+            ):
+                return episode
+
+        return None
 
 
 @dataclass(frozen=True)
@@ -59,6 +84,22 @@ def _positive_integer(
     return parsed
 
 
+def _clean_optional_text(
+    value,
+) -> str | None:
+    """Normalize optional Plex text metadata."""
+
+    if not isinstance(
+        value,
+        str,
+    ):
+        return None
+
+    value = value.strip()
+
+    return value or None
+
+
 def build_show_inventory(
     show,
     library: str,
@@ -87,7 +128,10 @@ def build_show_inventory(
         if season_number is None:
             continue
 
-        episode_numbers: set[int] = set()
+        episodes: dict[
+            int,
+            EpisodeInventory,
+        ] = {}
 
         for plex_episode in plex_season.episodes():
             episode_number = _positive_integer(
@@ -104,18 +148,55 @@ def build_show_inventory(
             ):
                 continue
 
-            episode_numbers.add(
-                episode_number
+            # Duplicate episode numbers are already normalized by the
+            # v3 inventory model. Preserve the first usable Plex entry
+            # so generation inputs are deterministic too.
+            episodes.setdefault(
+                episode_number,
+                EpisodeInventory(
+                    episode_number=(
+                        episode_number
+                    ),
+                    title=(
+                        _clean_optional_text(
+                            getattr(
+                                plex_episode,
+                                "title",
+                                None,
+                            )
+                        )
+                    ),
+                    plex_thumb=(
+                        _clean_optional_text(
+                            getattr(
+                                plex_episode,
+                                "thumb",
+                                None,
+                            )
+                        )
+                    ),
+                ),
             )
 
-        if not episode_numbers:
+        if not episodes:
             continue
+
+        episode_numbers = frozenset(
+            episodes
+        )
 
         seasons.append(
             SeasonInventory(
                 season_number=season_number,
-                episode_numbers=frozenset(
+                episode_numbers=(
                     episode_numbers
+                ),
+                episodes=tuple(
+                    episodes[
+                        episode_number
+                    ]
+                    for episode_number
+                    in sorted(episodes)
                 ),
             )
         )

@@ -44,6 +44,15 @@ class TMDBMovieArtwork:
     background: ArtworkAsset | None = None
 
 
+@dataclass(frozen=True)
+class TMDBEpisodeArtwork:
+    """Generation-relevant TMDB metadata for one TV episode."""
+
+    episode_number: int
+    title: str | None = None
+    card: ArtworkAsset | None = None
+
+
 class TMDBArtworkClient(
     MetadataTMDBProvider
 ):
@@ -367,16 +376,17 @@ class TMDBArtworkClient(
             background=background,
         )
 
-    def get_season_episode_cards(
+    def get_season_episode_artwork(
         self,
         *,
         tmdb_id: int,
         season_number: int,
-    ) -> dict[int, ArtworkAsset]:
-        """Return available episode stills for one TMDB season.
+    ) -> dict[int, TMDBEpisodeArtwork]:
+        """Return title/still metadata for one TMDB season.
 
-        One season request can resolve many missing episode cards.
-        Missing stills are omitted from the result.
+        Episodes remain present even when TMDB has no usable still so
+        Artwork Generator may still use the TMDB title with a Plex
+        thumbnail fallback.
         """
 
         response = self._get(
@@ -398,9 +408,9 @@ class TMDBArtworkClient(
             or []
         )
 
-        cards: dict[
+        artwork: dict[
             int,
-            ArtworkAsset,
+            TMDBEpisodeArtwork,
         ] = {}
 
         for raw_episode in episodes:
@@ -416,51 +426,98 @@ class TMDBArtworkClient(
                 )
             )
 
-            still_path = (
-                raw_episode.get(
-                    "still_path"
-                )
-            )
-
             if not isinstance(
                 episode_number,
                 int,
             ):
                 continue
 
-            if not isinstance(
+            raw_title = raw_episode.get(
+                "name"
+            )
+
+            title = None
+
+            if isinstance(
+                raw_title,
+                str,
+            ):
+                raw_title = raw_title.strip()
+
+                if raw_title:
+                    title = raw_title
+
+            still_path = raw_episode.get(
+                "still_path"
+            )
+
+            card = None
+
+            if isinstance(
                 still_path,
                 str,
             ):
-                continue
+                still_path = (
+                    still_path.strip()
+                )
 
-            still_path = (
-                still_path.strip()
-            )
+                if still_path:
+                    card = ArtworkAsset(
+                        kind=(
+                            ArtworkKind
+                            .EPISODE_CARD
+                        ),
+                        source=(
+                            ArtworkSource.TMDB
+                        ),
+                        url=self._image_url(
+                            still_path
+                        ),
+                        provider_asset_id=(
+                            still_path
+                        ),
+                        quality=(
+                            ArtworkQuality
+                            .RAW_STILL
+                        ),
+                    )
 
-            if not still_path:
-                continue
-
-            cards[
+            artwork[
                 episode_number
-            ] = ArtworkAsset(
-                kind=(
-                    ArtworkKind
-                    .EPISODE_CARD
+            ] = TMDBEpisodeArtwork(
+                episode_number=(
+                    episode_number
                 ),
-                source=(
-                    ArtworkSource.TMDB
-                ),
-                url=self._image_url(
-                    still_path
-                ),
-                provider_asset_id=(
-                    still_path
-                ),
-                quality=(
-                    ArtworkQuality
-                    .RAW_STILL
-                ),
+                title=title,
+                card=card,
             )
 
-        return cards
+        return artwork
+
+    def get_season_episode_cards(
+        self,
+        *,
+        tmdb_id: int,
+        season_number: int,
+    ) -> dict[int, ArtworkAsset]:
+        """Return available episode stills for one TMDB season.
+
+        This compatibility view preserves the Artwork Manager 3.0
+        contract while generation consumes the richer episode metadata.
+        """
+
+        artwork = (
+            self.get_season_episode_artwork(
+                tmdb_id=tmdb_id,
+                season_number=season_number,
+            )
+        )
+
+        return {
+            episode_number: episode.card
+            for (
+                episode_number,
+                episode,
+            ) in artwork.items()
+            if episode.card is not None
+        }

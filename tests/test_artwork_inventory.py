@@ -7,16 +7,33 @@ class FakeGuid:
 
 
 class FakeEpisode:
-    def __init__(self, index):
+    def __init__(
+        self,
+        index,
+        *,
+        title=None,
+        thumb=None,
+    ):
         self.index = index
+        self.title = title
+        self.thumb = thumb
 
 
 class FakeSeason:
     def __init__(self, index, episodes):
         self.index = index
         self._episodes = [
-            FakeEpisode(number)
-            for number in episodes
+            (
+                episode
+                if isinstance(
+                    episode,
+                    FakeEpisode,
+                )
+                else FakeEpisode(
+                    episode
+                )
+            )
+            for episode in episodes
         ]
 
     def episodes(self):
@@ -216,3 +233,125 @@ def test_inventory_feeds_coverage_shape_directly():
     assert expected[2] == frozenset(
         {1, 2}
     )
+
+
+def test_collects_episode_generation_metadata():
+    show = FakeShow(
+        seasons=[
+            FakeSeason(
+                1,
+                [
+                    FakeEpisode(
+                        1,
+                        title=(
+                            "The Journey's End"
+                        ),
+                        thumb=(
+                            "/library/metadata/"
+                            "123/thumb/456"
+                        ),
+                    ),
+                    FakeEpisode(
+                        2,
+                        title=(
+                            "It Didn't Have "
+                            "to Be Magic..."
+                        ),
+                        thumb=(
+                            "/library/metadata/"
+                            "124/thumb/457"
+                        ),
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    inventory = build_show_inventory(
+        show,
+        "TV",
+    )
+
+    season = inventory.season(1)
+
+    assert season is not None
+
+    episode = season.episode(1)
+
+    assert episode is not None
+    assert episode.episode_number == 1
+    assert (
+        episode.title
+        == "The Journey's End"
+    )
+    assert episode.plex_thumb == (
+        "/library/metadata/123/thumb/456"
+    )
+
+    second_episode = season.episode(2)
+
+    assert second_episode is not None
+    assert second_episode.title == (
+        "It Didn't Have to Be Magic..."
+    )
+
+
+def test_normalizes_blank_episode_generation_metadata():
+    show = FakeShow(
+        seasons=[
+            FakeSeason(
+                1,
+                [
+                    FakeEpisode(
+                        1,
+                        title="   ",
+                        thumb="   ",
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    inventory = build_show_inventory(
+        show,
+        "TV",
+    )
+
+    season = inventory.season(1)
+
+    assert season is not None
+
+    episode = season.episode(1)
+
+    assert episode is not None
+    assert episode.title is None
+    assert episode.plex_thumb is None
+
+
+def test_episode_metadata_preserves_existing_coverage_shape():
+    show = FakeShow(
+        seasons=[
+            FakeSeason(
+                1,
+                [
+                    FakeEpisode(
+                        1,
+                        title="Episode One",
+                    ),
+                    FakeEpisode(
+                        2,
+                        title="Episode Two",
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    inventory = build_show_inventory(
+        show,
+        "TV",
+    )
+
+    assert inventory.expected_episodes() == {
+        1: frozenset({1, 2}),
+    }
