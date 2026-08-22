@@ -70,6 +70,50 @@ def _load_config(path: Path) -> dict:
     return payload
 
 
+def _legacy_metadata_by_library(
+    values: tuple[str, ...],
+) -> dict[str, Path] | None:
+    """Parse explicit LIBRARY=PATH legacy bootstrap mappings."""
+
+    if not values:
+        return None
+
+    result: dict[str, Path] = {}
+
+    for raw_value in values:
+        library, separator, raw_path = (
+            raw_value.partition("=")
+        )
+
+        library = library.strip()
+        raw_path = raw_path.strip()
+
+        if (
+            not separator
+            or not library
+            or not raw_path
+        ):
+            raise click.BadParameter(
+                "must use LIBRARY=PATH with both "
+                "an exact Plex library name and "
+                "a metadata path",
+                param_hint="--legacy-metadata",
+            )
+
+        if library in result:
+            raise click.BadParameter(
+                f"duplicate legacy metadata mapping "
+                f"for library {library!r}",
+                param_hint="--legacy-metadata",
+            )
+
+        result[library] = Path(
+            raw_path
+        )
+
+    return result
+
+
 def _connect_plex(config: dict):
     plex_config = (
         config.get(
@@ -510,6 +554,17 @@ def status(
     ),
 )
 @click.option(
+    "--legacy-metadata",
+    "legacy_metadata",
+    multiple=True,
+    metavar="LIBRARY=PATH",
+    help=(
+        "Explicit legacy Artwork Manager metadata "
+        "bootstrap mapping. May be specified "
+        "multiple times."
+    ),
+)
+@click.option(
     "--json",
     "as_json",
     is_flag=True,
@@ -519,9 +574,16 @@ def status(
 def scan(
     ctx,
     libraries,
+    legacy_metadata,
     as_json,
 ):
     """Build a read-only Artwork Manager preview."""
+
+    legacy_metadata_by_library = (
+        _legacy_metadata_by_library(
+            legacy_metadata
+        )
+    )
 
     try:
         config = (
@@ -542,6 +604,9 @@ def scan(
                     _selected_libraries(
                         libraries
                     )
+                ),
+                legacy_metadata_by_library=(
+                    legacy_metadata_by_library
                 ),
                 progress_callback=(
                     _artwork_progress_reporter()
@@ -622,6 +687,17 @@ def scan(
     ),
 )
 @click.option(
+    "--legacy-metadata",
+    "legacy_metadata",
+    multiple=True,
+    metavar="LIBRARY=PATH",
+    help=(
+        "Explicit legacy Artwork Manager metadata "
+        "bootstrap mapping. May be specified "
+        "multiple times."
+    ),
+)
+@click.option(
     "--json",
     "as_json",
     is_flag=True,
@@ -631,9 +707,16 @@ def scan(
 def run_command(
     ctx,
     libraries,
+    legacy_metadata,
     as_json,
 ):
     """Run Artwork Manager using configured apply_mode."""
+
+    legacy_metadata_by_library = (
+        _legacy_metadata_by_library(
+            legacy_metadata
+        )
+    )
 
     try:
         config = (
@@ -660,6 +743,9 @@ def run_command(
                     _selected_libraries(
                         libraries
                     )
+                ),
+                legacy_metadata_by_library=(
+                    legacy_metadata_by_library
                 ),
                 progress_callback=(
                     _artwork_progress_reporter()

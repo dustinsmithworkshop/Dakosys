@@ -208,6 +208,7 @@ def test_scan_is_read_only_and_forwards_library(
         plex,
         config,
         selected_libraries,
+        legacy_metadata_by_library=None,
         progress_callback=None,
     ):
         captured[
@@ -312,6 +313,7 @@ def test_scan_forwards_multiple_exact_library_names(
         plex,
         config,
         selected_libraries,
+        legacy_metadata_by_library=None,
         progress_callback=None,
     ):
         captured[
@@ -390,6 +392,7 @@ def test_run_delegates_to_runtime_and_history(
         config,
         selected_libraries,
         history_directory,
+        legacy_metadata_by_library=None,
         progress_callback=None,
     ):
         captured[
@@ -602,3 +605,187 @@ def test_history_reads_recent_records(
     assert "3 no changes" in (
         result.output
     )
+
+
+def test_scan_forwards_explicit_legacy_metadata(
+    monkeypatch,
+):
+    runner = CliRunner()
+
+    captured = {}
+
+    monkeypatch.setattr(
+        artwork_cli,
+        "_config_from_context",
+        lambda ctx: _config(),
+    )
+
+    monkeypatch.setattr(
+        artwork_cli,
+        "_connect_plex",
+        lambda config: object(),
+    )
+
+    def build_workflow(
+        *,
+        plex,
+        config,
+        selected_libraries,
+        legacy_metadata_by_library=None,
+        progress_callback=None,
+    ):
+        captured[
+            "legacy_metadata_by_library"
+        ] = legacy_metadata_by_library
+
+        return object()
+
+    monkeypatch.setattr(
+        artwork_cli,
+        (
+            "build_configured_"
+            "artwork_manager_workflow"
+        ),
+        build_workflow,
+    )
+
+    monkeypatch.setattr(
+        artwork_cli,
+        "serialize_artwork_workflow",
+        lambda workflow: {
+            "summary": {
+                "library_count": 0,
+                "skipped_count": 0,
+                "safe_to_apply": True,
+                "changed_files": 0,
+            },
+            "libraries": [],
+            "skipped": [],
+        },
+    )
+
+    result = runner.invoke(
+        artwork_cli.cli,
+        [
+            "scan",
+            "--library",
+            "TV",
+            "--legacy-metadata",
+            "TV=/tmp/mediux-tv.yml",
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    assert captured[
+        "legacy_metadata_by_library"
+    ] == {
+        "TV": Path(
+            "/tmp/mediux-tv.yml"
+        ),
+    }
+
+
+def test_run_forwards_explicit_legacy_metadata(
+    monkeypatch,
+):
+    runner = CliRunner()
+
+    captured = {}
+
+    monkeypatch.setattr(
+        artwork_cli,
+        "_config_from_context",
+        lambda ctx: _config(),
+    )
+
+    monkeypatch.setattr(
+        artwork_cli,
+        "_connect_plex",
+        lambda config: object(),
+    )
+
+    def run_manager(
+        *,
+        plex,
+        config,
+        selected_libraries,
+        history_directory,
+        legacy_metadata_by_library=None,
+        progress_callback=None,
+    ):
+        captured[
+            "legacy_metadata_by_library"
+        ] = legacy_metadata_by_library
+
+        return object()
+
+    monkeypatch.setattr(
+        artwork_cli,
+        "run_configured_artwork_manager",
+        run_manager,
+    )
+
+    record = _run_record(
+        no_changes=1,
+    )
+
+    monkeypatch.setattr(
+        artwork_cli,
+        "load_latest_artwork_run",
+        lambda directory: record,
+    )
+
+    result = runner.invoke(
+        artwork_cli.cli,
+        [
+            "run",
+            "--legacy-metadata",
+            "TV=/tmp/mediux-tv.yml",
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    assert captured[
+        "legacy_metadata_by_library"
+    ] == {
+        "TV": Path(
+            "/tmp/mediux-tv.yml"
+        ),
+    }
+
+
+def test_legacy_metadata_rejects_malformed_mapping():
+    runner = CliRunner()
+
+    result = runner.invoke(
+        artwork_cli.cli,
+        [
+            "scan",
+            "--legacy-metadata",
+            "TV",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "LIBRARY=PATH" in result.output
+
+
+def test_legacy_metadata_rejects_duplicate_library():
+    runner = CliRunner()
+
+    result = runner.invoke(
+        artwork_cli.cli,
+        [
+            "scan",
+            "--legacy-metadata",
+            "TV=/tmp/first.yml",
+            "--legacy-metadata",
+            "TV=/tmp/second.yml",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "duplicate" in result.output
+    assert "TV" in result.output
