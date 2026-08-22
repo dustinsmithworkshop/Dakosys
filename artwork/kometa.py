@@ -93,21 +93,42 @@ def build_kometa_metadata(
             ) in sorted(
                 season.episodes.items()
             ):
-                card_url = (
-                    _asset_url(
-                        episode.card
-                    )
+                card = (
+                    episode.card
                 )
 
-                if not card_url:
+                if card is None:
                     continue
+
+                card_file = (
+                    card.file_path
+                    or ""
+                ).strip()
+
+                if card_file:
+                    card_entry = {
+                        "file_poster":
+                            card_file,
+                    }
+
+                else:
+                    card_url = (
+                        _asset_url(
+                            card
+                        )
+                    )
+
+                    if not card_url:
+                        continue
+
+                    card_entry = {
+                        "url_poster":
+                            card_url,
+                    }
 
                 episodes[
                     episode_number
-                ] = {
-                    "url_poster":
-                        card_url,
-                }
+                ] = card_entry
 
             if episodes:
                 season_entry[

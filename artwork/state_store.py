@@ -37,7 +37,23 @@ if TYPE_CHECKING:
 
 
 STATE_NAME = ".dakosys-state.json"
+# Legacy/shared state schema version.
+#
+# Movie state still uses schema v1. Keep this constant stable because
+# artwork.movie_state_store imports it directly.
 STATE_SCHEMA_VERSION = 1
+
+# Show state gained local generated-artwork delivery metadata in
+# Dakosys 3.1, so show-state writes use schema v2 while remaining
+# backward-compatible with existing v1 show state.
+SHOW_STATE_SCHEMA_VERSION = 2
+
+SUPPORTED_SHOW_STATE_SCHEMA_VERSIONS = frozenset(
+    {
+        STATE_SCHEMA_VERSION,
+        SHOW_STATE_SCHEMA_VERSION,
+    }
+)
 
 
 class ArtworkStateStoreError(RuntimeError):
@@ -86,7 +102,7 @@ class ArtworkStateStore:
     ) -> dict:
         return {
             "schema_version":
-                STATE_SCHEMA_VERSION,
+                SHOW_STATE_SCHEMA_VERSION,
             "library":
                 self.library,
             "items": {
@@ -236,6 +252,8 @@ def _asset_to_dict(
             if asset.quality is not None
             else None
         ),
+        "file_path":
+            asset.file_path,
     }
 
 
@@ -307,6 +325,17 @@ def _asset_from_dict(
             )
         ),
         quality=quality,
+        file_path=(
+            _optional_string(
+                raw.get(
+                    "file_path"
+                ),
+                field=(
+                    f"{field}."
+                    "file_path"
+                ),
+            )
+        ),
     )
 
 
@@ -847,7 +876,7 @@ def load_show_state_store(
         raw.get(
             "schema_version"
         )
-        != STATE_SCHEMA_VERSION
+        not in SUPPORTED_SHOW_STATE_SCHEMA_VERSIONS
     ):
         raise InvalidArtworkStateStoreError(
             "unsupported Artwork Manager "

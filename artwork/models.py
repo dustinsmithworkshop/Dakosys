@@ -46,6 +46,7 @@ class ArtworkAsset:
     url: Optional[str] = None
     provider_asset_id: Optional[str] = None
     quality: Optional[ArtworkQuality] = None
+    file_path: Optional[str] = None
 
     @property
     def available(self) -> bool:
@@ -59,6 +60,10 @@ class ArtworkAsset:
             (self.url or "").strip()
             or (
                 self.provider_asset_id
+                or ""
+            ).strip()
+            or (
+                self.file_path
                 or ""
             ).strip()
         )

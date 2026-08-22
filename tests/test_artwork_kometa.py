@@ -8,6 +8,15 @@ from artwork.kometa import (
     render_kometa_metadata,
 )
 from artwork.migration import import_mediux_metadata
+from artwork.models import (
+    ArtworkAsset,
+    ArtworkKind,
+    ArtworkQuality,
+    ArtworkSource,
+    EpisodeArtwork,
+    SeasonArtwork,
+    ShowArtworkState,
+)
 
 
 FIXTURE = Path(
@@ -276,3 +285,125 @@ def test_duplicate_tvdb_identity_is_rejected():
         build_kometa_metadata(
             duplicate
         )
+
+
+def test_generated_episode_uses_file_poster():
+    show = ShowArtworkState(
+        title="Example Show",
+        tvdb_id=100,
+        seasons={
+            1: SeasonArtwork(
+                season_number=1,
+                episodes={
+                    1: EpisodeArtwork(
+                        episode_number=1,
+                        card=ArtworkAsset(
+                            kind=(
+                                ArtworkKind
+                                .EPISODE_CARD
+                            ),
+                            source=(
+                                ArtworkSource
+                                .GENERATED
+                            ),
+                            quality=(
+                                ArtworkQuality
+                                .GENERATED
+                            ),
+                            file_path=(
+                                "/config/assets/"
+                                "generated/tv/"
+                                "tmdb-100/"
+                                "season-01/"
+                                "S01E01-test.jpg"
+                            ),
+                        ),
+                    ),
+                },
+            ),
+        },
+    )
+
+    generated = build_kometa_metadata(
+        [show]
+    )
+
+    episode = (
+        generated[
+            "metadata"
+        ][100][
+            "seasons"
+        ][1][
+            "episodes"
+        ][1]
+    )
+
+    assert episode == {
+        "file_poster": (
+            "/config/assets/"
+            "generated/tv/"
+            "tmdb-100/"
+            "season-01/"
+            "S01E01-test.jpg"
+        ),
+    }
+
+
+def test_local_episode_file_is_preferred_over_url():
+    show = ShowArtworkState(
+        title="Example Show",
+        tvdb_id=100,
+        seasons={
+            1: SeasonArtwork(
+                season_number=1,
+                episodes={
+                    1: EpisodeArtwork(
+                        episode_number=1,
+                        card=ArtworkAsset(
+                            kind=(
+                                ArtworkKind
+                                .EPISODE_CARD
+                            ),
+                            source=(
+                                ArtworkSource
+                                .GENERATED
+                            ),
+                            url=(
+                                "https://example.test/"
+                                "should-not-win.jpg"
+                            ),
+                            file_path=(
+                                "/config/assets/"
+                                "generated/card.jpg"
+                            ),
+                            quality=(
+                                ArtworkQuality
+                                .GENERATED
+                            ),
+                        ),
+                    ),
+                },
+            ),
+        },
+    )
+
+    generated = build_kometa_metadata(
+        [show]
+    )
+
+    episode = (
+        generated[
+            "metadata"
+        ][100][
+            "seasons"
+        ][1][
+            "episodes"
+        ][1]
+    )
+
+    assert episode == {
+        "file_poster": (
+            "/config/assets/"
+            "generated/card.jpg"
+        ),
+    }

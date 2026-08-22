@@ -162,7 +162,7 @@ def test_state_store_round_trip_preserves_provenance(
 
     assert document[
         "schema_version"
-    ] == 1
+    ] == 2
 
     assert document[
         "items"
@@ -294,3 +294,175 @@ def test_corrupt_state_is_rejected(
             directory,
             expected_library="TV",
         )
+
+
+def test_state_store_reads_legacy_schema_v1(
+    tmp_path,
+):
+    execution = _execution(
+        tmp_path
+    )
+
+    store = build_show_state_store(
+        execution
+    )
+
+    document = store.to_dict()
+
+    document[
+        "schema_version"
+    ] = 1
+
+    def remove_file_path(value):
+        if isinstance(
+            value,
+            dict,
+        ):
+            value.pop(
+                "file_path",
+                None,
+            )
+
+            for child in value.values():
+                remove_file_path(
+                    child
+                )
+
+        elif isinstance(
+            value,
+            list,
+        ):
+            for child in value:
+                remove_file_path(
+                    child
+                )
+
+    remove_file_path(
+        document
+    )
+
+    directory = (
+        tmp_path
+        / "artwork-tv"
+    )
+
+    directory.mkdir()
+
+    (
+        directory
+        / STATE_NAME
+    ).write_text(
+        json.dumps(
+            document
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = load_show_state_store(
+        directory,
+        expected_library="TV",
+    )
+
+    assert loaded is not None
+
+    card = (
+        loaded
+        .items[0]
+        .state
+        .seasons[1]
+        .episodes[1]
+        .card
+    )
+
+    assert card is not None
+    assert card.file_path is None
+
+
+def test_state_store_preserves_generated_file_path(
+    tmp_path,
+):
+    execution = _execution(
+        tmp_path
+    )
+
+    state = (
+        execution
+        .managed_coverage[0]
+        .state
+    )
+
+    state.seasons[
+        1
+    ].episodes[
+        1
+    ].card = ArtworkAsset(
+        kind=(
+            ArtworkKind
+            .EPISODE_CARD
+        ),
+        source=(
+            ArtworkSource
+            .GENERATED
+        ),
+        provider_asset_id=(
+            "generated-fingerprint"
+        ),
+        quality=(
+            ArtworkQuality
+            .GENERATED
+        ),
+        file_path=(
+            "/config/assets/"
+            "generated/tv/"
+            "tmdb-200/"
+            "season-01/"
+            "S01E01-test.jpg"
+        ),
+    )
+
+    store = build_show_state_store(
+        execution
+    )
+
+    directory = (
+        tmp_path
+        / "artwork-tv"
+    )
+
+    directory.mkdir()
+
+    (
+        directory
+        / STATE_NAME
+    ).write_text(
+        store.to_json(),
+        encoding="utf-8",
+    )
+
+    loaded = load_show_state_store(
+        directory,
+        expected_library="TV",
+    )
+
+    assert loaded is not None
+
+    card = (
+        loaded
+        .items[0]
+        .state
+        .seasons[1]
+        .episodes[1]
+        .card
+    )
+
+    assert card is not None
+
+    assert card.file_path == (
+        "/config/assets/"
+        "generated/tv/"
+        "tmdb-200/"
+        "season-01/"
+        "S01E01-test.jpg"
+    )
+
+    assert card.available
