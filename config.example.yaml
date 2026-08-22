@@ -79,6 +79,37 @@ services:
 
     output_dir: /kometa/metadata
 
+    # Optional Dakosys-generated episode title cards.
+    #
+    # Disabled by default. When enabled, generation is used only when
+    # higher-priority curated artwork is unavailable or when an existing
+    # lower-tier fallback can be safely upgraded.
+    #
+    # Generated artwork never overrides manual/locked artwork and can
+    # later be replaced automatically when better MediUX artwork appears.
+    generated_episode_cards:
+      enabled: false
+
+      # Kometa's view of its asset directory.
+      #
+      # Dakosys writes generated files beneath:
+      #
+      #   kometa_config.asset_directory/generated-artwork/
+      #
+      # and renders file_poster paths beneath:
+      #
+      #   <kometa_asset_directory>/generated-artwork/
+      #
+      # Example Docker mapping:
+      #
+      #   Dakosys: /kometa/assets/generated-artwork/
+      #   Kometa:  /config/assets/generated-artwork/
+      kometa_asset_directory: /config/assets
+
+      # Creative styling is intentionally kept in a separate versioned
+      # configuration file. Missing file = safe built-in defaults.
+      config_file: config/artwork-generator.yaml
+
     providers:
       mediux:
         # MediUX is the required primary Artwork Manager provider.

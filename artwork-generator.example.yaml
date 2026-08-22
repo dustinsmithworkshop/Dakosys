@@ -1,0 +1,61 @@
+# Dakosys Artwork Generator creative configuration
+#
+# Copy this file to:
+#
+#   config/artwork-generator.yaml
+#
+# This file controls the visual style of Dakosys-generated episode
+# title cards. It does not enable the generator itself.
+#
+# Enable generation separately in config/config.yaml:
+#
+# services:
+#   artwork_manager:
+#     generated_episode_cards:
+#       enabled: true
+#
+# Inheritance:
+#
+#   Show > Library > Global
+#
+# Show overrides use stable Dakosys artwork identity keys such as
+# tmdb:1398 rather than display titles.
+
+version: 1
+
+defaults:
+  font: marcellus
+
+# Optional exact Plex-library overrides.
+#
+# libraries:
+#   Anime:
+#     font: cormorant_garamond
+#
+#   TV:
+#     font: libre_baskerville
+
+libraries: {}
+
+# Optional stable show-identity overrides.
+#
+# shows:
+#   "tmdb:1398":
+#     font: prata
+#
+#   "tmdb:1399":
+#     font: cinzel
+
+shows: {}
+
+# Supported fonts:
+#
+#   marcellus
+#   prata
+#   cormorant_garamond
+#   syne
+#   libre_baskerville
+#   cinzel
+#
+# Japanese/CJK text automatically uses Dakosys's bundled Noto Sans JP
+# fallback when required.
