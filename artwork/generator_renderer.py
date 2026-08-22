@@ -11,6 +11,10 @@ from PIL import ImageFont
 from PIL import ImageOps
 
 
+RENDERER_VERSION = 1
+STYLE_VERSION = 1
+
+
 CANVAS_WIDTH = 1920
 CANVAS_HEIGHT = 1080
 CANVAS_SIZE = (
