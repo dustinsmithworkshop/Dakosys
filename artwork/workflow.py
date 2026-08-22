@@ -20,6 +20,9 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from artwork.episode_coverage import (
+    EpisodeGeneratorOptions,
+)
 from artwork.inventory import build_show_inventory
 from artwork.movie_inventory import (
     build_movie_inventory,
@@ -591,6 +594,10 @@ def build_artwork_target_workflow(
     target: ArtworkTarget,
     provider: ArtworkProvider,
     tmdb_client: TMDBArtworkClient | None = None,
+    generator_options: (
+        EpisodeGeneratorOptions
+        | None
+    ) = None,
     legacy_metadata: str | Path | None = None,
     incomplete_migration_threshold: float = 0.25,
     progress_callback: ArtworkProgressCallback | None = None,
@@ -709,6 +716,9 @@ def build_artwork_target_workflow(
         managed_shows=baseline.states,
         provider=provider,
         tmdb_client=tmdb_client,
+        generator_options=(
+            generator_options
+        ),
         incomplete_migration_threshold=(
             incomplete_migration_threshold
         ),
@@ -797,6 +807,10 @@ def build_artwork_manager_workflow(
     config: dict,
     provider: ArtworkProvider,
     tmdb_client: TMDBArtworkClient | None = None,
+    generator_options: (
+        EpisodeGeneratorOptions
+        | None
+    ) = None,
     selected_libraries: str | Iterable[str] | None = None,
     legacy_metadata_by_library: Mapping[
         str,
@@ -843,6 +857,9 @@ def build_artwork_manager_workflow(
                 target=target,
                 provider=provider,
                 tmdb_client=tmdb_client,
+                generator_options=(
+                    generator_options
+                ),
                 legacy_metadata=(
                     legacy.get(
                         target.library

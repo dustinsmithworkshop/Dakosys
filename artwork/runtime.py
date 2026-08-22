@@ -24,6 +24,12 @@ from artwork.apply_policy import (
     ArtworkApplyMode,
     resolve_artwork_apply_mode,
 )
+from artwork.episode_coverage import (
+    EpisodeGeneratorOptions,
+)
+from artwork.generator_config import (
+    load_artwork_generator_config,
+)
 from artwork.item_store import (
     ItemStoreError,
 )
@@ -77,6 +83,21 @@ class ArtworkRuntime:
     tmdb_client: TMDBArtworkClient | None
     apply_mode: ArtworkApplyMode
 
+    generator_options: (
+        EpisodeGeneratorOptions
+        | None
+    ) = None
+
+    @property
+    def generator_enabled(
+        self,
+    ) -> bool:
+        return bool(
+            self.generator_options
+            is not None
+            and self.generator_options.enabled
+        )
+
     @property
     def primary_provider_name(self) -> str:
         return str(
@@ -111,6 +132,28 @@ def _mapping(
         )
 
     return dict(value)
+
+
+def _boolean(
+    value,
+    *,
+    field: str,
+    default: bool = False,
+) -> bool:
+    """Return one strict boolean configuration value."""
+
+    if value is None:
+        return default
+
+    if not isinstance(
+        value,
+        bool,
+    ):
+        raise ValueError(
+            f"{field} must be a boolean"
+        )
+
+    return value
 
 
 def _optional_string(
@@ -294,10 +337,179 @@ def build_artwork_runtime(
             )
         )
 
+    generated_episode_cards = _mapping(
+        service.get(
+            "generated_episode_cards"
+        ),
+        field=(
+            "services.artwork_manager."
+            "generated_episode_cards"
+        ),
+    )
+
+    generator_enabled = _boolean(
+        generated_episode_cards.get(
+            "enabled"
+        ),
+        field=(
+            "services.artwork_manager."
+            "generated_episode_cards.enabled"
+        ),
+        default=False,
+    )
+
+    generator_options = None
+
+    if generator_enabled:
+        plex_config = _mapping(
+            config.get("plex"),
+            field="plex",
+        )
+
+        plex_url = _optional_string(
+            plex_config.get("url"),
+            field="plex.url",
+        )
+
+        plex_token = _optional_string(
+            plex_config.get("token"),
+            field="plex.token",
+        )
+
+        if plex_url is None:
+            raise ValueError(
+                "Artwork Generator requires "
+                "plex.url"
+            )
+
+        if plex_token is None:
+            raise ValueError(
+                "Artwork Generator requires "
+                "plex.token"
+            )
+
+        kometa_config = _mapping(
+            config.get(
+                "kometa_config"
+            ),
+            field="kometa_config",
+        )
+
+        dakosys_asset_directory = (
+            _optional_string(
+                kometa_config.get(
+                    "asset_directory"
+                ),
+                field=(
+                    "kometa_config."
+                    "asset_directory"
+                ),
+            )
+        )
+
+        if (
+            dakosys_asset_directory
+            is None
+        ):
+            raise ValueError(
+                "Artwork Generator requires "
+                "kometa_config.asset_directory"
+            )
+
+        kometa_asset_directory = (
+            _optional_string(
+                generated_episode_cards.get(
+                    "kometa_asset_directory"
+                ),
+                field=(
+                    "services.artwork_manager."
+                    "generated_episode_cards."
+                    "kometa_asset_directory"
+                ),
+            )
+        )
+
+        if kometa_asset_directory is None:
+            raise ValueError(
+                "Artwork Generator requires "
+                "services.artwork_manager."
+                "generated_episode_cards."
+                "kometa_asset_directory"
+            )
+
+        dakosys_asset_root = Path(
+            dakosys_asset_directory
+        )
+
+        if not (
+            dakosys_asset_root
+            .is_absolute()
+        ):
+            raise ValueError(
+                "kometa_config.asset_directory "
+                "must be an absolute path for "
+                "Artwork Generator"
+            )
+
+        if not (
+            kometa_asset_directory
+            .startswith("/")
+        ):
+            raise ValueError(
+                "generated_episode_cards."
+                "kometa_asset_directory must "
+                "be an absolute POSIX path"
+            )
+
+        creative_config_file = (
+            _optional_string(
+                generated_episode_cards.get(
+                    "config_file"
+                ),
+                field=(
+                    "services.artwork_manager."
+                    "generated_episode_cards."
+                    "config_file"
+                ),
+            )
+            or "config/artwork-generator.yaml"
+        )
+
+        creative_config = (
+            load_artwork_generator_config(
+                Path(
+                    creative_config_file
+                )
+            )
+        )
+
+        generator_options = (
+            EpisodeGeneratorOptions(
+                enabled=True,
+                local_root=(
+                    dakosys_asset_root
+                    / "generated-artwork"
+                ),
+                kometa_root=(
+                    kometa_asset_directory
+                    .rstrip("/")
+                    + "/generated-artwork"
+                ),
+                creative_config=(
+                    creative_config
+                ),
+                plex_base_url=plex_url,
+                plex_token=plex_token,
+            )
+        )
+
     return ArtworkRuntime(
         provider=provider,
         tmdb_client=tmdb_client,
         apply_mode=apply_mode,
+        generator_options=(
+            generator_options
+        ),
     )
 
 
@@ -351,6 +563,11 @@ def build_configured_artwork_manager_workflow(
         provider=runtime.provider,
         tmdb_client=(
             runtime.tmdb_client
+        ),
+        generator_options=getattr(
+            runtime,
+            "generator_options",
+            None,
         ),
         selected_libraries=(
             selected_libraries
@@ -457,6 +674,11 @@ def run_configured_artwork_manager(
                     ),
                     tmdb_client=(
                         runtime.tmdb_client
+                    ),
+                    generator_options=getattr(
+                        runtime,
+                        "generator_options",
+                        None,
                     ),
                     legacy_metadata=(
                         legacy.get(

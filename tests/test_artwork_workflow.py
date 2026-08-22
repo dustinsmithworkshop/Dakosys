@@ -126,6 +126,7 @@ def _stub_show_pipeline(
         managed_shows,
         provider,
         tmdb_client=None,
+        generator_options=None,
         incomplete_migration_threshold=0.25,
     ):
         value = SimpleNamespace(

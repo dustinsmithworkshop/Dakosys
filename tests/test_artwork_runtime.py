@@ -195,9 +195,14 @@ def test_configured_workflow_passes_runtime_to_domain(
     provider = object()
     tmdb_client = object()
 
+    generator_options = object()
+
     runtime = SimpleNamespace(
         provider=provider,
         tmdb_client=tmdb_client,
+        generator_options=(
+            generator_options
+        ),
     )
 
     monkeypatch.setattr(
@@ -248,6 +253,11 @@ def test_configured_workflow_passes_runtime_to_domain(
     assert (
         seen["tmdb_client"]
         is tmdb_client
+    )
+
+    assert (
+        seen["generator_options"]
+        is generator_options
     )
 
     assert (
@@ -891,3 +901,275 @@ def test_configured_runner_continues_after_library_bootstrap_block(
         result.no_changes_count
         == 1
     )
+
+
+def test_generator_is_disabled_by_default():
+    runtime = build_artwork_runtime(
+        _config(),
+        environ={},
+    )
+
+    assert runtime is not None
+    assert not runtime.generator_enabled
+    assert runtime.generator_options is None
+
+
+def test_runtime_builds_generator_options(
+    tmp_path,
+):
+    config = _config()
+
+    config["plex"] = {
+        "url": "http://plex:32400",
+        "token": "plex-token",
+    }
+
+    config["kometa_config"] = {
+        "asset_directory":
+            "/kometa/assets",
+    }
+
+    creative = (
+        tmp_path
+        / "artwork-generator.yaml"
+    )
+
+    creative.write_text(
+        """
+version: 1
+
+defaults:
+  font: marcellus
+
+libraries:
+  Anime:
+    font: cormorant_garamond
+
+shows:
+  tmdb:1398:
+    font: prata
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    config[
+        "services"
+    ][
+        "artwork_manager"
+    ][
+        "generated_episode_cards"
+    ] = {
+        "enabled": True,
+        "kometa_asset_directory":
+            "/config/assets",
+        "config_file": str(
+            creative
+        ),
+    }
+
+    runtime = build_artwork_runtime(
+        config,
+        environ={},
+    )
+
+    assert runtime is not None
+    assert runtime.generator_enabled
+
+    options = (
+        runtime.generator_options
+    )
+
+    assert options is not None
+
+    assert str(
+        options.local_root
+    ) == (
+        "/kometa/assets/"
+        "generated-artwork"
+    )
+
+    assert options.kometa_root == (
+        "/config/assets/"
+        "generated-artwork"
+    )
+
+    assert (
+        options.plex_base_url
+        == "http://plex:32400"
+    )
+
+    assert (
+        options.plex_token
+        == "plex-token"
+    )
+
+    assert options.font_key is None
+
+    assert (
+        options.creative_config
+        .resolve_style(
+            library="TV",
+        )
+        .font
+        == "marcellus"
+    )
+
+    assert (
+        options.creative_config
+        .resolve_style(
+            library="Anime",
+        )
+        .font
+        == "cormorant_garamond"
+    )
+
+    assert (
+        options.creative_config
+        .resolve_style(
+            library="Anime",
+            show_id="tmdb:1398",
+        )
+        .font
+        == "prata"
+    )
+
+
+def test_generator_missing_creative_file_uses_safe_defaults(
+    tmp_path,
+):
+    config = _config()
+
+    config["plex"] = {
+        "url": "http://plex:32400",
+        "token": "plex-token",
+    }
+
+    config["kometa_config"] = {
+        "asset_directory":
+            "/kometa/assets",
+    }
+
+    config[
+        "services"
+    ][
+        "artwork_manager"
+    ][
+        "generated_episode_cards"
+    ] = {
+        "enabled": True,
+        "kometa_asset_directory":
+            "/config/assets",
+        "config_file": str(
+            tmp_path
+            / "missing.yaml"
+        ),
+    }
+
+    runtime = build_artwork_runtime(
+        config,
+        environ={},
+    )
+
+    assert runtime is not None
+
+    assert (
+        runtime
+        .generator_options
+        .creative_config
+        .resolve_style()
+        .font
+        == "marcellus"
+    )
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    (
+        "plex_url",
+        "plex_token",
+        "dakosys_assets",
+        "kometa_assets",
+    ),
+)
+def test_enabled_generator_requires_runtime_paths_and_plex(
+    tmp_path,
+    missing_field,
+):
+    config = _config()
+
+    config["plex"] = {
+        "url": "http://plex:32400",
+        "token": "plex-token",
+    }
+
+    config["kometa_config"] = {
+        "asset_directory":
+            "/kometa/assets",
+    }
+
+    generated = {
+        "enabled": True,
+        "kometa_asset_directory":
+            "/config/assets",
+        "config_file": str(
+            tmp_path
+            / "missing.yaml"
+        ),
+    }
+
+    config[
+        "services"
+    ][
+        "artwork_manager"
+    ][
+        "generated_episode_cards"
+    ] = generated
+
+    if missing_field == "plex_url":
+        config["plex"].pop("url")
+
+    elif missing_field == "plex_token":
+        config["plex"].pop("token")
+
+    elif missing_field == "dakosys_assets":
+        config[
+            "kometa_config"
+        ].pop(
+            "asset_directory"
+        )
+
+    elif missing_field == "kometa_assets":
+        generated.pop(
+            "kometa_asset_directory"
+        )
+
+    with pytest.raises(
+        ValueError,
+    ):
+        build_artwork_runtime(
+            config,
+            environ={},
+        )
+
+
+def test_generator_enabled_must_be_boolean():
+    config = _config()
+
+    config[
+        "services"
+    ][
+        "artwork_manager"
+    ][
+        "generated_episode_cards"
+    ] = {
+        "enabled": "false",
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="boolean",
+    ):
+        build_artwork_runtime(
+            config,
+            environ={},
+        )
