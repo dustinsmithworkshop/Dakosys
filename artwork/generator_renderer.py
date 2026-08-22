@@ -10,6 +10,10 @@ from PIL import ImageDraw
 from PIL import ImageFont
 from PIL import ImageOps
 
+from artwork.generator_config import (
+    DEFAULT_GENERATOR_FONT,
+)
+
 
 RENDERER_VERSION = 1
 STYLE_VERSION = 1
@@ -102,7 +106,7 @@ def render_episode_title_card(
     output_path: str | Path,
     episode_title: str,
     font_key: str = (
-        "cormorant_garamond"
+        DEFAULT_GENERATOR_FONT
     ),
     font_dir: str | Path = (
         "fonts/artwork-generator"
@@ -498,16 +502,128 @@ def _wrap_text_to_two_lines(
     font: ImageFont.FreeTypeFont,
     max_width: int,
 ) -> tuple[str, ...] | None:
+    """Fit text to at most two lines at the current font size.
+
+    Whitespace-delimited titles keep the existing word-based wrapping
+    behavior.
+
+    CJK titles may not contain spaces, so those are split at measured
+    character boundaries. The most balanced valid two-line composition
+    is selected deterministically.
+    """
+
     if _text_width(
         draw=draw,
         text=text,
         font=font,
     ) <= max_width:
-        return (text,)
+        return (
+            text,
+        )
+
+    if _contains_cjk(
+        text
+    ):
+        candidates: list[
+            tuple[
+                int,
+                int,
+                str,
+                str,
+            ]
+        ] = []
+
+        for split_index in range(
+            1,
+            len(text),
+        ):
+            first = (
+                text[
+                    :split_index
+                ]
+                .strip()
+            )
+
+            second = (
+                text[
+                    split_index:
+                ]
+                .strip()
+            )
+
+            if (
+                not first
+                or not second
+            ):
+                continue
+
+            first_width = (
+                _text_width(
+                    draw=draw,
+                    text=first,
+                    font=font,
+                )
+            )
+
+            second_width = (
+                _text_width(
+                    draw=draw,
+                    text=second,
+                    font=font,
+                )
+            )
+
+            if (
+                first_width
+                > max_width
+                or second_width
+                > max_width
+            ):
+                continue
+
+            candidates.append(
+                (
+                    abs(
+                        first_width
+                        - second_width
+                    ),
+                    max(
+                        first_width,
+                        second_width,
+                    ),
+                    first,
+                    second,
+                )
+            )
+
+        if not candidates:
+            return None
+
+        (
+            _imbalance,
+            _widest_line,
+            first,
+            second,
+        ) = min(
+            candidates,
+            key=lambda item: (
+                item[0],
+                item[1],
+                item[2],
+                item[3],
+            ),
+        )
+
+        return (
+            first,
+            second,
+        )
 
     words = text.split()
 
-    if len(words) <= 1:
+    if len(
+        words
+    ) <= 1:
         return None
 
     lines: list[str] = []
@@ -517,7 +633,10 @@ def _wrap_text_to_two_lines(
         proposal = (
             word
             if not current
-            else f"{current} {word}"
+            else (
+                f"{current} "
+                f"{word}"
+            )
         )
 
         if _text_width(
@@ -528,33 +647,41 @@ def _wrap_text_to_two_lines(
             current = proposal
             continue
 
-        if current:
-            lines.append(current)
-            current = word
-        else:
+        if not current:
             return None
 
-        if len(lines) > 1:
+        lines.append(
+            current
+        )
+
+        if len(
+            lines
+        ) >= 2:
+            return None
+
+        current = word
+
+        if _text_width(
+            draw=draw,
+            text=current,
+            font=font,
+        ) > max_width:
             return None
 
     if current:
-        lines.append(current)
+        lines.append(
+            current
+        )
 
-    if not lines or len(lines) > 2:
-        return None
-
-    if any(
-        _text_width(
-            draw=draw,
-            text=line,
-            font=font,
-        ) > max_width
-        for line in lines
+    if (
+        not lines
+        or len(lines) > 2
     ):
         return None
 
-    return tuple(lines)
-
+    return tuple(
+        lines
+    )
 
 def _text_width(
     *,

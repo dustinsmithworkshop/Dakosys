@@ -210,3 +210,163 @@ def test_render_episode_title_card_rejects_missing_source_image(
             episode_title="Pilot",
             font_key="prata",
         )
+
+
+def test_render_episode_title_card_defaults_to_marcellus(
+    tmp_path: Path,
+) -> None:
+    source_path = _make_source_image(
+        tmp_path
+        / "source.jpg"
+    )
+
+    result = (
+        render_episode_title_card(
+            source_image_path=(
+                source_path
+            ),
+            output_path=(
+                tmp_path
+                / "default-font.jpg"
+            ),
+            episode_title="Pilot",
+        )
+    )
+
+    assert (
+        result.requested_font_key
+        == "marcellus"
+    )
+
+    assert (
+        result.actual_font_key
+        == "marcellus"
+    )
+
+
+def test_render_episode_title_card_wraps_long_cjk_title(
+    tmp_path: Path,
+) -> None:
+    source_path = _make_source_image(
+        tmp_path
+        / "source.jpg"
+    )
+
+    title = (
+        "これは非常に長い日本語の"
+        "エピソードタイトルであり"
+        "二行に折り返される必要があります"
+    )
+
+    result = (
+        render_episode_title_card(
+            source_image_path=(
+                source_path
+            ),
+            output_path=(
+                tmp_path
+                / "long-japanese.jpg"
+            ),
+            episode_title=title,
+            font_key="marcellus",
+        )
+    )
+
+    assert (
+        result.requested_font_key
+        == "marcellus"
+    )
+
+    assert (
+        result.actual_font_key
+        == "noto_sans_jp"
+    )
+
+    assert len(
+        result.title_lines
+    ) == 2
+
+    assert (
+        "".join(
+            result.title_lines
+        )
+        == title
+    )
+
+    assert (
+        result.text_box_width
+        <= int(
+            CANVAS_WIDTH
+            * MAX_TEXT_WIDTH_RATIO
+        )
+    )
+
+    assert (
+        result.text_box_height
+        <= int(
+            CANVAS_HEIGHT
+            * MAX_TEXT_HEIGHT_RATIO
+        )
+    )
+
+
+def test_long_cjk_wrapping_is_deterministic(
+    tmp_path: Path,
+) -> None:
+    source_path = _make_source_image(
+        tmp_path
+        / "source.jpg"
+    )
+
+    title = (
+        "世界の果てで始まる新しい"
+        "冒険と別れそして再会の物語"
+    )
+
+    first = (
+        render_episode_title_card(
+            source_image_path=(
+                source_path
+            ),
+            output_path=(
+                tmp_path
+                / "first.jpg"
+            ),
+            episode_title=title,
+            font_key="prata",
+        )
+    )
+
+    second = (
+        render_episode_title_card(
+            source_image_path=(
+                source_path
+            ),
+            output_path=(
+                tmp_path
+                / "second.jpg"
+            ),
+            episode_title=title,
+            font_key="prata",
+        )
+    )
+
+    assert (
+        first.actual_font_key
+        == "noto_sans_jp"
+    )
+
+    assert (
+        second.actual_font_key
+        == "noto_sans_jp"
+    )
+
+    assert (
+        first.title_lines
+        == second.title_lines
+    )
+
+    assert (
+        first.font_size
+        == second.font_size
+    )
