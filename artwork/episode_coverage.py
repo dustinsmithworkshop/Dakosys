@@ -12,6 +12,9 @@ from artwork.generator_enrichment import (
     GeneratorEnrichmentResult,
     enrich_show_with_generated_episode_cards,
 )
+from artwork.generator_renderer import (
+    BUNDLED_FONT_DIR,
+)
 from artwork.inventory import ShowInventory
 from artwork.models import ShowArtworkState
 from artwork.providers.tmdb import TMDBArtworkClient
@@ -48,7 +51,7 @@ class EpisodeGeneratorOptions:
     plex_token: str | None = None
 
     font_dir: str | Path = (
-        "fonts/artwork-generator"
+        BUNDLED_FONT_DIR
     )
 
     session: object | None = None

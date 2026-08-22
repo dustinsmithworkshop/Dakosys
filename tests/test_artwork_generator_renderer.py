@@ -4,6 +4,8 @@ import pytest
 from PIL import Image
 
 from artwork.generator_renderer import (
+    BUNDLED_FONT_DIR,
+    FONT_FILES,
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
     MAX_TEXT_HEIGHT_RATIO,
@@ -370,3 +372,76 @@ def test_long_cjk_wrapping_is_deterministic(
         first.font_size
         == second.font_size
     )
+
+
+def test_all_bundled_generator_fonts_exist() -> None:
+    assert BUNDLED_FONT_DIR.is_absolute()
+
+    missing = [
+        filename
+        for filename
+        in FONT_FILES.values()
+        if not (
+            BUNDLED_FONT_DIR
+            / filename
+        ).is_file()
+    ]
+
+    assert missing == []
+
+
+def test_default_font_resolution_does_not_depend_on_cwd(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source_dir = (
+        tmp_path
+        / "images"
+    )
+
+    source_dir.mkdir()
+
+    source_path = _make_source_image(
+        source_dir
+        / "source.jpg"
+    )
+
+    output_path = (
+        source_dir
+        / "rendered.jpg"
+    )
+
+    unrelated_cwd = (
+        tmp_path
+        / "unrelated"
+    )
+
+    unrelated_cwd.mkdir()
+
+    monkeypatch.chdir(
+        unrelated_cwd
+    )
+
+    result = (
+        render_episode_title_card(
+            source_image_path=(
+                source_path
+            ),
+            output_path=(
+                output_path
+            ),
+            episode_title="Pilot",
+        )
+    )
+
+    assert (
+        result.requested_font_key
+        == "marcellus"
+    )
+
+    assert (
+        result.actual_font_key
+        == "marcellus"
+    )
+
+    assert output_path.is_file()

@@ -19,6 +19,7 @@ from artwork.generator_paths import (
     translate_generated_artwork_path,
 )
 from artwork.generator_renderer import (
+    BUNDLED_FONT_DIR,
     render_episode_title_card,
 )
 from artwork.generator_source import (
@@ -64,7 +65,7 @@ def materialize_generated_episode_card(
     local_root: str | Path,
     kometa_root: str,
     font_dir: str | Path = (
-        "fonts/artwork-generator"
+        BUNDLED_FONT_DIR
     ),
     plex_base_url: str | None = None,
     plex_token: str | None = None,

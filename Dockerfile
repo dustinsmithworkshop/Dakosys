@@ -17,6 +17,7 @@ COPY assets/next_airing_poster.jpg /app/assets/
 COPY assets/gradient_top.png /app/assets/
 COPY assets/gradient_bottom.png /app/assets/
 COPY fonts/Juventus-Fans-Bold.ttf /app/fonts/
+COPY fonts/artwork-generator/ /app/fonts/artwork-generator/
 
 COPY *.py ./
 COPY tv_metadata/ ./tv_metadata/

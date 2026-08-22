@@ -19,6 +19,13 @@ RENDERER_VERSION = 1
 STYLE_VERSION = 1
 
 
+BUNDLED_FONT_DIR = (
+    Path(__file__).resolve().parent.parent
+    / "fonts"
+    / "artwork-generator"
+)
+
+
 CANVAS_WIDTH = 1920
 CANVAS_HEIGHT = 1080
 CANVAS_SIZE = (
@@ -109,7 +116,7 @@ def render_episode_title_card(
         DEFAULT_GENERATOR_FONT
     ),
     font_dir: str | Path = (
-        "fonts/artwork-generator"
+        BUNDLED_FONT_DIR
     ),
     jpeg_quality: int = 95,
 ) -> TitleCardRenderResult:
