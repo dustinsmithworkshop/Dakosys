@@ -1,4 +1,4 @@
-"""Show-wide episode artwork enrichment through Artwork Generator."""
+"""Show-wide read-only episode artwork planning through Artwork Generator."""
 
 from __future__ import annotations
 
@@ -11,8 +11,9 @@ from artwork.generator_inputs import (
     EpisodeGenerationPath,
     resolve_episode_generation_input,
 )
-from artwork.generator_materializer import (
-    materialize_generated_episode_card,
+from artwork.generator_plan import (
+    GeneratedEpisodeCardPlan,
+    plan_generated_episode_card,
 )
 from artwork.inventory import (
     ShowInventory,
@@ -54,7 +55,7 @@ class GeneratorSeasonFailure:
 
 @dataclass(frozen=True)
 class GeneratorEpisodeFailure:
-    """Generation failure isolated to one episode."""
+    """Generation planning failure isolated to one episode."""
 
     season_number: int
     episode_number: int
@@ -64,7 +65,7 @@ class GeneratorEpisodeFailure:
 
 @dataclass(frozen=True)
 class GeneratorEnrichmentResult:
-    """Result of generated-artwork enrichment for one show."""
+    """Read-only generator planning result for one show."""
 
     initial_state: ShowArtworkState | None
     state: ShowArtworkState | None
@@ -73,17 +74,22 @@ class GeneratorEnrichmentResult:
 
     tmdb_request_count: int = 0
 
-    generation_attempt_count: int = 0
+    plan_attempt_count: int = 0
     changed_episode_count: int = 0
 
-    rendered_count: int = 0
-    cache_reused_count: int = 0
+    cached_plan_count: int = 0
+    materialization_needed_count: int = 0
 
     kept_primary_count: int = 0
     kept_generated_count: int = 0
 
     no_title_count: int = 0
     no_source_image_count: int = 0
+
+    generation_plans: tuple[
+        GeneratedEpisodeCardPlan,
+        ...,
+    ] = ()
 
     season_failures: tuple[
         GeneratorSeasonFailure,
@@ -99,8 +105,27 @@ class GeneratorEnrichmentResult:
     def changed(
         self,
     ) -> bool:
+        """Whether prospective semantic state changed."""
+
         return (
             self.changed_episode_count
+            > 0
+        )
+
+    @property
+    def planned_count(
+        self,
+    ) -> int:
+        return len(
+            self.generation_plans
+        )
+
+    @property
+    def needs_materialization(
+        self,
+    ) -> bool:
+        return (
+            self.materialization_needed_count
             > 0
         )
 
@@ -130,28 +155,21 @@ def enrich_show_with_generated_episode_cards(
         TMDBArtworkClient
         | None
     ) = None,
-    plex_base_url: str | None = None,
-    plex_token: str | None = None,
-    font_dir: str | Path = (
-        "fonts/artwork-generator"
-    ),
-    session=None,
-    materialize_card=(
-        materialize_generated_episode_card
+    plan_card=(
+        plan_generated_episode_card
     ),
 ) -> GeneratorEnrichmentResult:
-    """Generate eligible episode cards without disturbing primary art.
+    """Plan generated episode cards without modifying the filesystem.
 
     Existing primary/curated artwork remains untouched.
 
-    Missing or upgradeable raw fallback artwork may become generated
-    artwork.
+    Missing or upgradeable raw fallback artwork may become prospective
+    generated artwork.
 
     Existing generated artwork is reevaluated so its deterministic
-    fingerprint can decide cache reuse versus rerender.
+    fingerprint decides whether an existing cache file can be reused.
 
-    Failure for one season or episode never discards successful work
-    from other episodes.
+    This function performs no source downloads and no rendering.
     """
 
     if not enabled:
@@ -229,9 +247,8 @@ def enrich_show_with_generated_episode_cards(
             )
 
         except Exception:
-            # Exact-ID resolution is useful but optional for generated
-            # artwork. Plex titles/thumbnails can still supply all
-            # required inputs, so do not fail the show here.
+            # Exact TMDB identity resolution is optional for generation.
+            # Plex identity can still provide a stable fallback key.
             resolved_tmdb_id = None
 
     show_key = _show_key(
@@ -240,17 +257,22 @@ def enrich_show_with_generated_episode_cards(
     )
 
     tmdb_request_count = 0
-    generation_attempt_count = 0
+
+    plan_attempt_count = 0
     changed_episode_count = 0
 
-    rendered_count = 0
-    cache_reused_count = 0
+    cached_plan_count = 0
+    materialization_needed_count = 0
 
     kept_primary_count = 0
     kept_generated_count = 0
 
     no_title_count = 0
     no_source_image_count = 0
+
+    generation_plans: list[
+        GeneratedEpisodeCardPlan
+    ] = []
 
     season_failures: list[
         GeneratorSeasonFailure
@@ -402,11 +424,11 @@ def enrich_show_with_generated_episode_cards(
             ):
                 continue
 
-            generation_attempt_count += 1
+            plan_attempt_count += 1
 
             try:
-                materialized = (
-                    materialize_card(
+                planned = (
+                    plan_card(
                         generation_input=(
                             generation_input
                         ),
@@ -419,14 +441,6 @@ def enrich_show_with_generated_episode_cards(
                         kometa_root=(
                             kometa_root
                         ),
-                        font_dir=font_dir,
-                        plex_base_url=(
-                            plex_base_url
-                        ),
-                        plex_token=(
-                            plex_token
-                        ),
-                        session=session,
                     )
                 )
 
@@ -450,13 +464,17 @@ def enrich_show_with_generated_episode_cards(
 
                 continue
 
-            if materialized.reused:
-                cache_reused_count += 1
+            generation_plans.append(
+                planned
+            )
+
+            if planned.cached:
+                cached_plan_count += 1
             else:
-                rendered_count += 1
+                materialization_needed_count += 1
 
             if (
-                materialized.asset
+                planned.asset
                 == current_card
             ):
                 continue
@@ -469,9 +487,7 @@ def enrich_show_with_generated_episode_cards(
                 episode_number=(
                     episode_number
                 ),
-                card=(
-                    materialized.asset
-                ),
+                card=planned.asset,
             )
 
             changed_episode_count += 1
@@ -491,6 +507,7 @@ def enrich_show_with_generated_episode_cards(
             if changed_episode_count > 0
             else None
         )
+
     else:
         resolved_state = working
 
@@ -506,17 +523,17 @@ def enrich_show_with_generated_episode_cards(
         tmdb_request_count=(
             tmdb_request_count
         ),
-        generation_attempt_count=(
-            generation_attempt_count
+        plan_attempt_count=(
+            plan_attempt_count
         ),
         changed_episode_count=(
             changed_episode_count
         ),
-        rendered_count=(
-            rendered_count
+        cached_plan_count=(
+            cached_plan_count
         ),
-        cache_reused_count=(
-            cache_reused_count
+        materialization_needed_count=(
+            materialization_needed_count
         ),
         kept_primary_count=(
             kept_primary_count
@@ -529,6 +546,9 @@ def enrich_show_with_generated_episode_cards(
         ),
         no_source_image_count=(
             no_source_image_count
+        ),
+        generation_plans=tuple(
+            generation_plans
         ),
         season_failures=tuple(
             season_failures

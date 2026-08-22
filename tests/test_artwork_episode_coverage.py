@@ -427,3 +427,290 @@ def test_coverage_rejects_tvdb_identity_mismatch():
         )
 
     assert client.calls == []
+
+
+def test_coverage_without_tmdb_preserves_existing_state():
+    state = _state(
+        cards={
+            1: {
+                1: _mediux("existing"),
+            },
+        }
+    )
+
+    result = resolve_episode_coverage(
+        inventory=_inventory(),
+        state=state,
+        tmdb_client=None,
+    )
+
+    assert result.state is state
+    assert result.tmdb is None
+    assert result.generator is None
+    assert result.changed is False
+
+
+def test_coverage_without_tmdb_and_without_generator_creates_nothing():
+    result = resolve_episode_coverage(
+        inventory=_inventory(),
+        state=None,
+        tmdb_client=None,
+    )
+
+    assert result.state is None
+    assert result.resolved is False
+    assert result.created is False
+    assert result.tmdb is None
+
+
+def test_generator_can_run_without_tmdb(
+    tmp_path,
+    monkeypatch,
+):
+    from artwork.episode_coverage import (
+        EpisodeGeneratorOptions,
+    )
+
+    import artwork.episode_coverage as coverage_module
+
+    generated_state = _state(
+        cards={
+            1: {
+                1: _card(
+                    source=(
+                        ArtworkSource
+                        .GENERATED
+                    ),
+                    asset_id="generated-1",
+                    quality=(
+                        ArtworkQuality
+                        .GENERATED
+                    ),
+                ),
+            },
+        }
+    )
+
+    calls = []
+
+    def fake_generator(
+        **kwargs,
+    ):
+        from artwork.generator_enrichment import (
+            GeneratorEnrichmentPath,
+            GeneratorEnrichmentResult,
+        )
+
+        calls.append(
+            kwargs
+        )
+
+        return GeneratorEnrichmentResult(
+            initial_state=(
+                kwargs["state"]
+            ),
+            state=generated_state,
+            path=(
+                GeneratorEnrichmentPath
+                .CHANGED
+            ),
+            plan_attempt_count=1,
+            changed_episode_count=1,
+            materialization_needed_count=1,
+        )
+
+    monkeypatch.setattr(
+        coverage_module,
+        "enrich_show_with_generated_episode_cards",
+        fake_generator,
+    )
+
+    result = resolve_episode_coverage(
+        inventory=_inventory(),
+        state=None,
+        tmdb_client=None,
+        generator_options=(
+            EpisodeGeneratorOptions(
+                enabled=True,
+                font_key="marcellus",
+                local_root=(
+                    tmp_path
+                    / "generated"
+                ),
+                kometa_root=(
+                    "/config/assets/generated"
+                ),
+                plex_base_url=(
+                    "http://plex:32400"
+                ),
+                plex_token="token",
+            )
+        ),
+    )
+
+    assert result.tmdb is None
+    assert result.generator is not None
+
+    assert result.resolved
+    assert result.created
+    assert result.changed
+
+    assert (
+        result.generator_changed_count
+        == 1
+    )
+
+    assert (
+        result.generator_materialization_needed_count
+        == 1
+    )
+
+    assert len(calls) == 1
+
+    assert (
+        calls[0]["tmdb_client"]
+        is None
+    )
+
+
+def test_tmdb_fallback_runs_before_generator(
+    tmp_path,
+    monkeypatch,
+):
+    from artwork.episode_coverage import (
+        EpisodeGeneratorOptions,
+    )
+
+    import artwork.episode_coverage as coverage_module
+
+    state = _state(
+        cards={
+            1: {
+                1: _mediux("mediux-1"),
+            },
+        }
+    )
+
+    client = FakeTMDBClient(
+        {
+            1: {
+                2: _tmdb("tmdb-2"),
+            },
+        }
+    )
+
+    seen_state = []
+
+    def fake_generator(
+        **kwargs,
+    ):
+        from artwork.generator_enrichment import (
+            GeneratorEnrichmentPath,
+            GeneratorEnrichmentResult,
+        )
+
+        generator_input_state = (
+            kwargs["state"]
+        )
+
+        seen_state.append(
+            generator_input_state
+        )
+
+        assert (
+            generator_input_state
+            .seasons[1]
+            .episodes[2]
+            .card
+            .source
+            is ArtworkSource.TMDB
+        )
+
+        return GeneratorEnrichmentResult(
+            initial_state=(
+                generator_input_state
+            ),
+            state=generator_input_state,
+            path=(
+                GeneratorEnrichmentPath
+                .NO_CHANGES
+            ),
+        )
+
+    monkeypatch.setattr(
+        coverage_module,
+        "enrich_show_with_generated_episode_cards",
+        fake_generator,
+    )
+
+    result = resolve_episode_coverage(
+        inventory=_inventory(),
+        state=state,
+        tmdb_client=client,
+        generator_options=(
+            EpisodeGeneratorOptions(
+                enabled=True,
+                font_key="marcellus",
+                local_root=(
+                    tmp_path
+                    / "generated"
+                ),
+                kometa_root=(
+                    "/config/assets/generated"
+                ),
+            )
+        ),
+    )
+
+    assert result.tmdb is not None
+    assert result.tmdb.changed
+    assert result.generator is not None
+    assert len(seen_state) == 1
+
+
+def test_disabled_generator_does_not_run(
+    tmp_path,
+    monkeypatch,
+):
+    from artwork.episode_coverage import (
+        EpisodeGeneratorOptions,
+    )
+
+    import artwork.episode_coverage as coverage_module
+
+    def unexpected_generator(
+        **_kwargs,
+    ):
+        raise AssertionError(
+            "disabled generator must not run"
+        )
+
+    monkeypatch.setattr(
+        coverage_module,
+        "enrich_show_with_generated_episode_cards",
+        unexpected_generator,
+    )
+
+    state = _state()
+
+    result = resolve_episode_coverage(
+        inventory=_inventory(),
+        state=state,
+        tmdb_client=None,
+        generator_options=(
+            EpisodeGeneratorOptions(
+                enabled=False,
+                font_key="marcellus",
+                local_root=(
+                    tmp_path
+                    / "generated"
+                ),
+                kometa_root=(
+                    "/config/assets/generated"
+                ),
+            )
+        ),
+    )
+
+    assert result.state is state
+    assert result.generator is None

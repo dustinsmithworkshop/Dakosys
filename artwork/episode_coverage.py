@@ -1,9 +1,14 @@
-"""Post-resolution artwork coverage enrichment."""
+"""Post-resolution episode artwork coverage enrichment."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
+from artwork.generator_enrichment import (
+    GeneratorEnrichmentResult,
+    enrich_show_with_generated_episode_cards,
+)
 from artwork.inventory import ShowInventory
 from artwork.models import ShowArtworkState
 from artwork.providers.tmdb import TMDBArtworkClient
@@ -15,66 +20,198 @@ from artwork.tmdb_fallback import (
 
 
 @dataclass(frozen=True)
+class EpisodeGeneratorOptions:
+    """Runtime inputs needed for optional episode-card generation."""
+
+    enabled: bool
+
+    font_key: str
+
+    local_root: str | Path
+    kometa_root: str
+
+    plex_base_url: str | None = None
+    plex_token: str | None = None
+
+    font_dir: str | Path = (
+        "fonts/artwork-generator"
+    )
+
+    session: object | None = None
+
+
+@dataclass(frozen=True)
 class EpisodeCoverageResult:
-    """Result of filling unresolved episode artwork after primary resolution."""
+    """Result of post-primary episode artwork enrichment."""
 
     inventory: ShowInventory
 
     initial_state: ShowArtworkState | None
     state: ShowArtworkState | None
 
-    tmdb: TMDBFallbackResult
+    tmdb: TMDBFallbackResult | None = None
+
+    generator: (
+        GeneratorEnrichmentResult
+        | None
+    ) = None
 
     @property
     def resolved(self) -> bool:
-        """Whether useful durable state exists after coverage resolution."""
+        """Whether useful durable state exists after coverage."""
 
         return self.state is not None
 
     @property
     def changed(self) -> bool:
-        """Whether fallback added at least one episode card."""
+        """Whether any coverage stage changed artwork state."""
 
-        return self.tmdb.changed
+        return (
+            (
+                self.tmdb is not None
+                and self.tmdb.changed
+            )
+            or (
+                self.generator is not None
+                and self.generator.changed
+            )
+        )
 
     @property
     def created(self) -> bool:
-        """Whether fallback created state for a previously unmanaged show."""
+        """Whether coverage created state for an unmanaged show."""
 
         return (
             self.initial_state is None
             and self.state is not None
         )
 
+    # ------------------------------------------------------------------
+    # Existing TMDB-facing compatibility properties.
+    #
+    # These deliberately remain TMDB-specific so current metrics do not
+    # silently change meaning when generator support is enabled.
+    # ------------------------------------------------------------------
+
     @property
     def gaps_before(self) -> int:
-        return self.tmdb.gaps_before
+        return (
+            self.tmdb.gaps_before
+            if self.tmdb is not None
+            else 0
+        )
 
     @property
     def gaps_filled(self) -> int:
-        return self.tmdb.gaps_filled
+        return (
+            self.tmdb.gaps_filled
+            if self.tmdb is not None
+            else 0
+        )
 
     @property
     def gaps_remaining(self) -> int:
-        return self.tmdb.gaps_remaining
+        return (
+            self.tmdb.gaps_remaining
+            if self.tmdb is not None
+            else 0
+        )
 
     @property
     def season_request_count(self) -> int:
-        return self.tmdb.season_request_count
+        return (
+            self.tmdb.season_request_count
+            if self.tmdb is not None
+            else 0
+        )
 
     @property
     def provider_error_count(self) -> int:
-        return self.tmdb.provider_error_count
+        return (
+            self.tmdb.provider_error_count
+            if self.tmdb is not None
+            else 0
+        )
 
     @property
-    def tmdb_path(self) -> TMDBFallbackPath:
-        return self.tmdb.path
+    def tmdb_path(
+        self,
+    ) -> TMDBFallbackPath | None:
+        return (
+            self.tmdb.path
+            if self.tmdb is not None
+            else None
+        )
+
+    # ------------------------------------------------------------------
+    # Generator-facing metrics.
+    # ------------------------------------------------------------------
+
+    @property
+    def generator_changed_count(
+        self,
+    ) -> int:
+        if self.generator is None:
+            return 0
+
+        return (
+            self.generator
+            .changed_episode_count
+        )
+
+    @property
+    def generator_plan_count(
+        self,
+    ) -> int:
+        if self.generator is None:
+            return 0
+
+        return (
+            self.generator
+            .planned_count
+        )
+
+    @property
+    def generator_cached_count(
+        self,
+    ) -> int:
+        if self.generator is None:
+            return 0
+
+        return (
+            self.generator
+            .cached_plan_count
+        )
+
+    @property
+    def generator_materialization_needed_count(
+        self,
+    ) -> int:
+        if self.generator is None:
+            return 0
+
+        return (
+            self.generator
+            .materialization_needed_count
+        )
+
+    @property
+    def generator_failure_count(
+        self,
+    ) -> int:
+        if self.generator is None:
+            return 0
+
+        return (
+            self.generator
+            .failure_count
+        )
 
 
 def _identity_state(
     inventory: ShowInventory,
 ) -> ShowArtworkState:
-    """Create temporary state used only while resolving fallback artwork."""
+    """Create temporary state used only during TMDB fallback."""
 
     identity = inventory.identity
 
@@ -90,17 +227,33 @@ def resolve_episode_coverage(
     *,
     inventory: ShowInventory,
     state: ShowArtworkState | None,
-    tmdb_client: TMDBArtworkClient,
+    tmdb_client: TMDBArtworkClient | None = None,
+    generator_options: (
+        EpisodeGeneratorOptions
+        | None
+    ) = None,
 ) -> EpisodeCoverageResult:
-    """Fill unresolved episode cards after primary artwork resolution.
+    """Resolve post-primary episode artwork coverage.
 
-    Existing artwork always wins.
+    Stage order:
 
-    When no primary artwork state exists, a temporary identity-only state
-    is used for TMDB resolution. That temporary state becomes durable only
-    when TMDB actually contributes artwork.
+        primary/cohesive artwork
+            ↓
+        optional TMDB raw fallback
+            ↓
+        optional Artwork Generator
 
-    This function performs no file writes and makes no Plex changes.
+    TMDB fills only unresolved gaps.
+
+    Artwork Generator may then:
+    - fill remaining gaps;
+    - upgrade raw TMDB/Plex fallback;
+    - reevaluate existing generated cards.
+
+    Primary/curated and locked artwork remains protected by generator
+    policy.
+
+    Neither stage performs Plex changes.
     """
 
     if (
@@ -115,43 +268,90 @@ def resolve_episode_coverage(
             "match Plex inventory"
         )
 
-    working_state = (
-        state
-        if state is not None
-        else _identity_state(
-            inventory
-        )
-    )
+    resolved_state = state
 
-    tmdb_result = (
-        fill_tmdb_episode_gaps(
-            inventory=inventory,
-            state=working_state,
-            client=tmdb_client,
-        )
-    )
+    tmdb_result = None
 
-    # Existing durable state is always preserved, regardless of whether
-    # TMDB contributed anything or encountered a transient failure.
-    if state is not None:
+    # ------------------------------------------------------------------
+    # Existing v3.0 TMDB fallback stage.
+    # ------------------------------------------------------------------
+
+    if tmdb_client is not None:
+        working_state = (
+            state
+            if state is not None
+            else _identity_state(
+                inventory
+            )
+        )
+
+        tmdb_result = (
+            fill_tmdb_episode_gaps(
+                inventory=inventory,
+                state=working_state,
+                client=tmdb_client,
+            )
+        )
+
+        # Existing durable state is always preserved regardless of
+        # whether TMDB contributed anything.
+        if state is not None:
+            resolved_state = (
+                tmdb_result.state
+            )
+
+        # Previously unmanaged shows become durable only if TMDB
+        # actually contributed artwork.
+        elif tmdb_result.changed:
+            resolved_state = (
+                tmdb_result.state
+            )
+
+        else:
+            resolved_state = None
+
+    # ------------------------------------------------------------------
+    # Optional Artwork Generator stage.
+    #
+    # This intentionally also runs when tmdb_client is None. Plex title
+    # + thumbnail alone may be sufficient to generate episode artwork.
+    # ------------------------------------------------------------------
+
+    generator_result = None
+
+    if (
+        generator_options is not None
+        and generator_options.enabled
+    ):
+        generator_result = (
+            enrich_show_with_generated_episode_cards(
+                inventory=inventory,
+                state=resolved_state,
+                enabled=True,
+                font_key=(
+                    generator_options
+                    .font_key
+                ),
+                local_root=(
+                    generator_options
+                    .local_root
+                ),
+                kometa_root=(
+                    generator_options
+                    .kometa_root
+                ),
+                tmdb_client=tmdb_client,
+            )
+        )
+
         resolved_state = (
-            tmdb_result.state
+            generator_result.state
         )
-
-    # A show with no primary artwork becomes managed only when fallback
-    # actually contributes useful episode artwork. Do not persist an
-    # empty identity shell.
-    elif tmdb_result.changed:
-        resolved_state = (
-            tmdb_result.state
-        )
-
-    else:
-        resolved_state = None
 
     return EpisodeCoverageResult(
         inventory=inventory,
         initial_state=state,
         state=resolved_state,
         tmdb=tmdb_result,
+        generator=generator_result,
     )

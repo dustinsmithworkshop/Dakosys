@@ -213,11 +213,11 @@ def _tmdb_episode(
     )
 
 
-def _materializer(
+def _planner(
     calls,
     *,
     fail_episode=None,
-    reused=False,
+    cached=False,
 ):
     def materialize(
         **kwargs,
@@ -275,7 +275,7 @@ def _materializer(
 
         return SimpleNamespace(
             asset=asset,
-            reused=reused,
+            cached=cached,
         )
 
     return materialize
@@ -303,8 +303,8 @@ def test_disabled_generator_makes_no_changes_or_requests(
             local_root=tmp_path,
             kometa_root="/config/assets",
             tmdb_client=tmdb,
-            materialize_card=(
-                _materializer(
+            plan_card=(
+                _planner(
                     calls
                 )
             ),
@@ -353,8 +353,8 @@ def test_partial_mediux_keeps_curated_and_generates_gap(
             local_root=tmp_path,
             kometa_root="/config/assets",
             tmdb_client=tmdb,
-            materialize_card=(
-                _materializer(
+            plan_card=(
+                _planner(
                     calls
                 )
             ),
@@ -424,8 +424,8 @@ def test_raw_tmdb_fallback_upgrades_to_generated(
             local_root=tmp_path,
             kometa_root="/config/assets",
             tmdb_client=None,
-            materialize_card=(
-                _materializer(
+            plan_card=(
+                _planner(
                     calls
                 )
             ),
@@ -479,8 +479,8 @@ def test_generation_failure_preserves_existing_fallback_and_continues(
             local_root=tmp_path,
             kometa_root="/config/assets",
             tmdb_client=None,
-            materialize_card=(
-                _materializer(
+            plan_card=(
+                _planner(
                     calls,
                     fail_episode=1,
                 )
@@ -531,8 +531,8 @@ def test_tmdb_failure_still_allows_plex_thumbnail_generation(
             local_root=tmp_path,
             kometa_root="/config/assets",
             tmdb_client=tmdb,
-            materialize_card=(
-                _materializer(
+            plan_card=(
+                _planner(
                     calls
                 )
             ),
@@ -566,8 +566,8 @@ def test_generator_can_create_state_from_plex_only(
             local_root=tmp_path,
             kometa_root="/config/assets",
             tmdb_client=None,
-            materialize_card=(
-                _materializer(
+            plan_card=(
+                _planner(
                     calls
                 )
             ),
@@ -625,8 +625,8 @@ def test_locked_episode_selection_never_generates(
             local_root=tmp_path,
             kometa_root="/config/assets",
             tmdb_client=FakeTMDB(),
-            materialize_card=(
-                _materializer(
+            plan_card=(
+                _planner(
                     calls
                 )
             ),
@@ -662,8 +662,8 @@ def test_tmdb_metadata_is_requested_once_per_season(
             local_root=tmp_path,
             kometa_root="/config/assets",
             tmdb_client=tmdb,
-            materialize_card=(
-                _materializer(
+            plan_card=(
+                _planner(
                     calls
                 )
             ),
@@ -680,7 +680,7 @@ def test_tmdb_metadata_is_requested_once_per_season(
     ]
 
 
-def test_cache_reuse_is_reported_separately_from_state_change(
+def test_cached_plan_is_reported_separately_from_state_change(
     tmp_path: Path,
 ):
     calls = []
@@ -696,10 +696,10 @@ def test_cache_reuse_is_reported_separately_from_state_change(
             local_root=tmp_path,
             kometa_root="/config/assets",
             tmdb_client=None,
-            materialize_card=(
-                _materializer(
+            plan_card=(
+                _planner(
                     calls,
-                    reused=True,
+                    cached=True,
                 )
             ),
         )
@@ -707,7 +707,59 @@ def test_cache_reuse_is_reported_separately_from_state_change(
 
     assert result.changed
     assert (
-        result.cache_reused_count
+        result.cached_plan_count
         == 1
     )
-    assert result.rendered_count == 0
+    assert result.materialization_needed_count == 0
+
+
+def test_real_enrichment_plans_without_writing_files(
+    tmp_path: Path,
+):
+    local_root = (
+        tmp_path
+        / "generated"
+    )
+
+    result = (
+        enrich_show_with_generated_episode_cards(
+            inventory=_inventory(
+                episodes=(1,)
+            ),
+            state=_state(),
+            enabled=True,
+            font_key="marcellus",
+            local_root=local_root,
+            kometa_root=(
+                "/config/assets/generated"
+            ),
+            tmdb_client=None,
+        )
+    )
+
+    assert result.changed
+    assert result.planned_count == 1
+
+    assert (
+        result.materialization_needed_count
+        == 1
+    )
+
+    assert result.cached_plan_count == 0
+
+    assert (
+        result.generation_plans[0]
+        .needs_materialization
+    )
+
+    assert (
+        result.state
+        .seasons[1]
+        .episodes[1]
+        .card
+        .source
+        is ArtworkSource.GENERATED
+    )
+
+    # Preview/planning must not create the cache root, let alone a JPEG.
+    assert not local_root.exists()
