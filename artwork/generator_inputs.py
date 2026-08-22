@@ -31,6 +31,7 @@ class EpisodeGenerationPath(
     LOCKED = "locked"
     KEEP_PRIMARY = "keep_primary"
     KEEP_GENERATED = "keep_generated"
+    REFRESH_GENERATED = "refresh_generated"
 
     NO_TITLE = "no_title"
     NO_SOURCE_IMAGE = "no_source_image"
@@ -65,6 +66,8 @@ class EpisodeGenerationInput:
             .GENERATE_MISSING,
             EpisodeGenerationPath
             .UPGRADE_FALLBACK,
+            EpisodeGenerationPath
+            .REFRESH_GENERATED,
         }
 
 
@@ -132,33 +135,27 @@ def resolve_episode_generation_input(
         and current_card.available
     )
 
+    current_generated = (
+        current_available
+        and current_card.source
+        is ArtworkSource.GENERATED
+    )
+
     if current_available:
         if (
-            current_card.source
-            is ArtworkSource.GENERATED
-        ):
-            return EpisodeGenerationInput(
-                episode_number=(
-                    episode_number
-                ),
-                path=(
-                    EpisodeGenerationPath
-                    .KEEP_GENERATED
-                ),
-                current_card=current_card,
+            not current_generated
+            and (
+                current_card.quality
+                is ArtworkQuality.CURATED
+                or current_card.source
+                in {
+                    ArtworkSource.MEDIUX,
+                    ArtworkSource.POSTERDB,
+                    ArtworkSource.MANUAL,
+                }
+                or current_card.source
+                not in UPGRADEABLE_FALLBACK_SOURCES
             )
-
-        if (
-            current_card.quality
-            is ArtworkQuality.CURATED
-            or current_card.source
-            in {
-                ArtworkSource.MEDIUX,
-                ArtworkSource.POSTERDB,
-                ArtworkSource.MANUAL,
-            }
-            or current_card.source
-            not in UPGRADEABLE_FALLBACK_SOURCES
         ):
             return EpisodeGenerationInput(
                 episode_number=(
@@ -185,6 +182,9 @@ def resolve_episode_generation_input(
             ),
             path=(
                 EpisodeGenerationPath
+                .KEEP_GENERATED
+                if current_generated
+                else EpisodeGenerationPath
                 .NO_TITLE
             ),
             current_card=current_card,
@@ -210,6 +210,9 @@ def resolve_episode_generation_input(
             ),
             path=(
                 EpisodeGenerationPath
+                .KEEP_GENERATED
+                if current_generated
+                else EpisodeGenerationPath
                 .NO_SOURCE_IMAGE
             ),
             title=title,
@@ -217,13 +220,23 @@ def resolve_episode_generation_input(
             current_card=current_card,
         )
 
-    path = (
-        EpisodeGenerationPath
-        .UPGRADE_FALLBACK
-        if current_available
-        else EpisodeGenerationPath
-        .GENERATE_MISSING
-    )
+    if current_generated:
+        path = (
+            EpisodeGenerationPath
+            .REFRESH_GENERATED
+        )
+
+    elif current_available:
+        path = (
+            EpisodeGenerationPath
+            .UPGRADE_FALLBACK
+        )
+
+    else:
+        path = (
+            EpisodeGenerationPath
+            .GENERATE_MISSING
+        )
 
     return EpisodeGenerationInput(
         episode_number=episode_number,

@@ -239,7 +239,7 @@ def test_any_curated_card_is_never_replaced():
     assert not result.should_generate
 
 
-def test_existing_generated_card_is_kept():
+def test_existing_generated_card_is_reevaluated():
     current = _card(
         source=ArtworkSource.GENERATED,
         quality=ArtworkQuality.GENERATED,
@@ -250,6 +250,60 @@ def test_existing_generated_card_is_kept():
             episode_number=1,
             plex_episode=_plex(),
             tmdb_episode=_tmdb(),
+            current_card=current,
+        )
+    )
+
+    assert (
+        result.path
+        is EpisodeGenerationPath
+        .REFRESH_GENERATED
+    )
+    assert result.should_generate
+
+
+def test_existing_generated_card_is_kept_when_source_is_unavailable():
+    current = _card(
+        source=ArtworkSource.GENERATED,
+        quality=ArtworkQuality.GENERATED,
+    )
+
+    result = (
+        resolve_episode_generation_input(
+            episode_number=1,
+            plex_episode=_plex(
+                thumb=None
+            ),
+            tmdb_episode=_tmdb(
+                still=False
+            ),
+            current_card=current,
+        )
+    )
+
+    assert (
+        result.path
+        is EpisodeGenerationPath
+        .KEEP_GENERATED
+    )
+    assert not result.should_generate
+
+
+def test_existing_generated_card_is_kept_when_title_is_unavailable():
+    current = _card(
+        source=ArtworkSource.GENERATED,
+        quality=ArtworkQuality.GENERATED,
+    )
+
+    result = (
+        resolve_episode_generation_input(
+            episode_number=1,
+            plex_episode=_plex(
+                title=None
+            ),
+            tmdb_episode=_tmdb(
+                title=None
+            ),
             current_card=current,
         )
     )
