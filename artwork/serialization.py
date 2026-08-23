@@ -59,6 +59,45 @@ def serialize_episode_source(
     }
 
 
+def serialize_generator_activity(
+    execution,
+) -> dict[str, int]:
+    """Serialize optional Artwork Generator planning activity.
+
+    Movie execution and generator-disabled show execution both expose a
+    stable zero-valued shape so API/GUI callers do not need media-type
+    special cases.
+    """
+
+    return {
+        "changed_shows": getattr(
+            execution,
+            "generator_changed_count",
+            0,
+        ),
+        "planned_cards": getattr(
+            execution,
+            "generator_plan_count",
+            0,
+        ),
+        "cached_cards": getattr(
+            execution,
+            "generator_cached_count",
+            0,
+        ),
+        "materialization_needed": getattr(
+            execution,
+            "generator_materialization_needed_count",
+            0,
+        ),
+        "failures": getattr(
+            execution,
+            "generator_failure_count",
+            0,
+        ),
+    }
+
+
 def serialize_artwork_library(
     run: ArtworkLibraryWorkflow,
 ) -> dict[str, Any]:
@@ -219,6 +258,11 @@ def serialize_artwork_library(
                 ),
             },
         },
+        "generator": (
+            serialize_generator_activity(
+                execution
+            )
+        ),
         "selection_activity": {
             "set_refreshes": (
                 preview.set_refresh_count

@@ -257,6 +257,14 @@ def _serialize_unavailable_library(
             },
         },
 
+        "generator": {
+            "changed_shows": 0,
+            "planned_cards": 0,
+            "cached_cards": 0,
+            "materialization_needed": 0,
+            "failures": 0,
+        },
+
         "selection_activity": {
             "set_refreshes": 0,
             "set_migrations": 0,

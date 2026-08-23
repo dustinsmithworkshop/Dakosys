@@ -333,7 +333,12 @@ export interface ArtworkLibraryPreview {
   output_path: string;
 
   baseline: {
-    source: "durable_state" | "legacy_migration" | "new_library" | string;
+    source:
+      | "durable_state"
+      | "item_store_bootstrap"
+      | "legacy_migration"
+      | "new_library"
+      | string;
     state_count: number;
   };
 
@@ -389,6 +394,14 @@ export interface ArtworkLibraryPreview {
       gaps_filled: number;
       gaps_remaining: number;
     };
+  };
+
+  generator: {
+    changed_shows: number;
+    planned_cards: number;
+    cached_cards: number;
+    materialization_needed: number;
+    failures: number;
   };
 
   selection_activity: {
