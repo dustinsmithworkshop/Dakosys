@@ -324,3 +324,54 @@ def test_missing_manifest_is_not_bootstrap_evidence(
         )
         == ()
     )
+
+
+def test_tmdb_url_recovers_provider_file_path(
+    tmp_path,
+):
+    payload = {
+        "metadata": {
+            71489: {
+                "seasons": {
+                    1: {
+                        "episodes": {
+                            1: {
+                                "url_poster": (
+                                    "https://image.tmdb.org/"
+                                    "t/p/original/"
+                                    "abc123.jpg"
+                                ),
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    }
+
+    (
+        directory,
+        _,
+    ) = _write_store(
+        tmp_path,
+        payload=payload,
+    )
+
+    seed = (
+        load_show_item_store_bootstrap_seeds(
+            directory=directory,
+            expected_library="TV",
+        )[0]
+    )
+
+    card = seed.assets[0]
+
+    assert (
+        card.source
+        is ArtworkSource.TMDB
+    )
+
+    assert (
+        card.provider_asset_id
+        == "/abc123.jpg"
+    )

@@ -224,9 +224,39 @@ def _source_from_url(
         )
 
     if host == "image.tmdb.org":
+        parts = tuple(
+            part
+            for part in parsed.path.split("/")
+            if part
+        )
+
+        if (
+            len(parts) < 4
+            or parts[0].casefold() != "t"
+            or parts[1].casefold() != "p"
+            or not parts[2].strip()
+        ):
+            raise ArtworkItemStoreBootstrapError(
+                "unrecognized TMDB image URL "
+                f"in pre-state-store output: {url!r}"
+            )
+
+        file_path = (
+            "/"
+            + "/".join(
+                parts[3:]
+            )
+        )
+
+        if file_path == "/":
+            raise ArtworkItemStoreBootstrapError(
+                "TMDB image URL has no "
+                f"provider file path: {url!r}"
+            )
+
         return (
             ArtworkSource.TMDB,
-            None,
+            file_path,
         )
 
     raise ArtworkItemStoreBootstrapError(
