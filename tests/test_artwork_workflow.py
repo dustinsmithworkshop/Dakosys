@@ -649,3 +649,206 @@ def test_workflow_preserves_unplannable_preview_as_blocked(
         run.changed_file_count
         == 0
     )
+
+
+def test_pre_state_item_store_bootstrap_resolves_before_execution(
+    monkeypatch,
+):
+    from artwork.managed_state import (
+        ManagedStateBaseline,
+        ManagedStateBaselineSource,
+    )
+
+    calls = _stub_show_pipeline(
+        monkeypatch
+    )
+
+    manifest = object()
+    seed = object()
+    historical_state = object()
+
+    def pending_baseline(
+        *,
+        directory,
+        library,
+        legacy_metadata=None,
+    ):
+        calls["baseline"].append(
+            (
+                Path(directory),
+                library,
+                legacy_metadata,
+            )
+        )
+
+        return ManagedStateBaseline(
+            library=library,
+            states=(),
+            source=(
+                ManagedStateBaselineSource
+                .ITEM_STORE_BOOTSTRAP
+            ),
+            manifest=manifest,
+        )
+
+    monkeypatch.setattr(
+        "artwork.workflow."
+        "load_show_managed_state_baseline",
+        pending_baseline,
+    )
+
+    seen = {}
+
+    def fake_seeds(
+        *,
+        directory,
+        expected_library,
+    ):
+        seen["seed_directory"] = (
+            Path(directory)
+        )
+        seen["seed_library"] = (
+            expected_library
+        )
+
+        return (
+            seed,
+        )
+
+    monkeypatch.setattr(
+        "artwork.workflow."
+        "load_show_item_store_bootstrap_seeds",
+        fake_seeds,
+    )
+
+    def fake_import(
+        path,
+    ):
+        seen["legacy_path"] = (
+            Path(path)
+        )
+
+        return [
+            historical_state,
+        ]
+
+    monkeypatch.setattr(
+        "artwork.workflow."
+        "import_mediux_metadata",
+        fake_import,
+    )
+
+    def fake_resolver(
+        *,
+        seeds,
+        inventories,
+        provider,
+        legacy_states,
+    ):
+        seen["seeds"] = tuple(
+            seeds
+        )
+        seen["inventories"] = tuple(
+            inventories
+        )
+        seen["provider"] = provider
+        seen["legacy_states"] = tuple(
+            legacy_states
+        )
+
+        return SimpleNamespace(
+            states=(
+                "reconstructed:Imported Shows",
+            ),
+        )
+
+    monkeypatch.setattr(
+        "artwork.workflow."
+        "resolve_show_item_store_bootstrap",
+        fake_resolver,
+    )
+
+    plex = FakePlex(
+        FakeSection(
+            "Imported Shows",
+            "show",
+            items=("one",),
+        ),
+    )
+
+    provider = object()
+
+    workflow = (
+        build_artwork_manager_workflow(
+            plex=plex,
+            config=_config(),
+            provider=provider,
+            legacy_metadata_by_library={
+                "Imported Shows": (
+                    "/imports/"
+                    "old-kometa.yml"
+                ),
+            },
+        )
+    )
+
+    assert seen == {
+        "seed_directory": Path(
+            "/metadata/"
+            "artwork-imported-shows"
+        ),
+        "seed_library": (
+            "Imported Shows"
+        ),
+        "legacy_path": Path(
+            "/imports/"
+            "old-kometa.yml"
+        ),
+        "seeds": (
+            seed,
+        ),
+        "inventories": (
+            "inventory:"
+            "Imported Shows:one",
+        ),
+        "provider": provider,
+        "legacy_states": (
+            historical_state,
+        ),
+    }
+
+    assert len(
+        calls["execution"]
+    ) == 1
+
+    assert (
+        calls["execution"][
+            0
+        ].managed_shows
+        == (
+            "reconstructed:"
+            "Imported Shows",
+        )
+    )
+
+    run = workflow.libraries[0]
+
+    assert (
+        run.baseline.source
+        is
+        ManagedStateBaselineSource
+        .ITEM_STORE_BOOTSTRAP
+    )
+
+    assert (
+        run.baseline.states
+        == (
+            "reconstructed:"
+            "Imported Shows",
+        )
+    )
+
+    assert (
+        run.baseline.manifest
+        is manifest
+    )

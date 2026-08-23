@@ -31,6 +31,12 @@ from artwork.item_store import (
     ItemStorePlan,
     build_show_item_store_plan,
 )
+from artwork.item_store_bootstrap import (
+    load_show_item_store_bootstrap_seeds,
+)
+from artwork.item_store_bootstrap_resolver import (
+    resolve_show_item_store_bootstrap,
+)
 from artwork.movie_item_store import (
     MovieItemStorePlan,
     build_movie_item_store_plan,
@@ -45,7 +51,11 @@ from artwork.movie_item_store_apply import (
 )
 from artwork.managed_state import (
     ManagedStateBaseline,
+    ManagedStateBaselineSource,
     load_show_managed_state_baseline,
+)
+from artwork.migration import (
+    import_mediux_metadata,
 )
 from artwork.movie_managed_state import (
     MovieManagedStateBaseline,
@@ -727,6 +737,47 @@ def build_artwork_target_workflow(
     inventories = tuple(
         inventory_results
     )
+
+    if (
+        baseline.source
+        is ManagedStateBaselineSource
+        .ITEM_STORE_BOOTSTRAP
+    ):
+        if legacy_metadata is None:
+            raise RuntimeError(
+                "pre-state-store bootstrap "
+                "requires explicit historical metadata"
+            )
+
+        seeds = (
+            load_show_item_store_bootstrap_seeds(
+                directory=target.output_path,
+                expected_library=target.library,
+            )
+        )
+
+        legacy_states = tuple(
+            import_mediux_metadata(
+                legacy_metadata
+            )
+        )
+
+        bootstrap = (
+            resolve_show_item_store_bootstrap(
+                seeds=seeds,
+                inventories=inventories,
+                provider=provider,
+                legacy_states=legacy_states,
+            )
+        )
+
+        baseline = ManagedStateBaseline(
+            library=baseline.library,
+            states=bootstrap.states,
+            source=baseline.source,
+            manifest=baseline.manifest,
+            state_store=baseline.state_store,
+        )
 
     execution_options = {}
 

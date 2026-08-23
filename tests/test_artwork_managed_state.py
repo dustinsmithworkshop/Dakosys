@@ -264,7 +264,8 @@ def test_manifest_state_identity_disagreement_is_rejected(
         )
 
 
-def test_existing_manifest_can_bootstrap_from_legacy(
+
+def test_existing_manifest_defers_to_item_store_bootstrap(
     tmp_path,
 ):
     directory = (
@@ -280,22 +281,12 @@ def test_existing_manifest_can_bootstrap_from_legacy(
         _manifest(),
     )
 
+    # This deliberately does not exist. The baseline loader must not
+    # import stale legacy artwork for an existing item store; the path
+    # is consumed later only as a historical provenance witness.
     legacy = (
         tmp_path
-        / "mediux-tv.yml"
-    )
-
-    legacy.write_text(
-        """
-metadata:
-  100: # TVDB id for Example. Set by Creator on MediUX https://mediux.pro/sets/123
-    seasons:
-      1:
-        episodes:
-          1:
-            url_poster: https://api.mediux.pro/assets/example
-""".lstrip(),
-        encoding="utf-8",
+        / "historical-witness.yml"
     )
 
     baseline = (
@@ -310,15 +301,9 @@ metadata:
         baseline.source
         is
         ManagedStateBaselineSource
-        .LEGACY_MIGRATION
+        .ITEM_STORE_BOOTSTRAP
     )
 
-    assert baseline.state_count == 1
-
-    state = baseline.states[0]
-
-    assert state.tvdb_id == 100
-    assert (
-        state.selected_set_id
-        == "123"
-    )
+    assert baseline.states == ()
+    assert baseline.manifest is not None
+    assert baseline.state_store is None

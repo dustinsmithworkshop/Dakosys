@@ -52,6 +52,7 @@ class ManagedStateBaselineSource(
     Enum,
 ):
     DURABLE_STATE = "durable_state"
+    ITEM_STORE_BOOTSTRAP = "item_store_bootstrap"
     LEGACY_MIGRATION = "legacy_migration"
     NEW_LIBRARY = "new_library"
 
@@ -170,6 +171,10 @@ def load_show_managed_state_baseline(
 
     # Existing generated output proves this is not a new library.
     # Without the semantic sidecar we require an explicit bootstrap.
+    #
+    # The old monolithic metadata is only a historical provenance
+    # witness for a pre-state-store item store. It must never replace
+    # the current manifest-owned split YAML as authoritative artwork.
     if manifest is not None:
         if legacy_metadata is None:
             raise (
@@ -182,18 +187,12 @@ def load_show_managed_state_baseline(
                 )
             )
 
-        states = tuple(
-            import_mediux_metadata(
-                legacy_metadata
-            )
-        )
-
         return ManagedStateBaseline(
             library=library,
-            states=states,
+            states=(),
             source=(
                 ManagedStateBaselineSource
-                .LEGACY_MIGRATION
+                .ITEM_STORE_BOOTSTRAP
             ),
             manifest=manifest,
         )
