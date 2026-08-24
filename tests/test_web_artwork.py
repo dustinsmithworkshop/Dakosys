@@ -1794,6 +1794,38 @@ def test_artwork_reviewed_apply_worker_records_success(
         "/data/artwork-manager",
     )
 
+    refreshed = {}
+
+    def fake_refresh(
+        *,
+        plex,
+        config,
+        library,
+    ):
+        refreshed.update(
+            {
+                "plex":
+                    plex,
+
+                "config":
+                    config,
+
+                "library":
+                    library,
+            }
+        )
+
+        return {
+            "scanned_at":
+                "2026-08-24T21:00:00+00:00",
+        }
+
+    monkeypatch.setattr(
+        web_server,
+        "_refresh_artwork_current_state_after_apply",
+        fake_refresh,
+    )
+
     web_server._run_artwork_reviewed_apply(
         "apply-1",
         "Anime",
@@ -1824,6 +1856,12 @@ def test_artwork_reviewed_apply_worker_records_success(
 
         "apply_mode":
             "manual",
+
+        "current_state_refreshed":
+            True,
+
+        "current_state_scanned_at":
+            "2026-08-24T21:00:00+00:00",
     }
 
     assert record[
@@ -1836,7 +1874,14 @@ def test_artwork_reviewed_apply_worker_records_success(
         ][
             "phase"
         ]
-        == "planning"
+        == "complete"
+    )
+
+    assert (
+        record[
+            "refresh_error"
+        ]
+        is None
     )
 
     assert (
@@ -1867,6 +1912,17 @@ def test_artwork_reviewed_apply_worker_records_success(
         ]
         == "/data/artwork-manager"
     )
+
+    assert refreshed == {
+        "plex":
+            plex,
+
+        "config":
+            config,
+
+        "library":
+            "Anime",
+    }
 
     assert (
         "Anime"
@@ -2008,4 +2064,380 @@ def test_artwork_reviewed_apply_status_unknown_is_404(
     assert (
         caught.value.status_code
         == 404
+    )
+
+
+def test_artwork_post_apply_refresh_rebuilds_current_state(
+    monkeypatch,
+):
+    config = {
+        "services": {
+            "artwork_manager": {
+                "enabled": True,
+            },
+        },
+    }
+
+    plex = object()
+
+    run = SimpleNamespace(
+        plan=object(),
+        safe_to_apply=True,
+        needs_apply=False,
+    )
+
+    class FakeWorkflow:
+        skipped = ()
+
+        def run_for_library(
+            self,
+            library,
+        ):
+            assert (
+                library
+                == "Anime"
+            )
+
+            return run
+
+    seen = {}
+
+    def fake_build(
+        **kwargs,
+    ):
+        seen.update(
+            kwargs
+        )
+
+        return FakeWorkflow()
+
+    monkeypatch.setattr(
+        web_server,
+        (
+            "build_configured_"
+            "artwork_manager_workflow"
+        ),
+        fake_build,
+    )
+
+    preview = {
+        "library":
+            "Anime",
+
+        "safety": {
+            "safe_to_apply":
+                True,
+        },
+
+        "output": {
+            "needs_apply":
+                False,
+        },
+    }
+
+    monkeypatch.setattr(
+        web_server,
+        "serialize_artwork_library",
+        lambda value:
+            preview,
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "build_artwork_review_fingerprint",
+        lambda value:
+            (_ for _ in ())
+            .throw(
+                AssertionError(
+                    "settled state must not "
+                    "receive a review fingerprint"
+                )
+            ),
+    )
+
+    written = {}
+
+    def fake_write(
+        *,
+        directory,
+        library,
+        preview,
+        review_fingerprint=None,
+        scanned_at=None,
+    ):
+        written.update(
+            {
+                "directory":
+                    directory,
+
+                "library":
+                    library,
+
+                "preview":
+                    preview,
+
+                "review_fingerprint":
+                    review_fingerprint,
+            }
+        )
+
+        return {
+            "schema_version": 3,
+            "library":
+                library,
+
+            "scanned_at":
+                "2026-08-24T21:15:00+00:00",
+
+            "review_fingerprint":
+                review_fingerprint,
+
+            "preview":
+                preview,
+        }
+
+    monkeypatch.setattr(
+        web_server,
+        "write_artwork_current_state",
+        fake_write,
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_HISTORY_DIR",
+        "/data/artwork-manager",
+    )
+
+    cached = (
+        web_server
+        ._refresh_artwork_current_state_after_apply(
+            plex=plex,
+            config=config,
+            library="Anime",
+        )
+    )
+
+    assert (
+        seen["plex"]
+        is plex
+    )
+
+    assert (
+        seen["config"]
+        is config
+    )
+
+    assert (
+        seen[
+            "selected_libraries"
+        ]
+        == "Anime"
+    )
+
+    assert written == {
+        "directory":
+            "/data/artwork-manager",
+
+        "library":
+            "Anime",
+
+        "preview":
+            preview,
+
+        "review_fingerprint":
+            None,
+    }
+
+    assert (
+        cached[
+            "review_fingerprint"
+        ]
+        is None
+    )
+
+
+def test_artwork_reviewed_apply_refresh_failure_does_not_change_success(
+    monkeypatch,
+):
+    from artwork.runner import (
+        ArtworkRunOutcome,
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_APPLIES",
+        {
+            "apply-1": {
+                "apply_id":
+                    "apply-1",
+
+                "library":
+                    "Anime",
+
+                "review_fingerprint":
+                    "reviewed-anime-plan",
+
+                "status":
+                    "running",
+
+                "updated_at":
+                    "start",
+
+                "refresh_error":
+                    None,
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_ACTIVE_APPLIES",
+        {
+            "Anime":
+                "apply-1",
+        },
+    )
+
+    config = {
+        "services": {
+            "artwork_manager": {
+                "enabled": True,
+            },
+        },
+    }
+
+    plex = object()
+
+    monkeypatch.setattr(
+        web_server,
+        "load_config",
+        lambda:
+            config,
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "_connect_plex",
+        lambda value:
+            plex,
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "run_configured_reviewed_artwork_manager",
+        lambda **kwargs:
+            SimpleNamespace(
+                libraries=(
+                    SimpleNamespace(
+                        outcome=(
+                            ArtworkRunOutcome
+                            .APPLIED
+                        ),
+                        error_type=None,
+                        error_message=None,
+                    ),
+                ),
+            ),
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "_refresh_artwork_current_state_after_apply",
+        lambda **kwargs:
+            (_ for _ in ())
+            .throw(
+                RuntimeError(
+                    "current-state refresh failed"
+                )
+            ),
+    )
+
+    web_server._run_artwork_reviewed_apply(
+        "apply-1",
+        "Anime",
+        "reviewed-anime-plan",
+    )
+
+    record = (
+        web_server
+        .ARTWORK_APPLIES[
+            "apply-1"
+        ]
+    )
+
+    # APPLY itself succeeded and must never be
+    # misreported as failed because the GUI cache
+    # could not be refreshed.
+    assert (
+        record["status"]
+        == "applied"
+    )
+
+    assert (
+        record["error"]
+        is None
+    )
+
+    assert (
+        record[
+            "result"
+        ][
+            "outcome"
+        ]
+        == "applied"
+    )
+
+    assert (
+        record[
+            "result"
+        ][
+            "current_state_refreshed"
+        ]
+        is False
+    )
+
+    assert (
+        record[
+            "result"
+        ][
+            "current_state_scanned_at"
+        ]
+        is None
+    )
+
+    assert (
+        record[
+            "refresh_error"
+        ][
+            "type"
+        ]
+        == "RuntimeError"
+    )
+
+    assert (
+        record[
+            "refresh_error"
+        ][
+            "message"
+        ]
+        == "current-state refresh failed"
+    )
+
+    assert (
+        record[
+            "progress"
+        ][
+            "message"
+        ]
+        == (
+            "Apply complete; current-state "
+            "refresh failed"
+        )
+    )
+
+    assert (
+        "Anime"
+        not in
+        web_server
+        .ARTWORK_ACTIVE_APPLIES
     )

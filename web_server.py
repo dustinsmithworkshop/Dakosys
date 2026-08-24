@@ -386,6 +386,82 @@ def _run_artwork_current_state_scan(
                 )
 
 
+def _refresh_artwork_current_state_after_apply(
+    *,
+    plex,
+    config: dict,
+    library: str,
+) -> dict:
+    """Rebuild and persist current state after reviewed APPLY."""
+
+    workflow = (
+        build_configured_artwork_manager_workflow(
+            plex=plex,
+            config=config,
+            selected_libraries=library,
+        )
+    )
+
+    run = (
+        workflow.run_for_library(
+            library
+        )
+    )
+
+    if run is None:
+        skipped = tuple(
+            item
+            for item in workflow.skipped
+            if (
+                item.target.library
+                == library
+            )
+        )
+
+        if skipped:
+            raise RuntimeError(
+                "Artwork Manager library "
+                f"{library!r} is not yet supported"
+            )
+
+        raise RuntimeError(
+            "Artwork Manager library "
+            f"{library!r} was not found"
+        )
+
+    preview = (
+        serialize_artwork_library(
+            run
+        )
+    )
+
+    review_fingerprint = None
+
+    if (
+        run.plan is not None
+        and run.safe_to_apply
+        and run.needs_apply
+    ):
+        review_fingerprint = (
+            build_artwork_review_fingerprint(
+                run
+            )
+        )
+
+    return (
+        write_artwork_current_state(
+            directory=(
+                ARTWORK_HISTORY_DIR
+            ),
+            library=library,
+            preview=preview,
+            review_fingerprint=(
+                review_fingerprint
+            ),
+        )
+    )
+
+
 def _run_artwork_reviewed_apply(
     apply_id: str,
     library: str,
@@ -511,20 +587,117 @@ def _run_artwork_reviewed_apply(
             else None
         )
 
+        current_state_refreshed = False
+        current_state_scanned_at = None
+        refresh_error = None
+
+        if outcome in {
+            "applied",
+            "no_changes",
+        }:
+            _update_artwork_apply(
+                apply_id,
+                progress={
+                    "phase":
+                        "refreshing",
+
+                    "completed": 0,
+                    "total": 0,
+                    "fraction": None,
+                    "message":
+                        "Refreshing current state "
+                        "after reviewed apply",
+
+                    "current_title":
+                        None,
+                },
+            )
+
+            try:
+                cached = (
+                    _refresh_artwork_current_state_after_apply(
+                        plex=plex,
+                        config=config,
+                        library=library,
+                    )
+                )
+
+                current_state_refreshed = True
+                current_state_scanned_at = (
+                    cached.get(
+                        "scanned_at"
+                    )
+                )
+
+            except Exception as exc:
+                refresh_error = {
+                    "type":
+                        type(exc).__name__,
+
+                    "message":
+                        str(exc),
+                }
+
+        terminal_message = {
+            "applied":
+                "Reviewed apply complete",
+
+            "no_changes":
+                "Reviewed plan required no changes",
+
+            "blocked":
+                "Reviewed apply blocked",
+
+            "failed":
+                "Reviewed apply failed",
+        }[
+            outcome
+        ]
+
+        if refresh_error is not None:
+            terminal_message = (
+                "Apply complete; current-state "
+                "refresh failed"
+            )
+
         _update_artwork_apply(
             apply_id,
             status=outcome,
             finished_at=(
                 _artwork_utc_now()
             ),
+            progress={
+                "phase":
+                    ArtworkScanPhase
+                    .COMPLETE
+                    .value,
+
+                "completed": 1,
+                "total": 1,
+                "fraction": 1.0,
+                "message":
+                    terminal_message,
+
+                "current_title":
+                    None,
+            },
             result={
                 "outcome":
                     outcome,
 
                 "apply_mode":
                     "manual",
+
+                "current_state_refreshed":
+                    current_state_refreshed,
+
+                "current_state_scanned_at":
+                    current_state_scanned_at,
             },
             error=error,
+            refresh_error=(
+                refresh_error
+            ),
         )
 
     except ArtworkReviewMismatchError as exc:
@@ -2355,6 +2528,9 @@ def start_artwork_reviewed_apply(
                 None,
 
             "error":
+                None,
+
+            "refresh_error":
                 None,
         }
 
