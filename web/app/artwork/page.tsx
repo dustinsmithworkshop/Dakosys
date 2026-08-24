@@ -20,6 +20,7 @@ import type {
   ArtworkScanRecord,
   ArtworkTarget,
   ArtworkTargetsResponse,
+  StatusResponse,
 } from "@/types/api";
 
 
@@ -32,10 +33,34 @@ function baselineLabel(source: string): string {
   switch (source) {
     case "durable_state":
       return "Durable State";
+    case "item_store_bootstrap":
+      return "3.0 Item Store Bootstrap";
     case "legacy_migration":
       return "Legacy Migration";
     case "new_library":
       return "New Library";
+    default:
+      return source;
+  }
+}
+
+
+function episodeSourceLabel(
+  source: string
+): string {
+  switch (source) {
+    case "mediux":
+      return "MediUX Curated";
+    case "generated":
+      return "Dakosys Generated";
+    case "tmdb":
+      return "TMDB Raw Still";
+    case "tvdb":
+      return "TVDB";
+    case "plex":
+      return "Plex / Existing";
+    case "manual":
+      return "Manual / Locked";
     default:
       return source;
   }
@@ -610,7 +635,9 @@ function PreviewPanel({
                     className="flex items-center justify-between bg-zinc-900 rounded-md px-3 py-2"
                   >
                     <span className="text-zinc-300 capitalize text-sm">
-                      {source.source}
+                      {episodeSourceLabel(
+                        source.source
+                      )}
                     </span>
 
                     <span className="text-zinc-400 text-xs">
@@ -625,6 +652,86 @@ function PreviewPanel({
           )}
         </CardBody>
       </Card>
+
+      {preview.media_type === "show" && (
+        <Card className="bg-zinc-950 border border-zinc-800">
+          <CardBody className="p-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+              <div>
+                <p className="font-semibold text-white">
+                  Artwork Generator Plan
+                </p>
+
+                <p className="text-zinc-500 text-xs mt-1">
+                  Generated episode-card activity in this
+                  read-only current-state plan.
+                </p>
+              </div>
+
+              <Chip
+                size="sm"
+                variant="flat"
+                color={
+                  preview.generator.failures > 0
+                    ? "danger"
+                    : preview.generator
+                          .materialization_needed > 0
+                      ? "secondary"
+                      : "default"
+                }
+              >
+                {preview.generator.failures > 0
+                  ? `${preview.generator.failures} failed`
+                  : preview.generator
+                        .materialization_needed > 0
+                    ? `${preview.generator.materialization_needed.toLocaleString()} to materialize`
+                    : "No materialization needed"}
+              </Chip>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <Stat
+                label="Changed Shows"
+                value={
+                  preview.generator.changed_shows
+                }
+              />
+
+              <Stat
+                label="Planned Cards"
+                value={
+                  preview.generator.planned_cards
+                    .toLocaleString()
+                }
+              />
+
+              <Stat
+                label="Cached"
+                value={
+                  preview.generator.cached_cards
+                    .toLocaleString()
+                }
+              />
+
+              <Stat
+                label="Need Materialization"
+                value={
+                  preview.generator
+                    .materialization_needed
+                    .toLocaleString()
+                }
+              />
+
+              <Stat
+                label="Failures"
+                value={
+                  preview.generator.failures
+                }
+              />
+            </div>
+          </CardBody>
+        </Card>
+      )}
 
       <div className="grid md:grid-cols-3 gap-3">
         <Card className="bg-zinc-950 border border-zinc-800">
@@ -1061,6 +1168,13 @@ export default function ArtworkPage() {
   );
 
   const [
+    artworkStatus,
+    setArtworkStatus,
+  ] = useState<
+    StatusResponse["artwork"] | null
+  >(null);
+
+  const [
     previews,
     setPreviews,
   ] = useState<
@@ -1413,6 +1527,22 @@ export default function ArtworkPage() {
     );
   };
 
+  const loadArtworkStatus = async () => {
+    try {
+      const result =
+        await api.getStatus();
+
+      setArtworkStatus(
+        result.artwork
+      );
+    } catch {
+      // Configuration status is supplemental.
+      // Target/history loading should remain usable
+      // if the dashboard status endpoint is unavailable.
+    }
+  };
+
+
   const loadTargets = async () => {
     setLoading(true);
 
@@ -1475,6 +1605,7 @@ export default function ArtworkPage() {
 
     await Promise.allSettled([
       loadHistory(),
+      loadArtworkStatus(),
       targets.length > 0
         ? refreshSupportedLibraryStates(
             targets
@@ -1486,6 +1617,7 @@ export default function ArtworkPage() {
   useEffect(() => {
     loadTargets();
     loadHistory();
+    loadArtworkStatus();
   }, []);
 
   const targets =
@@ -1543,6 +1675,187 @@ export default function ArtworkPage() {
           )}
         </div>
       </Spotlight>
+
+      {artworkStatus && (
+        <Card className="bg-zinc-900 border border-zinc-800 mb-6">
+          <CardBody className="p-5 space-y-5">
+            <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-white font-semibold text-lg">
+                    Artwork Configuration
+                  </p>
+
+                  <Chip
+                    size="sm"
+                    variant="flat"
+                    color={
+                      artworkStatus.enabled
+                        ? "success"
+                        : "default"
+                    }
+                  >
+                    {artworkStatus.enabled
+                      ? "Manager Enabled"
+                      : "Manager Disabled"}
+                  </Chip>
+
+                  <Chip
+                    size="sm"
+                    variant="flat"
+                    color={
+                      artworkStatus.generator.enabled
+                        ? "secondary"
+                        : "default"
+                    }
+                  >
+                    {artworkStatus.generator.enabled
+                      ? "Generator Enabled"
+                      : "Generator Disabled"}
+                  </Chip>
+                </div>
+
+                <p className="text-zinc-400 text-sm mt-1">
+                  Resolved Artwork Manager and episode-card
+                  generator configuration.
+                </p>
+              </div>
+
+              <div className="text-zinc-500 text-xs">
+                Canonical runtime configuration
+              </div>
+            </div>
+
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <Stat
+                label="Primary Source"
+                value={
+                  artworkStatus.enabled &&
+                  artworkStatus.primary_provider
+                    ? artworkStatus.primary_provider
+                        .charAt(0)
+                        .toUpperCase() +
+                      artworkStatus.primary_provider.slice(1)
+                    : "Disabled"
+                }
+              />
+
+              <Stat
+                label="Apply Mode"
+                value={
+                  artworkStatus.enabled
+                    ? artworkStatus.apply_mode === "auto"
+                      ? "Automatic"
+                      : "Manual Review"
+                    : "—"
+                }
+              />
+
+              <Stat
+                label="Episode Generator"
+                value={
+                  artworkStatus.generator.enabled
+                    ? "Enabled"
+                    : "Disabled"
+                }
+              />
+
+              <Stat
+                label="Default Font"
+                value={
+                  artworkStatus.generator.enabled &&
+                  artworkStatus.generator.default_font
+                    ? artworkStatus.generator.default_font
+                        .replaceAll(
+                          "_",
+                          " "
+                        )
+                    : "—"
+                }
+              />
+            </div>
+
+            {artworkStatus.enabled && (
+              <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-4">
+                <p className="text-zinc-500 text-xs uppercase tracking-wider mb-3">
+                  Episode Artwork Priority
+                </p>
+
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 text-sm">
+                  <span className="text-violet-300 font-medium">
+                    {artworkStatus.primary_provider
+                      ? `${
+                          artworkStatus.primary_provider
+                            .charAt(0)
+                            .toUpperCase() +
+                          artworkStatus.primary_provider
+                            .slice(1)
+                        } Curated`
+                      : "Curated Artwork"}
+                  </span>
+
+                  <span className="text-zinc-600 hidden sm:inline">
+                    →
+                  </span>
+
+                  {artworkStatus.generator.enabled && (
+                    <>
+                      <span className="text-zinc-100 font-medium">
+                        Dakosys Generated
+                      </span>
+
+                      <span className="text-zinc-600 hidden sm:inline">
+                        →
+                      </span>
+                    </>
+                  )}
+
+                  <span className="text-zinc-400">
+                    {artworkStatus.tmdb_enabled
+                      ? "TMDB / Existing Fallback"
+                      : "Existing Fallback"}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="grid lg:grid-cols-3 gap-3">
+              <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-3">
+                <p className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Generator Config
+                </p>
+
+                <p className="text-zinc-300 text-xs font-mono mt-2 break-all">
+                  {artworkStatus.generator.config_file ??
+                    "—"}
+                </p>
+              </div>
+
+              <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-3">
+                <p className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Local Generated Cache
+                </p>
+
+                <p className="text-zinc-300 text-xs font-mono mt-2 break-all">
+                  {artworkStatus.generator.local_asset_root ??
+                    "—"}
+                </p>
+              </div>
+
+              <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-3">
+                <p className="text-zinc-500 text-xs uppercase tracking-wider">
+                  Kometa Generated Path
+                </p>
+
+                <p className="text-zinc-300 text-xs font-mono mt-2 break-all">
+                  {artworkStatus.generator.kometa_asset_root ??
+                    "—"}
+                </p>
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+      )}
 
       <ArtworkRunDashboard
         latest={latestRun}
