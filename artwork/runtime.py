@@ -54,6 +54,7 @@ from artwork.runner import (
     ArtworkManagerRunResult,
     ArtworkRunOutcome,
     execute_artwork_library_workflow,
+    execute_reviewed_artwork_library_workflow,
 )
 from artwork.run_history import (
     write_artwork_run_history,
@@ -787,6 +788,132 @@ def run_configured_artwork_manager(
         skipped=tuple(
             skipped
         ),
+    )
+
+    if history_directory is not None:
+        write_artwork_run_history(
+            result,
+            directory=Path(
+                history_directory
+            ),
+        )
+
+    return result
+
+
+def run_configured_reviewed_artwork_manager(
+    *,
+    plex,
+    config: dict,
+    library: str,
+    review_fingerprint: str,
+    environ: Mapping[str, str] | None = None,
+    incomplete_migration_threshold: float = 0.25,
+    history_directory: (
+        str
+        | Path
+        | None
+    ) = None,
+    progress_callback: (
+        ArtworkProgressCallback
+        | None
+    ) = None,
+) -> ArtworkManagerRunResult | None:
+    """Apply one exact human-reviewed Artwork Manager plan.
+
+    This entry point deliberately ignores the configured automatic
+    apply policy. A successful call represents an explicit human
+    approval and is therefore always recorded as MANUAL.
+
+    The reviewed fingerprint is revalidated by the domain executor
+    immediately before transactional apply.
+    """
+
+    runtime = build_artwork_runtime(
+        config,
+        environ=environ,
+    )
+
+    if runtime is None:
+        return None
+
+    targets = (
+        discover_artwork_targets(
+            plex,
+            config,
+        )
+    )
+
+    (
+        execution_targets,
+        legacy,
+    ) = resolve_artwork_workflow_targets(
+        targets,
+        selected_libraries=library,
+        legacy_metadata_by_library=None,
+    )
+
+    if len(execution_targets) != 1:
+        raise RuntimeError(
+            "Reviewed Artwork Manager apply "
+            "must resolve exactly one library"
+        )
+
+    target = execution_targets[0]
+
+    if (
+        target.media_type
+        is not MediaType.SHOW
+    ):
+        raise ValueError(
+            "Reviewed Artwork Manager apply "
+            "currently supports show libraries only"
+        )
+
+    run = (
+        build_artwork_target_workflow(
+            plex=plex,
+            target=target,
+            provider=runtime.provider,
+            tmdb_client=(
+                runtime.tmdb_client
+            ),
+            generator_options=getattr(
+                runtime,
+                "generator_options",
+                None,
+            ),
+            legacy_metadata=(
+                legacy.get(
+                    target.library
+                )
+            ),
+            incomplete_migration_threshold=(
+                incomplete_migration_threshold
+            ),
+            progress_callback=(
+                progress_callback
+            ),
+        )
+    )
+
+    library_result = (
+        execute_reviewed_artwork_library_workflow(
+            run,
+            review_fingerprint=(
+                review_fingerprint
+            ),
+        )
+    )
+
+    result = ArtworkManagerRunResult(
+        apply_mode=(
+            ArtworkApplyMode.MANUAL
+        ),
+        libraries=(
+            library_result,
+        ),
+        skipped=(),
     )
 
     if history_directory is not None:

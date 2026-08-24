@@ -1173,3 +1173,460 @@ def test_generator_enabled_must_be_boolean():
             config,
             environ={},
         )
+
+
+def test_configured_reviewed_runner_applies_exact_library_manually(
+    monkeypatch,
+    tmp_path,
+):
+    from pathlib import Path
+
+    from artwork.apply_policy import (
+        ArtworkApplyMode,
+    )
+    from artwork.runner import (
+        ArtworkRunOutcome,
+    )
+    from artwork.runtime import (
+        run_configured_reviewed_artwork_manager,
+    )
+    from artwork.targets import (
+        ArtworkTarget,
+        MediaType,
+    )
+
+    provider = object()
+    tmdb_client = object()
+    generator_options = object()
+
+    # Deliberately AUTO: explicit reviewed apply
+    # must still be recorded as MANUAL.
+    runtime = SimpleNamespace(
+        provider=provider,
+        tmdb_client=tmdb_client,
+        generator_options=(
+            generator_options
+        ),
+        apply_mode=(
+            ArtworkApplyMode.AUTO
+        ),
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "build_artwork_runtime",
+        lambda config, environ=None:
+            runtime,
+    )
+
+    target = ArtworkTarget(
+        name="Anime",
+        library="Anime",
+        media_type=MediaType.SHOW,
+        output_path=Path(
+            "/metadata/artwork-anime"
+        ),
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "discover_artwork_targets",
+        lambda plex, config:
+            (target,),
+    )
+
+    resolved = {}
+
+    def fake_resolve(
+        targets,
+        *,
+        selected_libraries,
+        legacy_metadata_by_library,
+    ):
+        resolved[
+            "selected_libraries"
+        ] = selected_libraries
+
+        resolved[
+            "legacy_metadata"
+        ] = legacy_metadata_by_library
+
+        return (
+            (target,),
+            {},
+        )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "resolve_artwork_workflow_targets",
+        fake_resolve,
+    )
+
+    workflow = SimpleNamespace(
+        library="Anime"
+    )
+
+    built = {}
+
+    def fake_build(
+        **kwargs,
+    ):
+        built.update(
+            kwargs
+        )
+
+        return workflow
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "build_artwork_target_workflow",
+        fake_build,
+    )
+
+    reviewed = {}
+
+    library_result = SimpleNamespace(
+        library="Anime",
+        outcome=(
+            ArtworkRunOutcome.APPLIED
+        ),
+    )
+
+    def fake_reviewed_execute(
+        run,
+        *,
+        review_fingerprint,
+    ):
+        reviewed["run"] = run
+        reviewed[
+            "review_fingerprint"
+        ] = review_fingerprint
+
+        return library_result
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "execute_reviewed_artwork_library_workflow",
+        fake_reviewed_execute,
+    )
+
+    history = {}
+
+    def fake_history(
+        result,
+        *,
+        directory,
+    ):
+        history["result"] = result
+        history["directory"] = directory
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "write_artwork_run_history",
+        fake_history,
+    )
+
+    plex = object()
+    config = _config()
+    progress_callback = object()
+
+    result = (
+        run_configured_reviewed_artwork_manager(
+            plex=plex,
+            config=config,
+            library="Anime",
+            review_fingerprint=(
+                "reviewed-anime-plan"
+            ),
+            environ={},
+            history_directory=(
+                tmp_path
+                / "history"
+            ),
+            progress_callback=(
+                progress_callback
+            ),
+        )
+    )
+
+    assert result is not None
+
+    assert (
+        result.apply_mode
+        is ArtworkApplyMode.MANUAL
+    )
+
+    assert result.libraries == (
+        library_result,
+    )
+
+    assert (
+        resolved[
+            "selected_libraries"
+        ]
+        == "Anime"
+    )
+
+    assert (
+        resolved[
+            "legacy_metadata"
+        ]
+        is None
+    )
+
+    assert built[
+        "plex"
+    ] is plex
+
+    assert built[
+        "target"
+    ] is target
+
+    assert built[
+        "provider"
+    ] is provider
+
+    assert built[
+        "tmdb_client"
+    ] is tmdb_client
+
+    assert built[
+        "generator_options"
+    ] is generator_options
+
+    assert built[
+        "progress_callback"
+    ] is progress_callback
+
+    assert reviewed == {
+        "run":
+            workflow,
+
+        "review_fingerprint":
+            "reviewed-anime-plan",
+    }
+
+    assert (
+        history["result"]
+        is result
+    )
+
+    assert history[
+        "directory"
+    ] == (
+        tmp_path
+        / "history"
+    )
+
+
+def test_configured_reviewed_runner_returns_none_when_disabled(
+    monkeypatch,
+):
+    from artwork.runtime import (
+        run_configured_reviewed_artwork_manager,
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "build_artwork_runtime",
+        lambda config, environ=None:
+            None,
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "discover_artwork_targets",
+        lambda *args, **kwargs:
+            (_ for _ in ())
+            .throw(
+                AssertionError(
+                    "disabled manager must not discover targets"
+                )
+            ),
+    )
+
+    result = (
+        run_configured_reviewed_artwork_manager(
+            plex=object(),
+            config=_config(
+                enabled=False,
+            ),
+            library="Anime",
+            review_fingerprint=(
+                "reviewed-plan"
+            ),
+            environ={},
+        )
+    )
+
+    assert result is None
+
+
+def test_configured_reviewed_runner_rejects_movie_target(
+    monkeypatch,
+):
+    from pathlib import Path
+
+    from artwork.apply_policy import (
+        ArtworkApplyMode,
+    )
+    from artwork.runtime import (
+        run_configured_reviewed_artwork_manager,
+    )
+    from artwork.targets import (
+        ArtworkTarget,
+        MediaType,
+    )
+
+    runtime = SimpleNamespace(
+        provider=object(),
+        tmdb_client=None,
+        generator_options=None,
+        apply_mode=(
+            ArtworkApplyMode.AUTO
+        ),
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "build_artwork_runtime",
+        lambda config, environ=None:
+            runtime,
+    )
+
+    target = ArtworkTarget(
+        name="Movies",
+        library="Movies",
+        media_type=MediaType.MOVIE,
+        output_path=Path(
+            "/metadata/artwork-movies"
+        ),
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "discover_artwork_targets",
+        lambda plex, config:
+            (target,),
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "resolve_artwork_workflow_targets",
+        lambda *args, **kwargs:
+            (
+                (target,),
+                {},
+            ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="show libraries only",
+    ):
+        run_configured_reviewed_artwork_manager(
+            plex=object(),
+            config=_config(),
+            library="Movies",
+            review_fingerprint=(
+                "reviewed-movie-plan"
+            ),
+            environ={},
+        )
+
+
+def test_configured_reviewed_runner_preserves_review_mismatch(
+    monkeypatch,
+):
+    from pathlib import Path
+
+    from artwork.apply_policy import (
+        ArtworkApplyMode,
+    )
+    from artwork.runner import (
+        ArtworkReviewMismatchError,
+    )
+    from artwork.runtime import (
+        run_configured_reviewed_artwork_manager,
+    )
+    from artwork.targets import (
+        ArtworkTarget,
+        MediaType,
+    )
+
+    runtime = SimpleNamespace(
+        provider=object(),
+        tmdb_client=None,
+        generator_options=None,
+        apply_mode=(
+            ArtworkApplyMode.AUTO
+        ),
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "build_artwork_runtime",
+        lambda config, environ=None:
+            runtime,
+    )
+
+    target = ArtworkTarget(
+        name="Anime",
+        library="Anime",
+        media_type=MediaType.SHOW,
+        output_path=Path(
+            "/metadata/artwork-anime"
+        ),
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "discover_artwork_targets",
+        lambda plex, config:
+            (target,),
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "resolve_artwork_workflow_targets",
+        lambda *args, **kwargs:
+            (
+                (target,),
+                {},
+            ),
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "build_artwork_target_workflow",
+        lambda **kwargs:
+            SimpleNamespace(
+                library="Anime"
+            ),
+    )
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "execute_reviewed_artwork_library_workflow",
+        lambda *args, **kwargs:
+            (_ for _ in ())
+            .throw(
+                ArtworkReviewMismatchError(
+                    "plan changed after review"
+                )
+            ),
+    )
+
+    with pytest.raises(
+        ArtworkReviewMismatchError,
+        match="changed after review",
+    ):
+        run_configured_reviewed_artwork_manager(
+            plex=object(),
+            config=_config(),
+            library="Anime",
+            review_fingerprint=(
+                "old-reviewed-plan"
+            ),
+            environ={},
+        )
