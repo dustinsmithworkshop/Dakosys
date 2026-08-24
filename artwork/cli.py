@@ -20,6 +20,9 @@ from artwork.run_history import (
 from artwork.progress import (
     ArtworkScanProgress,
 )
+from artwork.status import (
+    build_artwork_status,
+)
 from artwork.runtime import (
     build_configured_artwork_manager_workflow,
     run_configured_artwork_manager,
@@ -413,79 +416,10 @@ def status(
             config
         )
 
-        targets = tuple(
-            discover_artwork_targets(
-                plex,
-                config,
-            )
+        payload = build_artwork_status(
+            config=config,
+            plex=plex,
         )
-
-        service = (
-            config
-            .get(
-                "services",
-                {},
-            )
-            .get(
-                "artwork_manager",
-                {},
-            )
-            or {}
-        )
-
-        schedule = (
-            config
-            .get(
-                "scheduler",
-                {},
-            )
-            .get(
-                "artwork_manager",
-            )
-        )
-
-        payload = {
-            "enabled":
-                bool(
-                    service.get(
-                        "enabled",
-                        False,
-                    )
-                ),
-
-            "apply_mode":
-                resolve_artwork_apply_mode(
-                    config
-                ).value,
-
-            "schedule":
-                schedule,
-
-            "libraries": [
-                {
-                    "library":
-                        target.library,
-
-                    "media_type":
-                        _enum_value(
-                            target.media_type
-                        ),
-
-                    "output_path":
-                        str(
-                            target.output_path
-                        ),
-
-                    "supported":
-                        True,
-
-                    "skip_reason":
-                        None,
-                }
-                for target
-                in targets
-            ],
-        }
 
     except Exception as exc:
         raise click.ClickException(
@@ -516,6 +450,50 @@ def status(
     click.echo(
         f"  Schedule: "
         f"{payload['schedule']}"
+    )
+
+    click.echo(
+        f"  Primary provider: "
+        f"{payload['primary_provider']}"
+    )
+
+    click.echo(
+        f"  TMDB fallback: "
+        f"{'enabled' if payload['tmdb_enabled'] else 'disabled'}"
+    )
+
+    generator = payload[
+        "generator"
+    ]
+
+    click.echo()
+    click.echo(
+        "Artwork Generator"
+    )
+
+    click.echo(
+        f"  Enabled: "
+        f"{generator['enabled']}"
+    )
+
+    click.echo(
+        f"  Config file: "
+        f"{generator['config_file']}"
+    )
+
+    click.echo(
+        f"  Local asset root: "
+        f"{generator['local_asset_root']}"
+    )
+
+    click.echo(
+        f"  Kometa asset root: "
+        f"{generator['kometa_asset_root']}"
+    )
+
+    click.echo(
+        f"  Default font: "
+        f"{generator['default_font']}"
     )
 
     click.echo()

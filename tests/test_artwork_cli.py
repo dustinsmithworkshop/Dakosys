@@ -13,6 +13,12 @@ def _config():
             "artwork_manager": {
                 "enabled": True,
                 "apply_mode": "auto",
+                "providers": {
+                    "mediux": {
+                        "api_token":
+                            "test-mediux-token",
+                    },
+                },
             },
         },
         "scheduler": {
@@ -112,8 +118,7 @@ def test_status_reports_dynamic_plex_targets(
     )
 
     monkeypatch.setattr(
-        artwork_cli,
-        "discover_artwork_targets",
+        "artwork.status.discover_artwork_targets",
         lambda plex, config: targets,
     )
 
@@ -151,8 +156,7 @@ def test_status_json_output(
     )
 
     monkeypatch.setattr(
-        artwork_cli,
-        "discover_artwork_targets",
+        "artwork.status.discover_artwork_targets",
         lambda plex, config: (
             SimpleNamespace(
                 library="TV",
