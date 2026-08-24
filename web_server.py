@@ -21,6 +21,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from artwork.status import (
+    build_artwork_status,
+)
 from artwork.current_state import (
     ArtworkCurrentStateError,
     load_artwork_current_state,
@@ -581,8 +584,16 @@ def get_status():
         except Exception:
             pass
 
+    artwork_status = (
+        build_artwork_status(
+            config=config or {},
+            plex=None,
+        )
+    )
+
     return {
         "services": services_info,
+        "artwork": artwork_status,
         "stats": {
             "total_shows": total_shows,
             "total_libraries": total_libraries,

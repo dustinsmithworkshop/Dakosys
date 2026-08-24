@@ -12,12 +12,37 @@ export interface StatusStats {
   total_size_gb: number;
 }
 
+export interface ArtworkStatus {
+  enabled: boolean;
+  apply_mode: "auto" | "manual";
+  schedule: unknown;
+  primary_provider: string | null;
+  tmdb_enabled: boolean;
+
+  generator: {
+    enabled: boolean;
+    config_file: string | null;
+    local_asset_root: string | null;
+    kometa_asset_root: string | null;
+    default_font: string | null;
+  };
+
+  libraries: {
+    library: string;
+    media_type: "show" | "movie";
+    output_path: string;
+    supported: boolean;
+    skip_reason: string | null;
+  }[];
+}
+
 export interface StatusResponse {
   services: {
     anime_episode_type: ServiceStatus;
     tv_status_tracker: ServiceStatus;
     size_overlay: ServiceStatus;
   };
+  artwork: ArtworkStatus;
   stats: StatusStats;
   trakt: {
     required: boolean;
