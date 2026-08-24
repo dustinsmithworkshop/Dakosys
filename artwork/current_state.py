@@ -13,7 +13,7 @@ from pathlib import Path
 from uuid import uuid4
 
 
-CURRENT_STATE_SCHEMA_VERSION = 1
+CURRENT_STATE_SCHEMA_VERSION = 2
 CURRENT_STATE_DIRECTORY_NAME = "current-state"
 
 
@@ -254,10 +254,29 @@ def load_artwork_current_state(
             "record must be a JSON object"
         )
 
+    schema_version = payload.get(
+        "schema_version"
+    )
+
     if (
-        payload.get(
-            "schema_version"
+        isinstance(
+            schema_version,
+            int,
         )
+        and not isinstance(
+            schema_version,
+            bool,
+        )
+        and schema_version
+        < CURRENT_STATE_SCHEMA_VERSION
+    ):
+        # Older cached previews are stale after a schema upgrade.
+        # Treat them as absent so callers can transparently rebuild
+        # current state using the current serializer.
+        return None
+
+    if (
+        schema_version
         != CURRENT_STATE_SCHEMA_VERSION
     ):
         raise InvalidArtworkCurrentStateError(

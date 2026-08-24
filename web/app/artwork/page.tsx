@@ -520,6 +520,15 @@ function PreviewPanel({
   const coverage = preview.coverage;
   const output = preview.output;
 
+  const generator =
+    preview.generator ?? {
+      changed_shows: 0,
+      planned_cards: 0,
+      cached_cards: 0,
+      materialization_needed: 0,
+      failures: 0,
+    };
+
   return (
     <div className="border-t border-zinc-800 p-5 space-y-5">
       <div className="flex flex-wrap gap-2">
@@ -672,19 +681,19 @@ function PreviewPanel({
                 size="sm"
                 variant="flat"
                 color={
-                  preview.generator.failures > 0
+                  generator.failures > 0
                     ? "danger"
-                    : preview.generator
+                    : generator
                           .materialization_needed > 0
                       ? "secondary"
                       : "default"
                 }
               >
-                {preview.generator.failures > 0
-                  ? `${preview.generator.failures} failed`
-                  : preview.generator
+                {generator.failures > 0
+                  ? `${generator.failures} failed`
+                  : generator
                         .materialization_needed > 0
-                    ? `${preview.generator.materialization_needed.toLocaleString()} to materialize`
+                    ? `${generator.materialization_needed.toLocaleString()} to materialize`
                     : "No materialization needed"}
               </Chip>
             </div>
@@ -693,14 +702,14 @@ function PreviewPanel({
               <Stat
                 label="Changed Shows"
                 value={
-                  preview.generator.changed_shows
+                  generator.changed_shows
                 }
               />
 
               <Stat
                 label="Planned Cards"
                 value={
-                  preview.generator.planned_cards
+                  generator.planned_cards
                     .toLocaleString()
                 }
               />
@@ -708,7 +717,7 @@ function PreviewPanel({
               <Stat
                 label="Cached"
                 value={
-                  preview.generator.cached_cards
+                  generator.cached_cards
                     .toLocaleString()
                 }
               />
@@ -716,7 +725,7 @@ function PreviewPanel({
               <Stat
                 label="Need Materialization"
                 value={
-                  preview.generator
+                  generator
                     .materialization_needed
                     .toLocaleString()
                 }
@@ -725,7 +734,7 @@ function PreviewPanel({
               <Stat
                 label="Failures"
                 value={
-                  preview.generator.failures
+                  generator.failures
                 }
               />
             </div>

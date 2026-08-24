@@ -188,3 +188,66 @@ def test_library_identity_mismatch_is_rejected(
             directory=tmp_path,
             library="Series",
         )
+
+
+def test_pre_generator_current_state_schema_is_treated_as_stale(
+    tmp_path,
+):
+    """3.0 GUI cache is stale and must trigger a fresh 3.1 scan."""
+
+    from artwork.current_state import (
+        CURRENT_STATE_SCHEMA_VERSION,
+    )
+
+    assert (
+        CURRENT_STATE_SCHEMA_VERSION
+        == 2
+    )
+
+    write_artwork_current_state(
+        directory=tmp_path,
+        library="TV",
+        preview={
+            "library": "TV",
+            "generator": {
+                "changed_shows": 0,
+                "planned_cards": 0,
+                "cached_cards": 0,
+                "materialization_needed": 0,
+                "failures": 0,
+            },
+        },
+    )
+
+    path = next(
+        (
+            tmp_path
+            / "current-state"
+        ).glob("*.json")
+    )
+
+    payload = json.loads(
+        path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    # Simulate a persisted 3.0 GUI cache.
+    payload["schema_version"] = 1
+    payload["preview"].pop(
+        "generator",
+        None,
+    )
+
+    path.write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
+
+    assert (
+        load_artwork_current_state(
+            directory=tmp_path,
+            library="TV",
+        )
+        is None
+    )
