@@ -41,8 +41,12 @@ from artwork.run_history import (
 from artwork.review import (
     build_artwork_review_fingerprint,
 )
+from artwork.runner import (
+    ArtworkReviewMismatchError,
+)
 from artwork.runtime import (
     build_configured_artwork_manager_workflow,
+    run_configured_reviewed_artwork_manager,
 )
 from artwork.serialization import (
     serialize_artwork_library,
@@ -92,6 +96,16 @@ ARTWORK_ACTIVE_SCANS: Dict[
     str,
 ] = {}
 
+ARTWORK_APPLIES: Dict[
+    str,
+    Dict[str, Any],
+] = {}
+
+ARTWORK_ACTIVE_APPLIES: Dict[
+    str,
+    str,
+] = {}
+
 
 def _artwork_utc_now() -> str:
     """Return an aware UTC timestamp for scan status records."""
@@ -133,6 +147,51 @@ def _update_artwork_scan(
         record = (
             ARTWORK_SCANS.get(
                 scan_id
+            )
+        )
+
+        if record is None:
+            return
+
+        record.update(
+            changes
+        )
+
+        record[
+            "updated_at"
+        ] = _artwork_utc_now()
+
+
+def _artwork_apply_snapshot(
+    apply_id: str,
+) -> Optional[dict]:
+    """Return a detached copy of one live reviewed apply."""
+
+    with ARTWORK_SCAN_LOCK:
+        record = (
+            ARTWORK_APPLIES.get(
+                apply_id
+            )
+        )
+
+        if record is None:
+            return None
+
+        return copy.deepcopy(
+            record
+        )
+
+
+def _update_artwork_apply(
+    apply_id: str,
+    **changes,
+) -> None:
+    """Atomically update one reviewed apply record."""
+
+    with ARTWORK_SCAN_LOCK:
+        record = (
+            ARTWORK_APPLIES.get(
+                apply_id
             )
         )
 
@@ -322,6 +381,195 @@ def _run_artwork_current_state_scan(
                 == scan_id
             ):
                 ARTWORK_ACTIVE_SCANS.pop(
+                    library,
+                    None,
+                )
+
+
+def _run_artwork_reviewed_apply(
+    apply_id: str,
+    library: str,
+    review_fingerprint: str,
+) -> None:
+    """Rebuild and apply one exact reviewed plan in a worker thread."""
+
+    def progress_callback(
+        progress: ArtworkScanProgress,
+    ) -> None:
+        serialized = (
+            _serialize_artwork_scan_progress(
+                progress
+            )
+        )
+
+        if (
+            progress.phase
+            is ArtworkScanPhase.COMPLETE
+        ):
+            serialized[
+                "message"
+            ] = (
+                "Reviewed plan rebuilt; "
+                "applying changes"
+            )
+
+        _update_artwork_apply(
+            apply_id,
+            progress=serialized,
+        )
+
+    try:
+        config = load_config()
+
+        if not config:
+            raise RuntimeError(
+                "Config file not found"
+            )
+
+        plex = _connect_plex(
+            config
+        )
+
+        result = (
+            run_configured_reviewed_artwork_manager(
+                plex=plex,
+                config=config,
+                library=library,
+                review_fingerprint=(
+                    review_fingerprint
+                ),
+                history_directory=(
+                    ARTWORK_HISTORY_DIR
+                ),
+                progress_callback=(
+                    progress_callback
+                ),
+            )
+        )
+
+        if result is None:
+            raise RuntimeError(
+                "Artwork Manager is disabled"
+            )
+
+        if len(
+            result.libraries
+        ) != 1:
+            raise RuntimeError(
+                "Reviewed Artwork Manager apply "
+                "did not return exactly one library"
+            )
+
+        library_result = (
+            result.libraries[0]
+        )
+
+        outcome = str(
+            getattr(
+                library_result.outcome,
+                "value",
+                library_result.outcome,
+            )
+        )
+
+        if outcome not in {
+            "applied",
+            "no_changes",
+            "blocked",
+            "failed",
+        }:
+            raise RuntimeError(
+                "Reviewed Artwork Manager apply "
+                f"returned unexpected outcome "
+                f"{outcome!r}"
+            )
+
+        error_type = getattr(
+            library_result,
+            "error_type",
+            None,
+        )
+
+        error_message = getattr(
+            library_result,
+            "error_message",
+            None,
+        )
+
+        error = (
+            {
+                "type":
+                    error_type,
+
+                "message":
+                    error_message,
+            }
+            if (
+                error_type
+                or error_message
+            )
+            else None
+        )
+
+        _update_artwork_apply(
+            apply_id,
+            status=outcome,
+            finished_at=(
+                _artwork_utc_now()
+            ),
+            result={
+                "outcome":
+                    outcome,
+
+                "apply_mode":
+                    "manual",
+            },
+            error=error,
+        )
+
+    except ArtworkReviewMismatchError as exc:
+        _update_artwork_apply(
+            apply_id,
+            status="stale",
+            finished_at=(
+                _artwork_utc_now()
+            ),
+            result=None,
+            error={
+                "type":
+                    type(exc).__name__,
+
+                "message":
+                    str(exc),
+            },
+        )
+
+    except Exception as exc:
+        _update_artwork_apply(
+            apply_id,
+            status="failed",
+            finished_at=(
+                _artwork_utc_now()
+            ),
+            result=None,
+            error={
+                "type":
+                    type(exc).__name__,
+
+                "message":
+                    str(exc),
+            },
+        )
+
+    finally:
+        with ARTWORK_SCAN_LOCK:
+            if (
+                ARTWORK_ACTIVE_APPLIES.get(
+                    library
+                )
+                == apply_id
+            ):
+                ARTWORK_ACTIVE_APPLIES.pop(
                     library,
                     None,
                 )
@@ -1614,6 +1862,35 @@ def start_artwork_current_state_scan(
         )
 
     with ARTWORK_SCAN_LOCK:
+        active_apply_id = (
+            ARTWORK_ACTIVE_APPLIES.get(
+                normalized
+            )
+        )
+
+        if active_apply_id is not None:
+            active_apply = (
+                ARTWORK_APPLIES.get(
+                    active_apply_id
+                )
+            )
+
+            if (
+                active_apply is not None
+                and active_apply.get(
+                    "status"
+                )
+                == "running"
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Artwork Manager apply "
+                        f"for {normalized!r} "
+                        "is already running"
+                    ),
+                )
+
         existing_id = (
             ARTWORK_ACTIVE_SCANS.get(
                 normalized
@@ -1773,6 +2050,403 @@ def get_artwork_current_state_scan(
 
     return {
         "scan":
+            record,
+    }
+
+
+class ArtworkReviewedApplyPayload(
+    BaseModel
+):
+    review_fingerprint: str
+
+
+@app.post(
+    "/api/artwork/apply/{library}",
+    status_code=202,
+)
+def start_artwork_reviewed_apply(
+    library: str,
+    payload: ArtworkReviewedApplyPayload,
+):
+    """Start or reuse one exact reviewed Artwork Manager apply."""
+
+    normalized = str(
+        library
+    ).strip()
+
+    if not normalized:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Artwork Manager library "
+                "cannot be empty"
+            ),
+        )
+
+    review_fingerprint = str(
+        payload.review_fingerprint
+        or ""
+    ).strip()
+
+    if not review_fingerprint:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Artwork Manager review "
+                "fingerprint cannot be empty"
+            ),
+        )
+
+    config = load_config()
+
+    if not config:
+        raise HTTPException(
+            status_code=500,
+            detail="Config file not found",
+        )
+
+    service = (
+        config.get(
+            "services",
+            {},
+        )
+        .get(
+            "artwork_manager",
+            {},
+        )
+        or {}
+    )
+
+    if not service.get(
+        "enabled",
+        False,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Artwork Manager is disabled"
+            ),
+        )
+
+    try:
+        cached = (
+            load_artwork_current_state(
+                directory=(
+                    ARTWORK_HISTORY_DIR
+                ),
+                library=normalized,
+            )
+        )
+
+    except (
+        ArtworkCurrentStateError,
+        ValueError,
+    ) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        ) from exc
+
+    if cached is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "No reviewed current-state "
+                "preview exists; scan the "
+                "library first"
+            ),
+        )
+
+    cached_fingerprint = (
+        cached.get(
+            "review_fingerprint"
+        )
+    )
+
+    if cached_fingerprint is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Current-state preview has "
+                "no safe pending plan to apply"
+            ),
+        )
+
+    if (
+        cached_fingerprint
+        != review_fingerprint
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Current-state preview changed; "
+                "refresh before applying"
+            ),
+        )
+
+    preview = (
+        cached.get(
+            "preview",
+            {}
+        )
+        or {}
+    )
+
+    safety = (
+        preview.get(
+            "safety",
+            {}
+        )
+        or {}
+    )
+
+    output = (
+        preview.get(
+            "output",
+            {}
+        )
+        or {}
+    )
+
+    if not safety.get(
+        "safe_to_apply",
+        False,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Current-state preview is "
+                "not safe to apply"
+            ),
+        )
+
+    if not output.get(
+        "needs_apply",
+        False,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Current-state preview has "
+                "no changes to apply"
+            ),
+        )
+
+    with ARTWORK_SCAN_LOCK:
+        active_apply_id = (
+            ARTWORK_ACTIVE_APPLIES.get(
+                normalized
+            )
+        )
+
+        if active_apply_id is not None:
+            active_apply = (
+                ARTWORK_APPLIES.get(
+                    active_apply_id
+                )
+            )
+
+            if (
+                active_apply is not None
+                and active_apply.get(
+                    "status"
+                )
+                == "running"
+            ):
+                if (
+                    active_apply.get(
+                        "review_fingerprint"
+                    )
+                    == review_fingerprint
+                ):
+                    return {
+                        "apply":
+                            copy.deepcopy(
+                                active_apply
+                            ),
+
+                        "reused":
+                            True,
+                    }
+
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "A different Artwork "
+                        "Manager apply for this "
+                        "library is already running"
+                    ),
+                )
+
+        active_scan_id = (
+            ARTWORK_ACTIVE_SCANS.get(
+                normalized
+            )
+        )
+
+        if active_scan_id is not None:
+            active_scan = (
+                ARTWORK_SCANS.get(
+                    active_scan_id
+                )
+            )
+
+            if (
+                active_scan is not None
+                and active_scan.get(
+                    "status"
+                )
+                == "running"
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Artwork Manager scan "
+                        f"for {normalized!r} "
+                        "is already running"
+                    ),
+                )
+
+        apply_id = (
+            uuid4().hex
+        )
+
+        timestamp = (
+            _artwork_utc_now()
+        )
+
+        record = {
+            "apply_id":
+                apply_id,
+
+            "library":
+                normalized,
+
+            "review_fingerprint":
+                review_fingerprint,
+
+            "status":
+                "running",
+
+            "started_at":
+                timestamp,
+
+            "updated_at":
+                timestamp,
+
+            "finished_at":
+                None,
+
+            "progress": {
+                "phase":
+                    "starting",
+
+                "completed": 0,
+                "total": 0,
+                "fraction": None,
+                "message":
+                    "Starting reviewed apply",
+
+                "current_title":
+                    None,
+            },
+
+            "result":
+                None,
+
+            "error":
+                None,
+        }
+
+        ARTWORK_APPLIES[
+            apply_id
+        ] = record
+
+        ARTWORK_ACTIVE_APPLIES[
+            normalized
+        ] = apply_id
+
+    worker = threading.Thread(
+        target=(
+            _run_artwork_reviewed_apply
+        ),
+        args=(
+            apply_id,
+            normalized,
+            review_fingerprint,
+        ),
+        name=(
+            "artwork-reviewed-apply-"
+            f"{apply_id[:8]}"
+        ),
+        daemon=True,
+    )
+
+    try:
+        worker.start()
+
+    except Exception as exc:
+        with ARTWORK_SCAN_LOCK:
+            ARTWORK_APPLIES.pop(
+                apply_id,
+                None,
+            )
+
+            if (
+                ARTWORK_ACTIVE_APPLIES.get(
+                    normalized
+                )
+                == apply_id
+            ):
+                ARTWORK_ACTIVE_APPLIES.pop(
+                    normalized,
+                    None,
+                )
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Could not start Artwork "
+                f"Manager apply: {exc}"
+            ),
+        ) from exc
+
+    return {
+        "apply":
+            copy.deepcopy(
+                record
+            ),
+
+        "reused":
+            False,
+    }
+
+
+@app.get(
+    "/api/artwork/apply/{apply_id}"
+)
+def get_artwork_reviewed_apply(
+    apply_id: str,
+):
+    """Return progress for one asynchronous reviewed apply."""
+
+    record = (
+        _artwork_apply_snapshot(
+            apply_id
+        )
+    )
+
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Artwork Manager apply "
+                f"{apply_id!r} was not found"
+            ),
+        )
+
+    return {
+        "apply":
             record,
     }
 

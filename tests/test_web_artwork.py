@@ -1284,3 +1284,728 @@ def test_artwork_scan_status_unknown_id_is_404(
         caught.value.status_code
         == 404
     )
+
+
+def _reviewed_current_state(
+    fingerprint="reviewed-anime-plan",
+):
+    return {
+        "schema_version": 3,
+        "library": "Anime",
+        "scanned_at":
+            "2026-08-24T20:00:00+00:00",
+        "review_fingerprint":
+            fingerprint,
+        "preview": {
+            "safety": {
+                "safe_to_apply": True,
+                "issues": [],
+            },
+            "output": {
+                "needs_apply": True,
+            },
+        },
+    }
+
+
+def test_artwork_reviewed_apply_starts_async_and_reuses_same_plan(
+    monkeypatch,
+):
+    config = {
+        "services": {
+            "artwork_manager": {
+                "enabled": True,
+            },
+        },
+    }
+
+    monkeypatch.setattr(
+        web_server,
+        "load_config",
+        lambda: config,
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "load_artwork_current_state",
+        lambda **kwargs:
+            _reviewed_current_state(),
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_APPLIES",
+        {},
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_ACTIVE_APPLIES",
+        {},
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_SCANS",
+        {},
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_ACTIVE_SCANS",
+        {},
+    )
+
+    started = []
+
+    class FakeThread:
+        def __init__(
+            self,
+            *,
+            target,
+            args,
+            name,
+            daemon,
+        ):
+            self.target = target
+            self.args = args
+            self.name = name
+            self.daemon = daemon
+
+        def start(
+            self,
+        ):
+            started.append(
+                (
+                    self.target,
+                    self.args,
+                )
+            )
+
+    monkeypatch.setattr(
+        web_server.threading,
+        "Thread",
+        FakeThread,
+    )
+
+    payload = (
+        web_server
+        .ArtworkReviewedApplyPayload(
+            review_fingerprint=(
+                "reviewed-anime-plan"
+            )
+        )
+    )
+
+    first = (
+        web_server
+        .start_artwork_reviewed_apply(
+            "Anime",
+            payload,
+        )
+    )
+
+    second = (
+        web_server
+        .start_artwork_reviewed_apply(
+            "Anime",
+            payload,
+        )
+    )
+
+    assert (
+        first["reused"]
+        is False
+    )
+
+    assert (
+        second["reused"]
+        is True
+    )
+
+    assert (
+        second[
+            "apply"
+        ][
+            "apply_id"
+        ]
+        == first[
+            "apply"
+        ][
+            "apply_id"
+        ]
+    )
+
+    assert (
+        first[
+            "apply"
+        ][
+            "status"
+        ]
+        == "running"
+    )
+
+    assert len(
+        started
+    ) == 1
+
+
+def test_artwork_reviewed_apply_rejects_active_scan(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        web_server,
+        "load_config",
+        lambda: {
+            "services": {
+                "artwork_manager": {
+                    "enabled": True,
+                },
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "load_artwork_current_state",
+        lambda **kwargs:
+            _reviewed_current_state(),
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_APPLIES",
+        {},
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_ACTIVE_APPLIES",
+        {},
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_SCANS",
+        {
+            "scan-1": {
+                "scan_id":
+                    "scan-1",
+
+                "library":
+                    "Anime",
+
+                "status":
+                    "running",
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_ACTIVE_SCANS",
+        {
+            "Anime":
+                "scan-1",
+        },
+    )
+
+    payload = (
+        web_server
+        .ArtworkReviewedApplyPayload(
+            review_fingerprint=(
+                "reviewed-anime-plan"
+            )
+        )
+    )
+
+    with pytest.raises(
+        HTTPException,
+    ) as caught:
+        (
+            web_server
+            .start_artwork_reviewed_apply(
+                "Anime",
+                payload,
+            )
+        )
+
+    assert (
+        caught.value.status_code
+        == 409
+    )
+
+    assert (
+        "scan"
+        in str(
+            caught.value.detail
+        ).lower()
+    )
+
+
+def test_artwork_scan_rejects_active_reviewed_apply(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        web_server,
+        "load_config",
+        lambda: {
+            "services": {
+                "artwork_manager": {
+                    "enabled": True,
+                },
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_SCANS",
+        {},
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_ACTIVE_SCANS",
+        {},
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_APPLIES",
+        {
+            "apply-1": {
+                "apply_id":
+                    "apply-1",
+
+                "library":
+                    "Anime",
+
+                "status":
+                    "running",
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_ACTIVE_APPLIES",
+        {
+            "Anime":
+                "apply-1",
+        },
+    )
+
+    with pytest.raises(
+        HTTPException,
+    ) as caught:
+        (
+            web_server
+            .start_artwork_current_state_scan(
+                "Anime"
+            )
+        )
+
+    assert (
+        caught.value.status_code
+        == 409
+    )
+
+    assert (
+        "apply"
+        in str(
+            caught.value.detail
+        ).lower()
+    )
+
+
+def test_artwork_reviewed_apply_rejects_changed_cached_fingerprint(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        web_server,
+        "load_config",
+        lambda: {
+            "services": {
+                "artwork_manager": {
+                    "enabled": True,
+                },
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "load_artwork_current_state",
+        lambda **kwargs:
+            _reviewed_current_state(
+                "newer-plan"
+            ),
+    )
+
+    payload = (
+        web_server
+        .ArtworkReviewedApplyPayload(
+            review_fingerprint=(
+                "older-plan"
+            )
+        )
+    )
+
+    with pytest.raises(
+        HTTPException,
+    ) as caught:
+        (
+            web_server
+            .start_artwork_reviewed_apply(
+                "Anime",
+                payload,
+            )
+        )
+
+    assert (
+        caught.value.status_code
+        == 409
+    )
+
+    assert (
+        "changed"
+        in str(
+            caught.value.detail
+        ).lower()
+    )
+
+
+def test_artwork_reviewed_apply_worker_records_success(
+    monkeypatch,
+):
+    from artwork.runner import (
+        ArtworkRunOutcome,
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_APPLIES",
+        {
+            "apply-1": {
+                "apply_id":
+                    "apply-1",
+
+                "library":
+                    "Anime",
+
+                "review_fingerprint":
+                    "reviewed-anime-plan",
+
+                "status":
+                    "running",
+
+                "updated_at":
+                    "start",
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_ACTIVE_APPLIES",
+        {
+            "Anime":
+                "apply-1",
+        },
+    )
+
+    config = {
+        "services": {
+            "artwork_manager": {
+                "enabled": True,
+            },
+        },
+    }
+
+    plex = object()
+
+    monkeypatch.setattr(
+        web_server,
+        "load_config",
+        lambda: config,
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "_connect_plex",
+        lambda value:
+            plex,
+    )
+
+    seen = {}
+
+    def fake_run(
+        **kwargs,
+    ):
+        seen.update(
+            kwargs
+        )
+
+        callback = (
+            kwargs[
+                "progress_callback"
+            ]
+        )
+
+        callback(
+            web_server.ArtworkScanProgress(
+                library="Anime",
+                phase=(
+                    web_server
+                    .ArtworkScanPhase
+                    .PLANNING
+                ),
+                completed=1,
+                total=2,
+                message=(
+                    "Planning output"
+                ),
+            )
+        )
+
+        return SimpleNamespace(
+            libraries=(
+                SimpleNamespace(
+                    outcome=(
+                        ArtworkRunOutcome
+                        .APPLIED
+                    ),
+                    error_type=None,
+                    error_message=None,
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(
+        web_server,
+        "run_configured_reviewed_artwork_manager",
+        fake_run,
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_HISTORY_DIR",
+        "/data/artwork-manager",
+    )
+
+    web_server._run_artwork_reviewed_apply(
+        "apply-1",
+        "Anime",
+        "reviewed-anime-plan",
+    )
+
+    record = (
+        web_server
+        .ARTWORK_APPLIES[
+            "apply-1"
+        ]
+    )
+
+    assert (
+        record["status"]
+        == "applied"
+    )
+
+    assert record[
+        "finished_at"
+    ] is not None
+
+    assert record[
+        "result"
+    ] == {
+        "outcome":
+            "applied",
+
+        "apply_mode":
+            "manual",
+    }
+
+    assert record[
+        "error"
+    ] is None
+
+    assert (
+        record[
+            "progress"
+        ][
+            "phase"
+        ]
+        == "planning"
+    )
+
+    assert (
+        seen["plex"]
+        is plex
+    )
+
+    assert (
+        seen["config"]
+        is config
+    )
+
+    assert (
+        seen["library"]
+        == "Anime"
+    )
+
+    assert (
+        seen[
+            "review_fingerprint"
+        ]
+        == "reviewed-anime-plan"
+    )
+
+    assert (
+        seen[
+            "history_directory"
+        ]
+        == "/data/artwork-manager"
+    )
+
+    assert (
+        "Anime"
+        not in
+        web_server
+        .ARTWORK_ACTIVE_APPLIES
+    )
+
+
+def test_artwork_reviewed_apply_worker_marks_stale_plan(
+    monkeypatch,
+):
+    from artwork.runner import (
+        ArtworkReviewMismatchError,
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_APPLIES",
+        {
+            "apply-1": {
+                "apply_id":
+                    "apply-1",
+
+                "library":
+                    "Anime",
+
+                "review_fingerprint":
+                    "old-plan",
+
+                "status":
+                    "running",
+
+                "updated_at":
+                    "start",
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_ACTIVE_APPLIES",
+        {
+            "Anime":
+                "apply-1",
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "load_config",
+        lambda: {
+            "services": {
+                "artwork_manager": {
+                    "enabled": True,
+                },
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "_connect_plex",
+        lambda value:
+            object(),
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "run_configured_reviewed_artwork_manager",
+        lambda **kwargs:
+            (_ for _ in ())
+            .throw(
+                ArtworkReviewMismatchError(
+                    "plan changed after review"
+                )
+            ),
+    )
+
+    web_server._run_artwork_reviewed_apply(
+        "apply-1",
+        "Anime",
+        "old-plan",
+    )
+
+    record = (
+        web_server
+        .ARTWORK_APPLIES[
+            "apply-1"
+        ]
+    )
+
+    assert (
+        record["status"]
+        == "stale"
+    )
+
+    assert (
+        record["result"]
+        is None
+    )
+
+    assert (
+        record[
+            "error"
+        ][
+            "type"
+        ]
+        == "ArtworkReviewMismatchError"
+    )
+
+    assert (
+        "Anime"
+        not in
+        web_server
+        .ARTWORK_ACTIVE_APPLIES
+    )
+
+
+def test_artwork_reviewed_apply_status_unknown_is_404(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_APPLIES",
+        {},
+    )
+
+    with pytest.raises(
+        HTTPException,
+    ) as caught:
+        (
+            web_server
+            .get_artwork_reviewed_apply(
+                "missing"
+            )
+        )
+
+    assert (
+        caught.value.status_code
+        == 404
+    )
