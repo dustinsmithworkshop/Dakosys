@@ -32,6 +32,8 @@ import type {
   ArtworkCurrentStateResponse,
   ArtworkScanStartResponse,
   ArtworkScanStatusResponse,
+  ArtworkReviewedApplyStartResponse,
+  ArtworkReviewedApplyStatusResponse,
 } from "@/types/api";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -70,6 +72,30 @@ export const api = {
   getArtworkScan: (scanId: string) =>
     apiFetch<ArtworkScanStatusResponse>(
       `/api/artwork/scan/${encodeURIComponent(scanId)}`
+    ),
+
+  startArtworkReviewedApply: (
+    library: string,
+    reviewFingerprint: string,
+  ) =>
+    apiFetch<ArtworkReviewedApplyStartResponse>(
+      `/api/artwork/apply/${encodeURIComponent(library)}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          review_fingerprint: reviewFingerprint,
+        }),
+      },
+    ),
+
+  getArtworkReviewedApply: (
+    applyId: string,
+  ) =>
+    apiFetch<ArtworkReviewedApplyStatusResponse>(
+      `/api/artwork/apply/${encodeURIComponent(applyId)}`
     ),
 
   getArtworkLatestRun: () =>

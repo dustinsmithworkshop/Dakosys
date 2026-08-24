@@ -594,3 +594,48 @@ export interface ArtworkScanStartResponse {
 export interface ArtworkScanStatusResponse {
   scan: ArtworkScanRecord;
 }
+
+
+export type ArtworkReviewedApplyStatus =
+  | "running"
+  | "applied"
+  | "no_changes"
+  | "blocked"
+  | "failed"
+  | "stale";
+
+export type ArtworkReviewedApplyOutcome =
+  | "applied"
+  | "no_changes"
+  | "blocked"
+  | "failed";
+
+export interface ArtworkReviewedApplyResult {
+  outcome: ArtworkReviewedApplyOutcome;
+  apply_mode: "manual";
+  current_state_refreshed: boolean;
+  current_state_scanned_at: string | null;
+}
+
+export interface ArtworkReviewedApplyRecord {
+  apply_id: string;
+  library: string;
+  review_fingerprint: string;
+  status: ArtworkReviewedApplyStatus;
+  started_at: string;
+  updated_at: string;
+  finished_at: string | null;
+  progress: ArtworkScanProgress;
+  result: ArtworkReviewedApplyResult | null;
+  error: ArtworkScanError | null;
+  refresh_error: ArtworkScanError | null;
+}
+
+export interface ArtworkReviewedApplyStartResponse {
+  apply: ArtworkReviewedApplyRecord;
+  reused: boolean;
+}
+
+export interface ArtworkReviewedApplyStatusResponse {
+  apply: ArtworkReviewedApplyRecord;
+}
