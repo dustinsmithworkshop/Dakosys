@@ -19,6 +19,7 @@ def _run(
         library=library,
         safe_to_apply=safe,
         needs_apply=needs_apply,
+        plan=object(),
     )
 
 
@@ -363,4 +364,351 @@ def test_auto_result_keeps_pre_apply_needs_apply_snapshot(
         result.libraries[0]
         .outcome
         is ArtworkRunOutcome.APPLIED
+    )
+
+
+def test_reviewed_apply_accepts_exact_fingerprint(
+    monkeypatch,
+):
+    from artwork.runner import (
+        execute_reviewed_artwork_library_workflow,
+    )
+
+    run = _run(
+        "Anime"
+    )
+
+    applied = []
+
+    monkeypatch.setattr(
+        "artwork.runner."
+        "build_artwork_review_fingerprint",
+        lambda value:
+            "reviewed-plan",
+    )
+
+    def fake_apply(
+        value,
+    ):
+        applied.append(
+            value.library
+        )
+
+        return SimpleNamespace(
+            changed=True
+        )
+
+    monkeypatch.setattr(
+        "artwork.runner."
+        "apply_artwork_library_workflow",
+        fake_apply,
+    )
+
+    result = (
+        execute_reviewed_artwork_library_workflow(
+            run,
+            review_fingerprint=(
+                "reviewed-plan"
+            ),
+        )
+    )
+
+    assert applied == [
+        "Anime"
+    ]
+
+    assert (
+        result.apply_mode
+        is ArtworkApplyMode.MANUAL
+    )
+
+    assert (
+        result.outcome
+        is ArtworkRunOutcome.APPLIED
+    )
+
+    assert (
+        result.review_fingerprint
+        == "reviewed-plan"
+    )
+
+    assert (
+        result.needs_apply
+        is True
+    )
+
+
+def test_reviewed_apply_rejects_changed_plan(
+    monkeypatch,
+):
+    import pytest
+
+    from artwork.runner import (
+        ArtworkReviewMismatchError,
+        execute_reviewed_artwork_library_workflow,
+    )
+
+    run = _run(
+        "Anime"
+    )
+
+    monkeypatch.setattr(
+        "artwork.runner."
+        "build_artwork_review_fingerprint",
+        lambda value:
+            "current-plan",
+    )
+
+    monkeypatch.setattr(
+        "artwork.runner."
+        "apply_artwork_library_workflow",
+        lambda value: (
+            (_ for _ in ())
+            .throw(
+                AssertionError(
+                    "stale review must not apply"
+                )
+            )
+        ),
+    )
+
+    with pytest.raises(
+        ArtworkReviewMismatchError,
+        match="changed after review",
+    ):
+        execute_reviewed_artwork_library_workflow(
+            run,
+            review_fingerprint=(
+                "old-reviewed-plan"
+            ),
+        )
+
+
+def test_reviewed_apply_blocks_exact_unsafe_plan(
+    monkeypatch,
+):
+    from artwork.runner import (
+        execute_reviewed_artwork_library_workflow,
+    )
+
+    run = _run(
+        "Anime",
+        safe=False,
+    )
+
+    monkeypatch.setattr(
+        "artwork.runner."
+        "build_artwork_review_fingerprint",
+        lambda value:
+            "unsafe-plan",
+    )
+
+    monkeypatch.setattr(
+        "artwork.runner."
+        "apply_artwork_library_workflow",
+        lambda value: (
+            (_ for _ in ())
+            .throw(
+                AssertionError(
+                    "unsafe review must not apply"
+                )
+            )
+        ),
+    )
+
+    result = (
+        execute_reviewed_artwork_library_workflow(
+            run,
+            review_fingerprint=(
+                "unsafe-plan"
+            ),
+        )
+    )
+
+    assert (
+        result.outcome
+        is ArtworkRunOutcome.BLOCKED
+    )
+
+    assert (
+        result.apply_mode
+        is ArtworkApplyMode.MANUAL
+    )
+
+
+def test_reviewed_apply_exact_no_change_is_noop(
+    monkeypatch,
+):
+    from artwork.runner import (
+        execute_reviewed_artwork_library_workflow,
+    )
+
+    run = _run(
+        "Anime",
+        needs_apply=False,
+    )
+
+    monkeypatch.setattr(
+        "artwork.runner."
+        "build_artwork_review_fingerprint",
+        lambda value:
+            "no-change-plan",
+    )
+
+    monkeypatch.setattr(
+        "artwork.runner."
+        "apply_artwork_library_workflow",
+        lambda value: (
+            (_ for _ in ())
+            .throw(
+                AssertionError(
+                    "no-change review must not apply"
+                )
+            )
+        ),
+    )
+
+    result = (
+        execute_reviewed_artwork_library_workflow(
+            run,
+            review_fingerprint=(
+                "no-change-plan"
+            ),
+        )
+    )
+
+    assert (
+        result.outcome
+        is ArtworkRunOutcome.NO_CHANGES
+    )
+
+    assert (
+        result.needs_apply
+        is False
+    )
+
+
+def test_reviewed_apply_records_apply_failure(
+    monkeypatch,
+):
+    from artwork.runner import (
+        execute_reviewed_artwork_library_workflow,
+    )
+
+    run = _run(
+        "Anime"
+    )
+
+    monkeypatch.setattr(
+        "artwork.runner."
+        "build_artwork_review_fingerprint",
+        lambda value:
+            "reviewed-plan",
+    )
+
+    def fail_apply(
+        value,
+    ):
+        raise RuntimeError(
+            "render failed"
+        )
+
+    monkeypatch.setattr(
+        "artwork.runner."
+        "apply_artwork_library_workflow",
+        fail_apply,
+    )
+
+    result = (
+        execute_reviewed_artwork_library_workflow(
+            run,
+            review_fingerprint=(
+                "reviewed-plan"
+            ),
+        )
+    )
+
+    assert (
+        result.outcome
+        is ArtworkRunOutcome.FAILED
+    )
+
+    assert (
+        result.error_type
+        == "RuntimeError"
+    )
+
+    assert (
+        result.error_message
+        == "render failed"
+    )
+
+
+def test_reviewed_apply_blocks_unplannable_current_state(
+    monkeypatch,
+):
+    from artwork.runner import (
+        execute_reviewed_artwork_library_workflow,
+    )
+
+    run = SimpleNamespace(
+        library="Anime",
+        safe_to_apply=False,
+        needs_apply=False,
+        plan=None,
+    )
+
+    monkeypatch.setattr(
+        "artwork.runner."
+        "build_artwork_review_fingerprint",
+        lambda value: (
+            (_ for _ in ())
+            .throw(
+                AssertionError(
+                    "unplannable state cannot be fingerprinted"
+                )
+            )
+        ),
+    )
+
+    monkeypatch.setattr(
+        "artwork.runner."
+        "apply_artwork_library_workflow",
+        lambda value: (
+            (_ for _ in ())
+            .throw(
+                AssertionError(
+                    "unplannable state must not apply"
+                )
+            )
+        ),
+    )
+
+    result = (
+        execute_reviewed_artwork_library_workflow(
+            run,
+            review_fingerprint=(
+                "previous-reviewed-plan"
+            ),
+        )
+    )
+
+    assert (
+        result.outcome
+        is ArtworkRunOutcome.BLOCKED
+    )
+
+    assert (
+        result.apply_mode
+        is ArtworkApplyMode.MANUAL
+    )
+
+    assert (
+        result.needs_apply
+        is False
+    )
+
+    assert (
+        result.review_fingerprint
+        == "previous-reviewed-plan"
     )

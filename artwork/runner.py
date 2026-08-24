@@ -35,6 +35,12 @@ class ArtworkRunOutcome(str, Enum):
     FAILED = "failed"
 
 
+class ArtworkReviewMismatchError(
+    RuntimeError
+):
+    """Reviewed plan no longer matches current state."""
+
+
 @dataclass(frozen=True)
 class ArtworkLibraryRunResult:
     """Outcome for one discovered executable library."""
@@ -279,6 +285,160 @@ def execute_artwork_library_workflow(
         ),
         outcome=outcome,
         apply_result=apply_result,
+    )
+
+
+def execute_reviewed_artwork_library_workflow(
+    run: ArtworkLibraryWorkflow,
+    *,
+    review_fingerprint: str,
+) -> ArtworkLibraryRunResult:
+    """Apply exactly one previously reviewed library plan.
+
+    The caller supplies the fingerprint of the plan presented for
+    review. The current workflow is fingerprinted again immediately
+    before apply.
+
+    A changed fingerprint is rejected without writing anything.
+
+    Explicit reviewed applies are recorded as MANUAL regardless of the
+    configured automatic scheduler policy.
+    """
+
+    if not isinstance(
+        review_fingerprint,
+        str,
+    ):
+        raise ValueError(
+            "Artwork review fingerprint "
+            "must be a string"
+        )
+
+    expected_fingerprint = (
+        review_fingerprint.strip()
+    )
+
+    if not expected_fingerprint:
+        raise ValueError(
+            "Artwork review fingerprint "
+            "cannot be empty"
+        )
+
+    if (
+        not run.safe_to_apply
+        and run.plan is None
+    ):
+        return ArtworkLibraryRunResult(
+            workflow=run,
+            apply_mode=(
+                ArtworkApplyMode.MANUAL
+            ),
+            planned_needs_apply=False,
+            outcome=(
+                ArtworkRunOutcome.BLOCKED
+            ),
+            review_fingerprint=(
+                expected_fingerprint
+            ),
+        )
+
+    current_fingerprint = (
+        build_artwork_review_fingerprint(
+            run
+        )
+    )
+
+    if (
+        current_fingerprint
+        != expected_fingerprint
+    ):
+        raise ArtworkReviewMismatchError(
+            "Artwork Manager plan changed "
+            "after review; refresh the "
+            "current-state preview before "
+            "applying"
+        )
+
+    planned_needs_apply = (
+        run.needs_apply
+    )
+
+    if not run.safe_to_apply:
+        return ArtworkLibraryRunResult(
+            workflow=run,
+            apply_mode=(
+                ArtworkApplyMode.MANUAL
+            ),
+            planned_needs_apply=(
+                planned_needs_apply
+            ),
+            outcome=(
+                ArtworkRunOutcome.BLOCKED
+            ),
+            review_fingerprint=(
+                current_fingerprint
+            ),
+        )
+
+    if not planned_needs_apply:
+        return ArtworkLibraryRunResult(
+            workflow=run,
+            apply_mode=(
+                ArtworkApplyMode.MANUAL
+            ),
+            planned_needs_apply=False,
+            outcome=(
+                ArtworkRunOutcome.NO_CHANGES
+            ),
+            review_fingerprint=(
+                current_fingerprint
+            ),
+        )
+
+    try:
+        apply_result = (
+            apply_artwork_library_workflow(
+                run
+            )
+        )
+
+    except Exception as exc:
+        return ArtworkLibraryRunResult(
+            workflow=run,
+            apply_mode=(
+                ArtworkApplyMode.MANUAL
+            ),
+            planned_needs_apply=True,
+            outcome=(
+                ArtworkRunOutcome.FAILED
+            ),
+            error_type=(
+                type(exc).__name__
+            ),
+            error_message=str(
+                exc
+            ),
+            review_fingerprint=(
+                current_fingerprint
+            ),
+        )
+
+    return ArtworkLibraryRunResult(
+        workflow=run,
+        apply_mode=(
+            ArtworkApplyMode.MANUAL
+        ),
+        planned_needs_apply=True,
+        outcome=(
+            ArtworkRunOutcome.APPLIED
+            if apply_result.changed
+            else ArtworkRunOutcome
+            .NO_CHANGES
+        ),
+        apply_result=apply_result,
+        review_fingerprint=(
+            current_fingerprint
+        ),
     )
 
 
