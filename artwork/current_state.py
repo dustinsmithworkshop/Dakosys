@@ -13,7 +13,7 @@ from pathlib import Path
 from uuid import uuid4
 
 
-CURRENT_STATE_SCHEMA_VERSION = 2
+CURRENT_STATE_SCHEMA_VERSION = 3
 CURRENT_STATE_DIRECTORY_NAME = "current-state"
 
 
@@ -148,6 +148,7 @@ def build_artwork_current_state_record(
     *,
     library: str,
     preview: dict,
+    review_fingerprint: str | None = None,
     scanned_at: datetime | None = None,
 ) -> dict:
     """Build one JSON-safe cached current-state record."""
@@ -167,6 +168,26 @@ def build_artwork_current_state_record(
         )
     )
 
+    if review_fingerprint is not None:
+        if not isinstance(
+            review_fingerprint,
+            str,
+        ):
+            raise ValueError(
+                "Artwork Manager review "
+                "fingerprint must be a string"
+            )
+
+        review_fingerprint = (
+            review_fingerprint.strip()
+        )
+
+        if not review_fingerprint:
+            raise ValueError(
+                "Artwork Manager review "
+                "fingerprint cannot be empty"
+            )
+
     return {
         "schema_version":
             CURRENT_STATE_SCHEMA_VERSION,
@@ -179,6 +200,9 @@ def build_artwork_current_state_record(
                 timespec="microseconds"
             ),
 
+        "review_fingerprint":
+            review_fingerprint,
+
         "preview":
             preview,
     }
@@ -189,6 +213,7 @@ def write_artwork_current_state(
     directory: str | Path,
     library: str,
     preview: dict,
+    review_fingerprint: str | None = None,
     scanned_at: datetime | None = None,
 ) -> dict:
     """Persist the latest successful current-state result."""
@@ -197,6 +222,9 @@ def write_artwork_current_state(
         build_artwork_current_state_record(
             library=library,
             preview=preview,
+            review_fingerprint=(
+                review_fingerprint
+            ),
             scanned_at=scanned_at,
         )
     )
@@ -304,6 +332,34 @@ def load_artwork_current_state(
         raise InvalidArtworkCurrentStateError(
             "Artwork Manager current-state "
             "preview is invalid"
+        )
+
+    if (
+        "review_fingerprint"
+        not in payload
+    ):
+        raise InvalidArtworkCurrentStateError(
+            "Artwork Manager current-state "
+            "review fingerprint is missing"
+        )
+
+    review_fingerprint = payload[
+        "review_fingerprint"
+    ]
+
+    if (
+        review_fingerprint is not None
+        and (
+            not isinstance(
+                review_fingerprint,
+                str,
+            )
+            or not review_fingerprint.strip()
+        )
+    ):
+        raise InvalidArtworkCurrentStateError(
+            "Artwork Manager current-state "
+            "review fingerprint is invalid"
         )
 
     return payload

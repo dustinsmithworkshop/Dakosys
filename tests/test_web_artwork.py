@@ -874,7 +874,11 @@ def test_artwork_scan_worker_reports_progress_and_caches_success(
 
     plex = object()
 
-    run = object()
+    run = SimpleNamespace(
+        plan=object(),
+        safe_to_apply=True,
+        needs_apply=True,
+    )
 
     class FakeWorkflow:
         skipped = ()
@@ -1020,6 +1024,13 @@ def test_artwork_scan_worker_reports_progress_and_caches_success(
             preview,
     )
 
+    monkeypatch.setattr(
+        web_server,
+        "build_artwork_review_fingerprint",
+        lambda value:
+            "reviewed-series-plan",
+    )
+
     written = {}
 
     def fake_write(
@@ -1027,6 +1038,7 @@ def test_artwork_scan_worker_reports_progress_and_caches_success(
         directory,
         library,
         preview,
+        review_fingerprint=None,
         scanned_at=None,
     ):
         written.update(
@@ -1039,14 +1051,19 @@ def test_artwork_scan_worker_reports_progress_and_caches_success(
 
                 "preview":
                     preview,
+
+                "review_fingerprint":
+                    review_fingerprint,
             }
         )
 
         return {
-            "schema_version": 1,
+            "schema_version": 3,
             "library": library,
             "scanned_at":
                 "2026-08-18T18:00:00+00:00",
+            "review_fingerprint":
+                review_fingerprint,
             "preview": preview,
         }
 
@@ -1105,6 +1122,9 @@ def test_artwork_scan_worker_reports_progress_and_caches_success(
 
         "preview":
             preview,
+
+        "review_fingerprint":
+            "reviewed-series-plan",
     }
 
     assert (

@@ -38,6 +38,9 @@ from artwork.run_history import (
     list_artwork_run_history,
     load_latest_artwork_run,
 )
+from artwork.review import (
+    build_artwork_review_fingerprint,
+)
 from artwork.runtime import (
     build_configured_artwork_manager_workflow,
 )
@@ -245,6 +248,19 @@ def _run_artwork_current_state_scan(
             )
         )
 
+        review_fingerprint = None
+
+        if (
+            run.plan is not None
+            and run.safe_to_apply
+            and run.needs_apply
+        ):
+            review_fingerprint = (
+                build_artwork_review_fingerprint(
+                    run
+                )
+            )
+
         cached = (
             write_artwork_current_state(
                 directory=(
@@ -252,6 +268,9 @@ def _run_artwork_current_state_scan(
                 ),
                 library=library,
                 preview=preview,
+                review_fingerprint=(
+                    review_fingerprint
+                ),
             )
         )
 

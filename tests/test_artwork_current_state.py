@@ -201,7 +201,7 @@ def test_pre_generator_current_state_schema_is_treated_as_stale(
 
     assert (
         CURRENT_STATE_SCHEMA_VERSION
-        == 2
+        == 3
     )
 
     write_artwork_current_state(
@@ -251,3 +251,129 @@ def test_pre_generator_current_state_schema_is_treated_as_stale(
         )
         is None
     )
+
+
+def test_current_state_round_trips_review_fingerprint(
+    tmp_path,
+):
+    record = (
+        write_artwork_current_state(
+            directory=tmp_path,
+            library="Anime",
+            preview={
+                "library": "Anime",
+            },
+            review_fingerprint=(
+                "reviewed-anime-plan"
+            ),
+        )
+    )
+
+    loaded = (
+        load_artwork_current_state(
+            directory=tmp_path,
+            library="Anime",
+        )
+    )
+
+    assert loaded == record
+
+    assert (
+        loaded[
+            "review_fingerprint"
+        ]
+        == "reviewed-anime-plan"
+    )
+
+
+def test_schema_two_current_state_is_treated_as_stale(
+    tmp_path,
+):
+    write_artwork_current_state(
+        directory=tmp_path,
+        library="Anime",
+        preview={
+            "library": "Anime",
+        },
+        review_fingerprint=(
+            "reviewed-anime-plan"
+        ),
+    )
+
+    path = next(
+        (
+            tmp_path
+            / "current-state"
+        ).glob("*.json")
+    )
+
+    payload = json.loads(
+        path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    payload[
+        "schema_version"
+    ] = 2
+
+    payload.pop(
+        "review_fingerprint",
+        None,
+    )
+
+    path.write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
+
+    assert (
+        load_artwork_current_state(
+            directory=tmp_path,
+            library="Anime",
+        )
+        is None
+    )
+
+
+def test_schema_three_requires_review_fingerprint_field(
+    tmp_path,
+):
+    write_artwork_current_state(
+        directory=tmp_path,
+        library="Anime",
+        preview={
+            "library": "Anime",
+        },
+    )
+
+    path = next(
+        (
+            tmp_path
+            / "current-state"
+        ).glob("*.json")
+    )
+
+    payload = json.loads(
+        path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    payload.pop(
+        "review_fingerprint"
+    )
+
+    path.write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        InvalidArtworkCurrentStateError,
+        match="fingerprint is missing",
+    ):
+        load_artwork_current_state(
+            directory=tmp_path,
+            library="Anime",
+        )

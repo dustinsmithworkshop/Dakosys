@@ -548,6 +548,7 @@ export interface ArtworkCurrentStateRecord {
   schema_version: number;
   library: string;
   scanned_at: string;
+  review_fingerprint: string | null;
   preview: ArtworkLibraryPreview;
 }
 
