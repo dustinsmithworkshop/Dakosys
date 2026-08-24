@@ -5,6 +5,11 @@ import {
   Card,
   CardBody,
   Chip,
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
   Progress,
   Spinner,
 } from "@nextui-org/react";
@@ -984,15 +989,33 @@ function TargetCard({
   scan,
   previewError,
   scannedAt,
+  reviewFingerprint,
+  onReviewApply,
 }: {
   target: ArtworkTarget;
   preview: ArtworkLibraryPreview | null;
   scan: ArtworkScanRecord | null;
   previewError: string | null;
   scannedAt: string | null;
+  reviewFingerprint: string | null;
+  onReviewApply: (
+    target: ArtworkTarget,
+    preview: ArtworkLibraryPreview,
+    reviewFingerprint: string,
+  ) => void;
 }) {
   const scanning =
     scan?.status === "running";
+
+  const canReviewApply =
+    target.supported &&
+    target.media_type === "show" &&
+    preview !== null &&
+    preview.safety.safe_to_apply &&
+    preview.output.needs_apply &&
+    reviewFingerprint !== null &&
+    !scanning &&
+    previewError === null;
 
   const progress =
     scanning
@@ -1047,30 +1070,54 @@ function TargetCard({
             </div>
 
             {target.supported ? (
-              <Chip
-                variant="flat"
-                color={
-                  scanning
-                    ? "secondary"
-                    : previewError
-                      ? "danger"
-                      : preview
-                        ? "success"
-                        : "default"
-                }
-              >
-                {scanning
-                  ? preview
-                    ? "Refreshing"
-                    : "Scanning"
-                  : previewError
+              <div className="flex flex-wrap items-center gap-2">
+                <Chip
+                  variant="flat"
+                  color={
+                    scanning
+                      ? "secondary"
+                      : previewError
+                        ? "danger"
+                        : preview
+                          ? "success"
+                          : "default"
+                  }
+                >
+                  {scanning
                     ? preview
-                      ? "Refresh Failed"
-                      : "Scan Failed"
-                    : preview
-                      ? "Current State"
-                      : "Waiting"}
-              </Chip>
+                      ? "Refreshing"
+                      : "Scanning"
+                    : previewError
+                      ? preview
+                        ? "Refresh Failed"
+                        : "Scan Failed"
+                      : preview
+                        ? "Current State"
+                        : "Waiting"}
+                </Chip>
+
+                {canReviewApply && (
+                  <Button
+                    size="sm"
+                    color="secondary"
+                    variant="flat"
+                    onPress={() => {
+                      if (
+                        preview &&
+                        reviewFingerprint
+                      ) {
+                        onReviewApply(
+                          target,
+                          preview,
+                          reviewFingerprint,
+                        );
+                      }
+                    }}
+                  >
+                    Apply Reviewed Plan
+                  </Button>
+                )}
+              </div>
             ) : (
               <Chip
                 variant="flat"
@@ -1198,6 +1245,22 @@ export default function ArtworkPage() {
   >({});
 
   const [
+    reviewFingerprints,
+    setReviewFingerprints,
+  ] = useState<
+    Record<string, string | null>
+  >({});
+
+  const [
+    reviewDialog,
+    setReviewDialog,
+  ] = useState<{
+    target: ArtworkTarget;
+    preview: ArtworkLibraryPreview;
+    reviewFingerprint: string;
+  } | null>(null);
+
+  const [
     scans,
     setScans,
   ] = useState<
@@ -1292,6 +1355,15 @@ export default function ArtworkPage() {
           ...current,
           [library]:
             result.state!.scanned_at,
+        })
+      );
+
+      setReviewFingerprints(
+        (current) => ({
+          ...current,
+          [library]:
+            result.state!
+              .review_fingerprint,
         })
       );
 
@@ -1950,10 +2022,197 @@ export default function ArtworkPage() {
                   target.library
                 ] ?? null
               }
+              reviewFingerprint={
+                reviewFingerprints[
+                  target.library
+                ] ?? null
+              }
+              onReviewApply={(
+                selectedTarget,
+                selectedPreview,
+                reviewFingerprint,
+              ) => {
+                setReviewDialog({
+                  target:
+                    selectedTarget,
+                  preview:
+                    selectedPreview,
+                  reviewFingerprint,
+                });
+              }}
             />
           )
         )}
       </div>
+
+      <Modal
+        isOpen={
+          reviewDialog !== null
+        }
+        onClose={() => {
+          setReviewDialog(null);
+        }}
+        backdrop="blur"
+        size="lg"
+      >
+        <ModalContent>
+          {(onClose) => {
+            if (!reviewDialog) {
+              return null;
+            }
+
+            const preview =
+              reviewDialog.preview;
+
+            const generator =
+              preview.generator ?? {
+                changed_shows: 0,
+                planned_cards: 0,
+                cached_cards: 0,
+                materialization_needed: 0,
+                failures: 0,
+              };
+
+            return (
+              <>
+                <ModalHeader className="flex flex-col gap-1">
+                  Apply {reviewDialog.target.library} Artwork?
+                </ModalHeader>
+
+                <ModalBody>
+                  <p className="text-zinc-400 text-sm">
+                    Review the exact cached plan before applying it.
+                    Dakosys will rebuild and verify this plan again
+                    before writing anything.
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <Stat
+                      label="Changed Shows"
+                      value={
+                        generator.changed_shows
+                          .toLocaleString()
+                      }
+                    />
+
+                    <Stat
+                      label="Generated Cards"
+                      value={
+                        generator.planned_cards
+                          .toLocaleString()
+                      }
+                    />
+
+                    <Stat
+                      label="To Materialize"
+                      value={
+                        generator
+                          .materialization_needed
+                          .toLocaleString()
+                      }
+                    />
+
+                    <Stat
+                      label="Safety Issues"
+                      value={
+                        preview.safety.issues.length
+                      }
+                    />
+                  </div>
+
+                  <Card className="bg-zinc-950 border border-zinc-800">
+                    <CardBody className="p-4">
+                      <p className="text-zinc-400 text-xs uppercase tracking-wider mb-3">
+                        Filesystem Changes
+                      </p>
+
+                      <div className="grid grid-cols-3 gap-3 text-center">
+                        <div>
+                          <p className="text-green-400 text-lg font-semibold">
+                            {preview.output.added}
+                          </p>
+                          <p className="text-zinc-500 text-xs">
+                            Added
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-yellow-400 text-lg font-semibold">
+                            {preview.output.updated}
+                          </p>
+                          <p className="text-zinc-500 text-xs">
+                            Updated
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-red-400 text-lg font-semibold">
+                            {preview.output.removed}
+                          </p>
+                          <p className="text-zinc-500 text-xs">
+                            Removed
+                          </p>
+                        </div>
+                      </div>
+                    </CardBody>
+                  </Card>
+
+                  <Card className="bg-zinc-950 border border-zinc-800">
+                    <CardBody className="p-4">
+                      <p className="text-zinc-400 text-xs uppercase tracking-wider">
+                        Episode Coverage
+                      </p>
+
+                      <p className="text-zinc-200 text-lg font-semibold mt-2">
+                        {preview.coverage.cards_before
+                          .toLocaleString()}
+                        {" → "}
+                        {preview.coverage.cards_after
+                          .toLocaleString()}
+                      </p>
+
+                      <p className="text-zinc-500 text-xs mt-1">
+                        of{" "}
+                        {preview.coverage.expected_episodes
+                          .toLocaleString()} expected episodes
+                      </p>
+                    </CardBody>
+                  </Card>
+
+                  <div className="bg-violet-950/30 border border-violet-900/60 rounded-lg p-4">
+                    <p className="text-violet-200 text-sm font-medium">
+                      Exact reviewed plan
+                    </p>
+
+                    <p className="text-zinc-400 text-xs mt-1">
+                      If Plex, provider data, generator inputs,
+                      configuration, or filesystem state changed
+                      since this preview, Dakosys will refuse the
+                      apply and ask for a fresh scan.
+                    </p>
+                  </div>
+                </ModalBody>
+
+                <ModalFooter>
+                  <Button
+                    variant="flat"
+                    onPress={onClose}
+                  >
+                    Cancel
+                  </Button>
+
+                  <Button
+                    color="secondary"
+                    isDisabled
+                  >
+                    Apply {reviewDialog.target.library}
+                  </Button>
+                </ModalFooter>
+              </>
+            );
+          }}
+        </ModalContent>
+      </Modal>
     </div>
   );
 }
