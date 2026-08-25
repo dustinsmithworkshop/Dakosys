@@ -1846,19 +1846,13 @@ def get_artwork_targets():
                     "supported":
                         (
                             target.media_type
-                            is MediaType.SHOW
+                            in {
+                                MediaType.SHOW,
+                                MediaType.MOVIE,
+                            }
                         ),
                     "status":
-                        (
-                            "ready"
-                            if (
-                                target.media_type
-                                is MediaType.SHOW
-                            )
-                            else (
-                                "movie_support_pending"
-                            )
-                        ),
+                        "ready",
                 }
                 for target
                 in targets

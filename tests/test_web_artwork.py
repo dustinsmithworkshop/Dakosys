@@ -165,9 +165,8 @@ def test_artwork_targets_are_dynamic(
                         "/metadata/"
                         "artwork-cinema-vault"
                     ),
-                "supported": False,
-                "status":
-                    "movie_support_pending",
+                "supported": True,
+                "status": "ready",
             },
         ],
     }

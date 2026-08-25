@@ -545,6 +545,8 @@ function PreviewPanel({
 }) {
   const coverage = preview.coverage;
   const output = preview.output;
+  const isMovie =
+    preview.media_type === "movie";
 
   const generator =
     preview.generator ?? {
@@ -595,7 +597,11 @@ function PreviewPanel({
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Stat
-          label="Plex Shows"
+          label={
+            isMovie
+              ? "Plex Movies"
+              : "Plex Shows"
+          }
           value={preview.inventory.plex_shows}
         />
         <Stat
@@ -603,15 +609,32 @@ function PreviewPanel({
           value={preview.inventory.managed_after}
         />
         <Stat
-          label="Episodes"
-          value={coverage.expected_episodes}
+          label={
+            isMovie
+              ? "Posters"
+              : "Episodes"
+          }
+          value={
+            isMovie
+              ? preview.presentation.show_posters
+              : coverage.expected_episodes
+          }
         />
         <Stat
-          label="Gaps"
-          value={coverage.gaps_after}
+          label={
+            isMovie
+              ? "Backgrounds"
+              : "Gaps"
+          }
+          value={
+            isMovie
+              ? preview.presentation.backgrounds
+              : coverage.gaps_after
+          }
         />
       </div>
 
+      {!isMovie && (
       <Card className="bg-zinc-950 border border-zinc-800">
         <CardBody className="p-4">
           <div className="flex items-center justify-between mb-2">
@@ -687,6 +710,7 @@ function PreviewPanel({
           )}
         </CardBody>
       </Card>
+      )}
 
       {preview.media_type === "show" && (
         <Card className="bg-zinc-950 border border-zinc-800">
@@ -972,7 +996,9 @@ function PreviewPanel({
       {preview.inventory.no_state_titles.length > 0 && (
         <div>
           <p className="text-zinc-400 text-xs uppercase tracking-wider mb-2">
-            Shows Without Managed Artwork
+            {isMovie
+              ? "Movies Without Managed Artwork"
+              : "Shows Without Managed Artwork"}
           </p>
 
           <div className="flex flex-wrap gap-2">
