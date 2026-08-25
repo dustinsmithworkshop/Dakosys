@@ -23,6 +23,7 @@ import type {
   ArtworkRunOutcome,
   ArtworkRunRecord,
   ArtworkScanRecord,
+  ArtworkReviewedApplyRecord,
   ArtworkTarget,
   ArtworkTargetsResponse,
   StatusResponse,
@@ -97,6 +98,26 @@ function scanPhaseLabel(
       return "Current-state scan complete";
     default:
       return fallback || phase;
+  }
+}
+
+
+function applyPhaseLabel(
+  phase: string,
+  fallback: string
+): string {
+  switch (phase) {
+    case "starting":
+      return "Starting reviewed apply";
+    case "refreshing":
+      return "Refreshing current state after apply";
+    case "complete":
+      return fallback || "Reviewed apply complete";
+    default:
+      return scanPhaseLabel(
+        phase,
+        fallback
+      );
   }
 }
 
@@ -987,6 +1008,8 @@ function TargetCard({
   target,
   preview,
   scan,
+  apply,
+  applyBusy,
   previewError,
   scannedAt,
   reviewFingerprint,
@@ -995,6 +1018,8 @@ function TargetCard({
   target: ArtworkTarget;
   preview: ArtworkLibraryPreview | null;
   scan: ArtworkScanRecord | null;
+  apply: ArtworkReviewedApplyRecord | null;
+  applyBusy: boolean;
   previewError: string | null;
   scannedAt: string | null;
   reviewFingerprint: string | null;
@@ -1007,6 +1032,9 @@ function TargetCard({
   const scanning =
     scan?.status === "running";
 
+  const applying =
+    apply?.status === "running";
+
   const canReviewApply =
     target.supported &&
     target.media_type === "show" &&
@@ -1015,6 +1043,7 @@ function TargetCard({
     preview.output.needs_apply &&
     reviewFingerprint !== null &&
     !scanning &&
+    !applyBusy &&
     previewError === null;
 
   const progress =
@@ -1074,20 +1103,24 @@ function TargetCard({
                 <Chip
                   variant="flat"
                   color={
-                    scanning
+                    applying
                       ? "secondary"
-                      : previewError
+                      : scanning
+                        ? "secondary"
+                        : previewError
                         ? "danger"
                         : preview
                           ? "success"
                           : "default"
                   }
                 >
-                  {scanning
-                    ? preview
-                      ? "Refreshing"
-                      : "Scanning"
-                    : previewError
+                  {applying
+                    ? "Applying"
+                    : scanning
+                      ? preview
+                        ? "Refreshing"
+                        : "Scanning"
+                      : previewError
                       ? preview
                         ? "Refresh Failed"
                         : "Scan Failed"
@@ -1182,6 +1215,138 @@ function TargetCard({
           </div>
         )}
 
+        {apply && (
+          <div className="border-t border-zinc-800 p-5">
+            <div
+              className={
+                apply.status === "applied"
+                  ? "bg-green-950/30 border border-green-900 rounded-lg p-4"
+                  : apply.status === "stale"
+                    ? "bg-yellow-950/30 border border-yellow-900 rounded-lg p-4"
+                    : apply.status === "blocked" ||
+                        apply.status === "failed"
+                      ? "bg-red-950/40 border border-red-900 rounded-lg p-4"
+                      : "bg-zinc-950 border border-zinc-800 rounded-lg p-4"
+              }
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <p className="text-zinc-100 font-medium">
+                    {apply.status === "running"
+                      ? applyPhaseLabel(
+                          apply.progress.phase,
+                          apply.progress.message
+                        )
+                      : apply.status === "applied"
+                        ? "Reviewed plan applied"
+                        : apply.status === "no_changes"
+                          ? "Reviewed plan already current"
+                          : apply.status === "stale"
+                            ? "Reviewed plan changed"
+                            : apply.status === "blocked"
+                              ? "Reviewed apply blocked"
+                              : "Reviewed apply failed"}
+                  </p>
+
+                  <p className="text-zinc-500 text-xs mt-1">
+                    Manual reviewed apply
+                  </p>
+                </div>
+
+                <Chip
+                  size="sm"
+                  variant="flat"
+                  color={
+                    apply.status === "applied"
+                      ? "success"
+                      : apply.status === "stale"
+                        ? "warning"
+                        : apply.status === "blocked" ||
+                            apply.status === "failed"
+                          ? "danger"
+                          : apply.status === "running"
+                            ? "secondary"
+                            : "default"
+                  }
+                >
+                  {apply.status === "running"
+                    ? "Applying"
+                    : apply.status === "no_changes"
+                      ? "No Changes"
+                      : apply.status === "stale"
+                        ? "Refresh Required"
+                        : apply.status.charAt(0).toUpperCase() +
+                          apply.status.slice(1)}
+                </Chip>
+              </div>
+
+              {apply.status === "running" && (
+                <div className="mt-4">
+                  <Progress
+                    aria-label={`${target.library} reviewed apply progress`}
+                    color="secondary"
+                    isIndeterminate={
+                      apply.progress.total <= 0 ||
+                      apply.progress.fraction === null ||
+                      apply.progress.phase === "complete" ||
+                      apply.progress.phase === "refreshing"
+                    }
+                    value={
+                      apply.progress.total > 0 &&
+                      apply.progress.fraction !== null
+                        ? apply.progress.fraction * 100
+                        : undefined
+                    }
+                  />
+
+                  {apply.progress.current_title && (
+                    <p className="text-zinc-400 text-sm mt-3">
+                      Processing{" "}
+                      <span className="text-zinc-200">
+                        {apply.progress.current_title}
+                      </span>
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {apply.status === "stale" && (
+                <p className="text-yellow-200 text-sm mt-3">
+                  The library changed after this plan was reviewed.
+                  Dakosys did not apply the stale plan. A fresh
+                  current-state scan is required before trying again.
+                </p>
+              )}
+
+              {apply.status === "applied" &&
+                apply.result?.current_state_refreshed && (
+                  <p className="text-green-200 text-sm mt-3">
+                    Artwork was applied and the dashboard current
+                    state was refreshed successfully.
+                  </p>
+                )}
+
+              {apply.refresh_error && (
+                <div className="mt-3 bg-yellow-950/40 border border-yellow-900 rounded-md px-3 py-2">
+                  <p className="text-yellow-200 text-sm">
+                    Apply succeeded, but the current-state refresh
+                    failed: {apply.refresh_error.message}
+                  </p>
+                </div>
+              )}
+
+              {apply.error &&
+                apply.status !== "stale" && (
+                  <div className="mt-3 bg-red-950/40 border border-red-900 rounded-md px-3 py-2">
+                    <p className="text-red-300 text-sm">
+                      {apply.error.message}
+                    </p>
+                  </div>
+                )}
+            </div>
+          </div>
+        )}
+
         {previewError && (
           <div className="border-t border-zinc-800 p-5">
             <div className="bg-red-950/40 border border-red-900 rounded-lg p-4">
@@ -1266,6 +1431,18 @@ export default function ArtworkPage() {
   ] = useState<
     Record<string, ArtworkScanRecord>
   >({});
+
+  const [
+    applies,
+    setApplies,
+  ] = useState<
+    Record<string, ArtworkReviewedApplyRecord>
+  >({});
+
+  const [
+    startingApplyLibrary,
+    setStartingApplyLibrary,
+  ] = useState<string | null>(null);
 
   const [
     latestRun,
@@ -1680,6 +1857,262 @@ export default function ArtworkPage() {
     }
   };
 
+  const clearReviewFingerprint = (
+    library: string
+  ) => {
+    setReviewFingerprints(
+      (current) => ({
+        ...current,
+        [library]: null,
+      })
+    );
+  };
+
+  const handleArtworkApplyTerminal = async (
+    library: string,
+    apply: ArtworkReviewedApplyRecord
+  ) => {
+    await loadHistory();
+
+    if (
+      (
+        apply.status === "applied" ||
+        apply.status === "no_changes"
+      ) &&
+      apply.result
+        ?.current_state_refreshed
+    ) {
+      const loaded =
+        await loadCachedLibraryState(
+          library
+        );
+
+      if (!loaded) {
+        clearReviewFingerprint(
+          library
+        );
+
+        setLibraryError(
+          library,
+          (
+            `${library} apply completed, ` +
+            "but refreshed current state could not be loaded"
+          )
+        );
+      }
+
+      return;
+    }
+
+    clearReviewFingerprint(
+      library
+    );
+
+    await scanLibraryState(
+      library
+    );
+  };
+
+
+  const pollArtworkApply = async (
+    library: string,
+    applyId: string
+  ) => {
+    while (true) {
+      await new Promise(
+        (resolve) =>
+          setTimeout(
+            resolve,
+            1000
+          )
+      );
+
+      let result;
+
+      try {
+        result =
+          await api.getArtworkReviewedApply(
+            applyId
+          );
+      } catch (e: unknown) {
+        const message =
+          e instanceof Error
+            ? e.message
+            : `Lost reviewed apply status for ${library}`;
+
+        clearReviewFingerprint(
+          library
+        );
+
+        setApplies(
+          (current) => {
+            const existing =
+              current[
+                library
+              ];
+
+            if (!existing) {
+              return current;
+            }
+
+            return {
+              ...current,
+              [library]: {
+                ...existing,
+                status: "failed",
+                updated_at:
+                  new Date().toISOString(),
+                finished_at:
+                  new Date().toISOString(),
+                error: {
+                  type: "ClientError",
+                  message,
+                },
+              },
+            };
+          }
+        );
+
+        setLibraryError(
+          library,
+          message
+        );
+
+        return;
+      }
+
+      const apply =
+        result.apply;
+
+      setApplies(
+        (current) => ({
+          ...current,
+          [library]: apply,
+        })
+      );
+
+      if (
+        apply.status === "running"
+      ) {
+        continue;
+      }
+
+      await handleArtworkApplyTerminal(
+        library,
+        apply
+      );
+
+      return;
+    }
+  };
+
+  const submitReviewedApply = async (
+    request: {
+      target: ArtworkTarget;
+      preview: ArtworkLibraryPreview;
+      reviewFingerprint: string;
+    }
+  ) => {
+    const library =
+      request.target.library;
+
+    const currentFingerprint =
+      reviewFingerprints[
+        library
+      ] ?? null;
+
+    if (
+      currentFingerprint !==
+      request.reviewFingerprint
+    ) {
+      setReviewDialog(null);
+      clearReviewFingerprint(
+        library
+      );
+
+      setLibraryError(
+        library,
+        "The reviewed plan changed locally. Refresh current state before applying."
+      );
+
+      return;
+    }
+
+    setStartingApplyLibrary(
+      library
+    );
+
+    clearLibraryError(
+      library
+    );
+
+    try {
+      const started =
+        await api.startArtworkReviewedApply(
+          library,
+          request.reviewFingerprint
+        );
+
+      const apply =
+        started.apply;
+
+      setApplies(
+        (current) => ({
+          ...current,
+          [library]: apply,
+        })
+      );
+
+      setReviewDialog(null);
+
+      setStartingApplyLibrary(
+        null
+      );
+
+      if (
+        apply.status === "running"
+      ) {
+        void pollArtworkApply(
+          library,
+          apply.apply_id
+        );
+      } else {
+        await handleArtworkApplyTerminal(
+          library,
+          apply
+        );
+      }
+    } catch (e: unknown) {
+      const message =
+        e instanceof Error
+          ? e.message
+          : `Failed to start reviewed apply for ${library}`;
+
+      // A 409 means the exact cached plan is no longer
+      // immediately actionable. Never silently submit another.
+      if (
+        message.includes(
+          "API error 409"
+        )
+      ) {
+        clearReviewFingerprint(
+          library
+        );
+        setReviewDialog(null);
+      }
+
+      setLibraryError(
+        library,
+        message
+      );
+    } finally {
+      setStartingApplyLibrary(
+        null
+      );
+    }
+  };
+
+
   const refreshArtworkStatus = async () => {
     const targets =
       targetsResponse?.targets ?? [];
@@ -1703,6 +2136,15 @@ export default function ArtworkPage() {
 
   const targets =
     targetsResponse?.targets ?? [];
+
+  const applyBusy =
+    startingApplyLibrary !== null ||
+    Object.values(
+      applies
+    ).some(
+      (apply) =>
+        apply.status === "running"
+    );
 
   const showCount =
     targets.filter(
@@ -1948,7 +2390,8 @@ export default function ArtworkPage() {
           ).some(
             (scan) =>
               scan.status === "running"
-          )
+          ) ||
+          applyBusy
         }
         onRefresh={refreshArtworkStatus}
       />
@@ -2012,6 +2455,14 @@ export default function ArtworkPage() {
                   target.library
                 ] ?? null
               }
+              apply={
+                applies[
+                  target.library
+                ] ?? null
+              }
+              applyBusy={
+                applyBusy
+              }
               previewError={
                 previewErrors[
                   target.library
@@ -2050,7 +2501,11 @@ export default function ArtworkPage() {
           reviewDialog !== null
         }
         onClose={() => {
-          setReviewDialog(null);
+          if (
+            startingApplyLibrary === null
+          ) {
+            setReviewDialog(null);
+          }
         }}
         backdrop="blur"
         size="lg"
@@ -2196,6 +2651,9 @@ export default function ArtworkPage() {
                 <ModalFooter>
                   <Button
                     variant="flat"
+                    isDisabled={
+                      startingApplyLibrary !== null
+                    }
                     onPress={onClose}
                   >
                     Cancel
@@ -2203,7 +2661,18 @@ export default function ArtworkPage() {
 
                   <Button
                     color="secondary"
-                    isDisabled
+                    isLoading={
+                      startingApplyLibrary ===
+                      reviewDialog.target.library
+                    }
+                    isDisabled={
+                      startingApplyLibrary !== null
+                    }
+                    onPress={() => {
+                      void submitReviewedApply(
+                        reviewDialog
+                      );
+                    }}
                   >
                     Apply {reviewDialog.target.library}
                   </Button>
