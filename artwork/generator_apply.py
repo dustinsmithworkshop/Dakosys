@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from typing import Iterable
 
 from artwork.episode_coverage import (
@@ -78,6 +79,53 @@ class GeneratedArtworkApplyResult:
         )
 
 
+def _exception_chain_summary(
+    exc: Exception,
+) -> str:
+    """Return a compact diagnostic summary of one exception chain."""
+
+    parts = []
+    seen = set()
+    current = exc
+
+    while (
+        isinstance(current, Exception)
+        and id(current) not in seen
+    ):
+        seen.add(
+            id(current)
+        )
+
+        detail = str(
+            current
+        ).strip()
+
+        part = (
+            f"{type(current).__name__}: "
+            f"{detail}"
+            if detail
+            else type(current).__name__
+        )
+
+        if part not in parts:
+            parts.append(
+                part
+            )
+
+        current = (
+            current.__cause__
+            if isinstance(
+                current.__cause__,
+                Exception,
+            )
+            else None
+        )
+
+    return " <- ".join(
+        parts
+    )
+
+
 def materialize_reviewed_generation_plans(
     *,
     plans: Iterable[
@@ -87,12 +135,24 @@ def materialize_reviewed_generation_plans(
     materialize_card=(
         materialize_generated_episode_card
     ),
+    attempts: int = 3,
+    retry_delays: tuple[
+        float,
+        ...
+    ] = (
+        1.0,
+        2.0,
+    ),
+    sleep=time.sleep,
 ) -> GeneratedArtworkApplyResult:
     """Materialize exactly the generator plans approved by preview.
 
     Cache state may change between preview and apply. That is safe:
     materialization may reuse a file that appeared after preview, or
     recreate one that disappeared.
+
+    Transient materialization failures are retried per card. Semantic
+    validation failures are deliberately not retried.
 
     Semantic identity may not change. Every materialized result must
     exactly match the reviewed fingerprint, output paths, and asset.
@@ -104,6 +164,49 @@ def materialize_reviewed_generation_plans(
             "while Artwork Generator is disabled"
         )
 
+    if (
+        not isinstance(
+            attempts,
+            int,
+        )
+        or isinstance(
+            attempts,
+            bool,
+        )
+        or attempts <= 0
+    ):
+        raise ValueError(
+            "materialization attempts must "
+            "be a positive integer"
+        )
+
+    normalized_delays = []
+
+    for delay in retry_delays:
+        if (
+            not isinstance(
+                delay,
+                (int, float),
+            )
+            or isinstance(
+                delay,
+                bool,
+            )
+            or delay < 0
+        ):
+            raise ValueError(
+                "materialization retry delays "
+                "must be non-negative numbers"
+            )
+
+        normalized_delays.append(
+            float(delay)
+        )
+
+    retry_delays = tuple(
+        normalized_delays
+    )
+
     reviewed = tuple(
         plans
     )
@@ -111,52 +214,91 @@ def materialize_reviewed_generation_plans(
     applied = []
 
     for plan in reviewed:
-        try:
-            result = (
-                materialize_card(
-                    generation_input=(
-                        plan.generation_input
-                    ),
-                    show_key=(
-                        plan.identity.show_key
-                    ),
-                    season_number=(
-                        plan.identity
-                        .season_number
-                    ),
-                    font_key=(
-                        plan.identity.font_key
-                    ),
-                    local_root=(
-                        options.local_root
-                    ),
-                    kometa_root=(
-                        options.kometa_root
-                    ),
-                    font_dir=(
-                        options.font_dir
-                    ),
-                    plex_base_url=(
-                        options.plex_base_url
-                    ),
-                    plex_token=(
-                        options.plex_token
-                    ),
-                    session=(
-                        options.session
-                    ),
-                )
-            )
+        result = None
 
-        except Exception as exc:
+        for attempt in range(
+            1,
+            attempts + 1,
+        ):
+            try:
+                result = (
+                    materialize_card(
+                        generation_input=(
+                            plan.generation_input
+                        ),
+                        show_key=(
+                            plan.identity.show_key
+                        ),
+                        season_number=(
+                            plan.identity
+                            .season_number
+                        ),
+                        font_key=(
+                            plan.identity.font_key
+                        ),
+                        local_root=(
+                            options.local_root
+                        ),
+                        kometa_root=(
+                            options.kometa_root
+                        ),
+                        font_dir=(
+                            options.font_dir
+                        ),
+                        plex_base_url=(
+                            options.plex_base_url
+                        ),
+                        plex_token=(
+                            options.plex_token
+                        ),
+                        session=(
+                            options.session
+                        ),
+                    )
+                )
+
+                break
+
+            except Exception as exc:
+                if attempt >= attempts:
+                    episode = (
+                        f"S{plan.identity.season_number:02d}"
+                        f"E{plan.identity.episode_number:02d}"
+                    )
+
+                    raise GeneratedArtworkApplyError(
+                        "could not materialize "
+                        "reviewed generated artwork "
+                        f"for {plan.identity.show_key} "
+                        f"{episode} after "
+                        f"{attempts} attempts: "
+                        f"{_exception_chain_summary(exc)}"
+                    ) from exc
+
+                delay = 0.0
+
+                if retry_delays:
+                    delay = (
+                        retry_delays[
+                            min(
+                                attempt - 1,
+                                len(
+                                    retry_delays
+                                ) - 1,
+                            )
+                        ]
+                    )
+
+                if delay > 0:
+                    sleep(
+                        delay
+                    )
+
+        if result is None:
             raise GeneratedArtworkApplyError(
-                "could not materialize "
-                "reviewed generated artwork "
-                f"for season "
-                f"{plan.identity.season_number} "
-                f"episode "
-                f"{plan.identity.episode_number}"
-            ) from exc
+                "generated artwork "
+                "materializer returned no result"
+            )
 
         _validate_materialized_result(
             plan=plan,
@@ -175,7 +317,6 @@ def materialize_reviewed_generation_plans(
             applied
         )
     )
-
 
 def _validate_materialized_result(
     *,

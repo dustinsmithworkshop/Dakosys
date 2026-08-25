@@ -1390,12 +1390,19 @@ def test_generation_failure_blocks_item_store_activation(
     with pytest.raises(
         ItemStoreApplyError,
         match="Artwork Generator",
-    ):
+    ) as caught:
         apply_show_item_store(
             execution=execution,
             preview=preview,
             plan=plan,
         )
+
+    assert (
+        "render failed"
+        in str(
+            caught.value
+        )
+    )
 
     assert not (
         tmp_path

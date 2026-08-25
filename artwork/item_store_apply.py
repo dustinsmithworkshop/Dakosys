@@ -574,7 +574,8 @@ def apply_show_item_store(
         except GeneratedArtworkApplyError as exc:
             raise ItemStoreApplyError(
                 "could not materialize reviewed "
-                "Artwork Generator output"
+                "Artwork Generator output: "
+                f"{exc}"
             ) from exc
 
         generated_materialized_count = (

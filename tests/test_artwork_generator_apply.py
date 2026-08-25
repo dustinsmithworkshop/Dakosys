@@ -338,16 +338,85 @@ def test_disabled_generator_rejects_apply_before_io(
         )
 
 
-def test_materializer_failure_is_wrapped(
+def test_materializer_failure_retries_then_succeeds(
     tmp_path: Path,
 ):
     plan = _plan(
         tmp_path
     )
 
+    attempt_count = 0
+    sleeps = []
+
+    successful = (
+        _successful_materializer(
+            []
+        )
+    )
+
+    def flaky(
+        **kwargs,
+    ):
+        nonlocal attempt_count
+
+        attempt_count += 1
+
+        if attempt_count < 3:
+            raise RuntimeError(
+                "temporary download failure"
+            )
+
+        return successful(
+            **kwargs
+        )
+
+    result = (
+        materialize_reviewed_generation_plans(
+            plans=(
+                plan,
+            ),
+            options=(
+                _options(
+                    tmp_path
+                )
+            ),
+            materialize_card=flaky,
+            sleep=sleeps.append,
+        )
+    )
+
+    assert attempt_count == 3
+
+    assert sleeps == [
+        1.0,
+        2.0,
+    ]
+
+    assert (
+        result.materialized_count
+        == 1
+    )
+
+    assert result.reused_count == 0
+
+
+def test_materializer_failure_is_wrapped_after_retries(
+    tmp_path: Path,
+):
+    plan = _plan(
+        tmp_path
+    )
+
+    attempt_count = 0
+    sleeps = []
+
     def fail(
         **_kwargs,
     ):
+        nonlocal attempt_count
+
+        attempt_count += 1
+
         raise RuntimeError(
             "download failed"
         )
@@ -355,7 +424,7 @@ def test_materializer_failure_is_wrapped(
     with pytest.raises(
         GeneratedArtworkApplyError,
         match="could not materialize",
-    ):
+    ) as caught:
         materialize_reviewed_generation_plans(
             plans=(
                 plan,
@@ -366,12 +435,32 @@ def test_materializer_failure_is_wrapped(
                 )
             ),
             materialize_card=fail,
+            sleep=sleeps.append,
         )
+
+    assert attempt_count == 3
+
+    assert sleeps == [
+        1.0,
+        2.0,
+    ]
+
+    message = str(
+        caught.value
+    )
+
+    assert "tmdb:1398" in message
+    assert "S01E01" in message
+    assert "after 3 attempts" in message
+
+    assert (
+        "RuntimeError: download failed"
+        in message
+    )
 
     assert not (
         plan.local_path.exists()
     )
-
 
 def test_changed_fingerprint_is_rejected(
     tmp_path: Path,
@@ -380,9 +469,14 @@ def test_changed_fingerprint_is_rejected(
         tmp_path
     )
 
+    calls = 0
+
     def mismatch(
         **_kwargs,
     ):
+        nonlocal calls
+
+        calls += 1
         plan.local_path.parent.mkdir(
             parents=True,
             exist_ok=True,
@@ -416,6 +510,8 @@ def test_changed_fingerprint_is_rejected(
             ),
             materialize_card=mismatch,
         )
+
+    assert calls == 1
 
 
 def test_changed_asset_is_rejected(
