@@ -496,10 +496,111 @@ def _fit_title_text(
                     text_box_height,
             }
 
-    raise ArtworkGeneratorRenderError(
-        "unable to fit episode title within "
-        "Artwork Generator layout constraints"
+    # The full title cannot fit while preserving the minimum readable
+    # font size and two-line layout. Keep as much of the real title as
+    # possible instead of failing the entire Artwork Generator run.
+    #
+    # Truncation is deliberately character-based rather than word-based:
+    # the goal is the longest visible prefix that fits the established
+    # layout constraints. No ellipsis is appended because that would
+    # consume space that can display another character from the title.
+    truncated = _fit_truncated_title_text(
+        draw=draw,
+        text=text,
+        font_path=font_path,
+        max_width=max_width,
+        max_height=max_height,
     )
+
+    if truncated is not None:
+        return truncated
+
+    raise ArtworkGeneratorRenderError(
+        "unable to fit any episode title text "
+        "within Artwork Generator layout constraints"
+    )
+
+
+def _fit_truncated_title_text(
+    *,
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font_path: Path,
+    max_width: int,
+    max_height: int,
+) -> dict[str, object] | None:
+    """Return the longest title prefix that fits at minimum font size."""
+
+    font = ImageFont.truetype(
+        str(font_path),
+        size=DEFAULT_MIN_FONT_SIZE,
+    )
+
+    # Work backwards so the first valid candidate is guaranteed to be
+    # the longest prefix. Overflow titles are uncommon and short enough
+    # that this simple deterministic search is preferable to assuming
+    # text-fit behavior is monotonic for a binary search.
+    for end in range(
+        len(text) - 1,
+        0,
+        -1,
+    ):
+        candidate = (
+            text[:end]
+            .rstrip()
+        )
+
+        if not candidate:
+            continue
+
+        lines = _wrap_text_to_two_lines(
+            draw=draw,
+            text=candidate,
+            font=font,
+            max_width=max_width,
+        )
+
+        if lines is None:
+            continue
+
+        bbox = draw.multiline_textbbox(
+            (
+                0,
+                0,
+            ),
+            "\n".join(lines),
+            font=font,
+            spacing=DEFAULT_LINE_SPACING,
+            stroke_width=DEFAULT_STROKE_WIDTH,
+            align="left",
+        )
+
+        text_box_width = (
+            bbox[2] - bbox[0]
+        )
+        text_box_height = (
+            bbox[3] - bbox[1]
+        )
+
+        if (
+            text_box_width
+            <= max_width
+            and text_box_height
+            <= max_height
+        ):
+            return {
+                "font": font,
+                "font_size":
+                    DEFAULT_MIN_FONT_SIZE,
+                "lines":
+                    tuple(lines),
+                "text_box_width":
+                    text_box_width,
+                "text_box_height":
+                    text_box_height,
+            }
+
+    return None
 
 
 def _wrap_text_to_two_lines(

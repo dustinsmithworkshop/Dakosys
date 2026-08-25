@@ -18,6 +18,9 @@ from artwork.generator_inputs import (
 from artwork.generator_plan import (
     plan_generated_episode_card,
 )
+from artwork.generator_renderer import (
+    ArtworkGeneratorRenderError,
+)
 from artwork.models import (
     ArtworkAsset,
     ArtworkKind,
@@ -398,6 +401,62 @@ def test_materializer_failure_retries_then_succeeds(
     )
 
     assert result.reused_count == 0
+
+
+def test_renderer_failure_is_not_retried(
+    tmp_path: Path,
+):
+    plan = _plan(
+        tmp_path
+    )
+
+    attempt_count = 0
+    sleeps = []
+
+    def fail_render(
+        **_kwargs,
+    ):
+        nonlocal attempt_count
+
+        attempt_count += 1
+
+        try:
+            raise ArtworkGeneratorRenderError(
+                "layout failed"
+            )
+        except ArtworkGeneratorRenderError as exc:
+            raise RuntimeError(
+                "materialization failed"
+            ) from exc
+
+    with pytest.raises(
+        GeneratedArtworkApplyError,
+        match="after 1 attempt",
+    ) as caught:
+        materialize_reviewed_generation_plans(
+            plans=(
+                plan,
+            ),
+            options=(
+                _options(
+                    tmp_path
+                )
+            ),
+            materialize_card=fail_render,
+            sleep=sleeps.append,
+        )
+
+    assert attempt_count == 1
+    assert sleeps == []
+
+    message = str(
+        caught.value
+    )
+
+    assert (
+        "ArtworkGeneratorRenderError: layout failed"
+        in message
+    )
 
 
 def test_materializer_failure_is_wrapped_after_retries(

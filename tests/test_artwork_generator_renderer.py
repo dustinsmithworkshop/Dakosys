@@ -138,6 +138,69 @@ def test_render_episode_title_card_shrinks_long_title_to_fit_constraints(
     )
 
 
+def test_render_episode_title_card_truncates_extreme_title_to_longest_prefix(
+    tmp_path: Path,
+) -> None:
+    source_path = _make_source_image(
+        tmp_path / "source.jpg"
+    )
+
+    title = (
+        "Let Your Eyes Behold the Glory and Mystery of the Brothel "
+        "with a Perfect Score! Take a Newlywed or a Horny Tutor or "
+        "a Little Piggie as Your Lover! They'll Squeeze, Squeeze, "
+        "Squeeze It Outta Ya! Infinite Pleasure Over a Satisfying "
+        "Three-Day Excursion! True Happiness Awaits!!!"
+    )
+
+    result = render_episode_title_card(
+        source_image_path=source_path,
+        output_path=(
+            tmp_path
+            / "extreme-title.jpg"
+        ),
+        episode_title=title,
+        font_key="marcellus",
+    )
+
+    rendered_title = " ".join(
+        result.title_lines
+    )
+
+    assert rendered_title
+    assert len(rendered_title) < len(title)
+    assert title.startswith(
+        rendered_title
+    )
+
+    assert result.font_size == 34
+
+    assert 1 <= len(
+        result.title_lines
+    ) <= 2
+
+    assert (
+        result.text_box_width
+        <= int(
+            CANVAS_WIDTH
+            * MAX_TEXT_WIDTH_RATIO
+        )
+    )
+
+    assert (
+        result.text_box_height
+        <= int(
+            CANVAS_HEIGHT
+            * MAX_TEXT_HEIGHT_RATIO
+        )
+    )
+
+    assert (
+        tmp_path
+        / "extreme-title.jpg"
+    ).is_file()
+
+
 def test_render_episode_title_card_uses_noto_for_cjk_text(
     tmp_path: Path,
 ) -> None:

@@ -17,6 +17,9 @@ from artwork.generator_materializer import (
 from artwork.generator_plan import (
     GeneratedEpisodeCardPlan,
 )
+from artwork.generator_renderer import (
+    ArtworkGeneratorRenderError,
+)
 
 
 class GeneratedArtworkApplyError(
@@ -77,6 +80,44 @@ class GeneratedArtworkApplyResult:
             for item in self.items
             if item.materialized
         )
+
+
+def _exception_chain_contains(
+    exc: Exception,
+    exception_type: type[BaseException],
+) -> bool:
+    """Whether one exception type appears anywhere in the cause chain."""
+
+    seen = set()
+    current = exc
+
+    while (
+        isinstance(
+            current,
+            BaseException,
+        )
+        and id(current) not in seen
+    ):
+        seen.add(
+            id(current)
+        )
+
+        if isinstance(
+            current,
+            exception_type,
+        ):
+            return True
+
+        current = (
+            current.__cause__
+            if isinstance(
+                current.__cause__,
+                BaseException,
+            )
+            else None
+        )
+
+    return False
 
 
 def _exception_chain_summary(
@@ -260,10 +301,26 @@ def materialize_reviewed_generation_plans(
                 break
 
             except Exception as exc:
-                if attempt >= attempts:
+                non_retryable = (
+                    _exception_chain_contains(
+                        exc,
+                        ArtworkGeneratorRenderError,
+                    )
+                )
+
+                if (
+                    non_retryable
+                    or attempt >= attempts
+                ):
                     episode = (
                         f"S{plan.identity.season_number:02d}"
                         f"E{plan.identity.episode_number:02d}"
+                    )
+
+                    attempt_label = (
+                        "attempt"
+                        if attempt == 1
+                        else "attempts"
                     )
 
                     raise GeneratedArtworkApplyError(
@@ -271,7 +328,7 @@ def materialize_reviewed_generation_plans(
                         "reviewed generated artwork "
                         f"for {plan.identity.show_key} "
                         f"{episode} after "
-                        f"{attempts} attempts: "
+                        f"{attempt} {attempt_label}: "
                         f"{_exception_chain_summary(exc)}"
                     ) from exc
 
