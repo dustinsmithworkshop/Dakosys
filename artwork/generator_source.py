@@ -279,14 +279,15 @@ def materialize_generation_source(
         )
 
     # A successful HTTP response and image/* Content-Type do not prove
-    # that the body contains a decodable image. Validate the downloaded
-    # bytes here so corrupt provider/Plex responses are classified as
-    # source failures rather than renderer failures.
+    # that the body contains a fully decodable image. Force Pillow to
+    # decode the pixel data here so truncated/corrupt provider or Plex
+    # responses are classified as source failures rather than renderer
+    # failures.
     try:
         with Image.open(
             destination
         ) as image:
-            image.verify()
+            image.load()
 
     except (
         OSError,
