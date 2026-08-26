@@ -422,48 +422,6 @@ def test_truncated_image_body_is_rejected_and_removed(
     )
 
 
-def test_truncated_image_body_is_rejected_and_removed(
-    tmp_path: Path,
-):
-    destination = (
-        tmp_path
-        / "source.jpg"
-    )
-
-    # Removing only the final byte leaves a JPEG whose structure passes
-    # Pillow verify(), but whose pixel data fails during full decoding.
-    body = _jpeg_bytes()[:-1]
-
-    with Image.open(
-        BytesIO(body)
-    ) as image:
-        image.verify()
-
-    session = FakeSession(
-        FakeResponse(
-            body=body,
-            content_type="image/jpeg",
-        )
-    )
-
-    with pytest.raises(
-        InvalidArtworkGeneratorSourceError,
-        match="invalid image data",
-    ) as caught:
-        materialize_generation_source(
-            generation_input=_input(),
-            destination=destination,
-            session=session,
-        )
-
-    assert not destination.exists()
-
-    assert (
-        caught.value.__cause__
-        is not None
-    )
-
-
 def test_empty_image_is_rejected(
     tmp_path: Path,
 ):
