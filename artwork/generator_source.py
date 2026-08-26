@@ -31,6 +31,12 @@ class ArtworkGeneratorSourceError(
     """A generation source image could not be materialized."""
 
 
+class InvalidArtworkGeneratorSourceError(
+    ArtworkGeneratorSourceError
+):
+    """A downloaded source body is not a decodable image."""
+
+
 @dataclass(frozen=True)
 class MaterializedSourceImage:
     """One downloaded source image ready for the renderer."""
@@ -290,7 +296,7 @@ def materialize_generation_source(
             missing_ok=True
         )
 
-        raise ArtworkGeneratorSourceError(
+        raise InvalidArtworkGeneratorSourceError(
             "generation source returned "
             "invalid image data"
         ) from exc

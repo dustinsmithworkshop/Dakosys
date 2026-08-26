@@ -19,6 +19,9 @@ from artwork.generator_plan import (
     GeneratedEpisodeCardPlan,
     plan_generated_episode_card,
 )
+from artwork.generator_source_failures import (
+    is_generation_source_known_invalid,
+)
 from artwork.inventory import (
     ShowInventory,
 )
@@ -502,6 +505,26 @@ def enrich_show_with_generated_episode_cards(
                 generation_input
                 .should_generate
             ):
+                continue
+
+            # APPLY may discover that a provider/Plex source which
+            # looked usable during read-only planning actually contains
+            # invalid image bytes. After repeated confirmation APPLY
+            # records that exact source identity in the derived
+            # negative cache.
+            #
+            # A subsequent read-only scan must not promise generated
+            # artwork from that known-bad source. Existing artwork, if
+            # any, remains untouched; an episode with no current card
+            # remains a real coverage gap until the source changes or
+            # the marker expires.
+            if is_generation_source_known_invalid(
+                root=local_root,
+                generation_input=(
+                    generation_input
+                ),
+            ):
+                no_source_image_count += 1
                 continue
 
             plan_attempt_count += 1

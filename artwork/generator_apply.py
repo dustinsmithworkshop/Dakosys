@@ -20,6 +20,12 @@ from artwork.generator_plan import (
 from artwork.generator_renderer import (
     ArtworkGeneratorRenderError,
 )
+from artwork.generator_source import (
+    InvalidArtworkGeneratorSourceError,
+)
+from artwork.generator_source_failures import (
+    record_invalid_generation_source,
+)
 
 
 class GeneratedArtworkApplyError(
@@ -312,6 +318,34 @@ def materialize_reviewed_generation_plans(
                     non_retryable
                     or attempt >= attempts
                 ):
+                    invalid_source_recorded = False
+                    marker_error = None
+
+                    if (
+                        attempt >= attempts
+                        and _exception_chain_contains(
+                            exc,
+                            InvalidArtworkGeneratorSourceError,
+                        )
+                    ):
+                        try:
+                            record_invalid_generation_source(
+                                root=options.local_root,
+                                generation_input=(
+                                    plan.generation_input
+                                ),
+                                reason=(
+                                    _exception_chain_summary(
+                                        exc
+                                    )
+                                ),
+                            )
+
+                            invalid_source_recorded = True
+
+                        except Exception as marker_exc:
+                            marker_error = marker_exc
+
                     episode = (
                         f"S{plan.identity.season_number:02d}"
                         f"E{plan.identity.episode_number:02d}"
@@ -323,6 +357,21 @@ def materialize_reviewed_generation_plans(
                         else "attempts"
                     )
 
+                    marker_detail = ""
+
+                    if invalid_source_recorded:
+                        marker_detail = (
+                            "; source marked temporarily "
+                            "invalid for future scans"
+                        )
+
+                    elif marker_error is not None:
+                        marker_detail = (
+                            "; invalid-source marker "
+                            "could not be written: "
+                            f"{_exception_chain_summary(marker_error)}"
+                        )
+
                     raise GeneratedArtworkApplyError(
                         "could not materialize "
                         "reviewed generated artwork "
@@ -330,6 +379,7 @@ def materialize_reviewed_generation_plans(
                         f"{episode} after "
                         f"{attempt} {attempt_label}: "
                         f"{_exception_chain_summary(exc)}"
+                        f"{marker_detail}"
                     ) from exc
 
                 delay = 0.0

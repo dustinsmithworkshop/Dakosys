@@ -690,3 +690,79 @@ def test_empty_plan_collection_is_noop(
         result.materialized_count
         == 0
     )
+
+
+def test_repeated_invalid_source_failure_records_marker(
+    tmp_path: Path,
+):
+    from artwork.generator_materializer import (
+        ArtworkGeneratorMaterializationError,
+    )
+    from artwork.generator_source import (
+        InvalidArtworkGeneratorSourceError,
+    )
+    from artwork.generator_source_failures import (
+        is_generation_source_known_invalid,
+    )
+
+    plan = _plan(
+        tmp_path
+    )
+
+    options = _options(
+        tmp_path
+    )
+
+    attempt_count = 0
+    sleeps = []
+
+    def fail_invalid_source(
+        **_kwargs,
+    ):
+        nonlocal attempt_count
+
+        attempt_count += 1
+
+        try:
+            raise InvalidArtworkGeneratorSourceError(
+                "generation source returned "
+                "invalid image data"
+            )
+
+        except InvalidArtworkGeneratorSourceError as exc:
+            raise ArtworkGeneratorMaterializationError(
+                "could not materialize generated "
+                "episode artwork"
+            ) from exc
+
+    with pytest.raises(
+        GeneratedArtworkApplyError,
+        match=(
+            "source marked temporarily "
+            "invalid for future scans"
+        ),
+    ):
+        materialize_reviewed_generation_plans(
+            plans=(plan,),
+            options=options,
+            materialize_card=(
+                fail_invalid_source
+            ),
+            sleep=sleeps.append,
+        )
+
+    assert attempt_count == 3
+
+    assert sleeps == [
+        1.0,
+        2.0,
+    ]
+
+    assert (
+        is_generation_source_known_invalid(
+            root=options.local_root,
+            generation_input=(
+                plan.generation_input
+            ),
+        )
+    )

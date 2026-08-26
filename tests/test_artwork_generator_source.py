@@ -10,6 +10,7 @@ from artwork.generator_inputs import (
 )
 from artwork.generator_source import (
     ArtworkGeneratorSourceError,
+    InvalidArtworkGeneratorSourceError,
     materialize_generation_source,
 )
 from artwork.models import (
@@ -352,7 +353,7 @@ def test_corrupt_image_body_is_rejected_and_removed(
     )
 
     with pytest.raises(
-        ArtworkGeneratorSourceError,
+        InvalidArtworkGeneratorSourceError,
         match="invalid image data",
     ) as caught:
         materialize_generation_source(

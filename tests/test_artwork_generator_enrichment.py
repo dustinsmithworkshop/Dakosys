@@ -5,6 +5,13 @@ from artwork.generator_enrichment import (
     GeneratorEnrichmentPath,
     enrich_show_with_generated_episode_cards,
 )
+from artwork.generator_inputs import (
+    EpisodeGenerationInput,
+    EpisodeGenerationPath,
+)
+from artwork.generator_source_failures import (
+    record_invalid_generation_source,
+)
 from artwork.inventory import (
     EpisodeInventory,
     SeasonInventory,
@@ -940,4 +947,190 @@ def test_global_font_is_used_when_no_override_matches(
     assert (
         calls[0]["font_key"]
         == "libre_baskerville"
+    )
+
+
+def test_known_invalid_plex_source_becomes_real_coverage_gap(
+    tmp_path: Path,
+):
+    local_root = (
+        tmp_path
+        / "generated"
+    )
+
+    generation_input = (
+        EpisodeGenerationInput(
+            episode_number=1,
+            path=(
+                EpisodeGenerationPath
+                .GENERATE_MISSING
+            ),
+            title="Episode 1",
+            title_source=(
+                ArtworkSource.PLEX
+            ),
+            image_ref=(
+                "/library/metadata/"
+                "1/thumb"
+            ),
+            image_source=(
+                ArtworkSource.PLEX
+            ),
+            image_provider_asset_id=None,
+        )
+    )
+
+    record_invalid_generation_source(
+        root=local_root,
+        generation_input=(
+            generation_input
+        ),
+        reason=(
+            "generation source returned "
+            "invalid image data"
+        ),
+    )
+
+    calls = []
+
+    result = (
+        enrich_show_with_generated_episode_cards(
+            inventory=_inventory(
+                episodes=(1,)
+            ),
+            state=_state(),
+            enabled=True,
+            font_key="marcellus",
+            local_root=local_root,
+            kometa_root=(
+                "/config/assets/generated"
+            ),
+            tmdb_client=None,
+            plan_card=(
+                _planner(
+                    calls
+                )
+            ),
+        )
+    )
+
+    assert not result.changed
+
+    assert (
+        result.no_source_image_count
+        == 1
+    )
+
+    assert result.planned_count == 0
+
+    assert (
+        result.materialization_needed_count
+        == 0
+    )
+
+    assert calls == []
+
+    assert (
+        1 not in
+        result.state
+        .seasons[1]
+        .episodes
+    )
+
+
+def test_known_invalid_source_preserves_existing_fallback(
+    tmp_path: Path,
+):
+    local_root = (
+        tmp_path
+        / "generated"
+    )
+
+    raw = _asset(
+        source=ArtworkSource.PLEX,
+        quality=(
+            ArtworkQuality.RAW_STILL
+        ),
+        identifier="raw-1",
+    )
+
+    state = _state(
+        cards={
+            1: raw,
+        }
+    )
+
+    generation_input = (
+        EpisodeGenerationInput(
+            episode_number=1,
+            path=(
+                EpisodeGenerationPath
+                .UPGRADE_FALLBACK
+            ),
+            title="Episode 1",
+            title_source=(
+                ArtworkSource.PLEX
+            ),
+            image_ref=(
+                "/library/metadata/"
+                "1/thumb"
+            ),
+            image_source=(
+                ArtworkSource.PLEX
+            ),
+            image_provider_asset_id=None,
+            current_card=raw,
+        )
+    )
+
+    record_invalid_generation_source(
+        root=local_root,
+        generation_input=(
+            generation_input
+        ),
+        reason=(
+            "generation source returned "
+            "invalid image data"
+        ),
+    )
+
+    calls = []
+
+    result = (
+        enrich_show_with_generated_episode_cards(
+            inventory=_inventory(
+                episodes=(1,)
+            ),
+            state=state,
+            enabled=True,
+            font_key="marcellus",
+            local_root=local_root,
+            kometa_root=(
+                "/config/assets/generated"
+            ),
+            tmdb_client=None,
+            plan_card=(
+                _planner(
+                    calls
+                )
+            ),
+        )
+    )
+
+    assert not result.changed
+
+    assert (
+        result.no_source_image_count
+        == 1
+    )
+
+    assert result.planned_count == 0
+    assert calls == []
+
+    assert (
+        result.state
+        .seasons[1]
+        .episodes[1]
+        .card
+        == raw
     )
