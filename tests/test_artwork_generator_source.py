@@ -1,6 +1,8 @@
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from artwork.generator_inputs import (
     EpisodeGenerationInput,
@@ -15,15 +17,38 @@ from artwork.models import (
 )
 
 
+def _jpeg_bytes() -> bytes:
+    buffer = BytesIO()
+
+    Image.new(
+        "RGB",
+        (4, 4),
+        (
+            32,
+            64,
+            128,
+        ),
+    ).save(
+        buffer,
+        format="JPEG",
+    )
+
+    return buffer.getvalue()
+
+
 class FakeResponse:
     def __init__(
         self,
         *,
-        body=b"image-bytes",
+        body=None,
         status_code=200,
         content_type="image/jpeg",
     ):
-        self.body = body
+        self.body = (
+            _jpeg_bytes()
+            if body is None
+            else body
+        )
         self.status_code = status_code
         self.headers = {
             "Content-Type":
@@ -111,9 +136,11 @@ def _input(
 def test_downloads_tmdb_image_without_plex_auth(
     tmp_path: Path,
 ):
+    body = _jpeg_bytes()
+
     session = FakeSession(
         FakeResponse(
-            body=b"tmdb-image",
+            body=body,
         )
     )
 
@@ -129,16 +156,16 @@ def test_downloads_tmdb_image_without_plex_auth(
         timeout=12.0,
     )
 
-    assert destination.read_bytes() == (
-        b"tmdb-image"
-    )
+    assert destination.read_bytes() == body
 
     assert result.path == destination
     assert (
         result.source
         is ArtworkSource.TMDB
     )
-    assert result.byte_count == 10
+    assert result.byte_count == len(
+        body
+    )
 
     assert session.calls == [
         {
@@ -195,9 +222,7 @@ def test_downloads_plex_thumbnail_with_scoped_auth(
     tmp_path: Path,
 ):
     session = FakeSession(
-        FakeResponse(
-            body=b"plex-image",
-        )
+        FakeResponse()
     )
 
     generation_input = _input(
@@ -306,6 +331,52 @@ def test_non_image_response_is_rejected(
         )
 
     assert not destination.exists()
+
+
+def test_corrupt_image_body_is_rejected_and_removed(
+    tmp_path: Path,
+):
+    destination = (
+        tmp_path
+        / "source.jpg"
+    )
+
+    session = FakeSession(
+        FakeResponse(
+            body=(
+                b"\x00"
+                * 134246
+            ),
+            content_type="image/jpeg",
+        )
+    )
+
+    with pytest.raises(
+        ArtworkGeneratorSourceError,
+        match="invalid image data",
+    ) as caught:
+        materialize_generation_source(
+            generation_input=_input(
+                source=ArtworkSource.PLEX,
+                image_ref=(
+                    "/library/metadata/"
+                    "114373/thumb/1786889881"
+                ),
+                provider_asset_id=None,
+            ),
+            destination=destination,
+            plex_base_url=(
+                "http://plex.local:32400"
+            ),
+            plex_token="secret-token",
+            session=session,
+        )
+
+    assert not destination.exists()
+    assert (
+        caught.value.__cause__
+        is not None
+    )
 
 
 def test_empty_image_is_rejected(

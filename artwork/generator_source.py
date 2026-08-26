@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
+from PIL import Image
 
 from artwork.generator_inputs import (
     EpisodeGenerationInput,
@@ -270,6 +271,29 @@ def materialize_generation_source(
         raise ArtworkGeneratorSourceError(
             "generation source image was empty"
         )
+
+    # A successful HTTP response and image/* Content-Type do not prove
+    # that the body contains a decodable image. Validate the downloaded
+    # bytes here so corrupt provider/Plex responses are classified as
+    # source failures rather than renderer failures.
+    try:
+        with Image.open(
+            destination
+        ) as image:
+            image.verify()
+
+    except (
+        OSError,
+        ValueError,
+    ) as exc:
+        destination.unlink(
+            missing_ok=True
+        )
+
+        raise ArtworkGeneratorSourceError(
+            "generation source returned "
+            "invalid image data"
+        ) from exc
 
     return MaterializedSourceImage(
         path=destination,
