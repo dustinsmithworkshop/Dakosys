@@ -1449,6 +1449,106 @@ def test_artwork_reviewed_apply_starts_async_and_reuses_same_plan(
     ) == 1
 
 
+def test_artwork_reviewed_apply_rejects_other_library_active_apply(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        web_server,
+        "load_config",
+        lambda: {
+            "services": {
+                "artwork_manager": {
+                    "enabled": True,
+                },
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "load_artwork_current_state",
+        lambda **kwargs:
+            _reviewed_current_state(),
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_APPLIES",
+        {
+            "apply-1": {
+                "apply_id":
+                    "apply-1",
+
+                "library":
+                    "Anime",
+
+                "review_fingerprint":
+                    "reviewed-anime-plan",
+
+                "status":
+                    "running",
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_ACTIVE_APPLIES",
+        {
+            "Anime":
+                "apply-1",
+        },
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_SCANS",
+        {},
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "ARTWORK_ACTIVE_SCANS",
+        {},
+    )
+
+    payload = (
+        web_server
+        .ArtworkReviewedApplyPayload(
+            review_fingerprint=(
+                "reviewed-anime-plan"
+            )
+        )
+    )
+
+    with pytest.raises(
+        HTTPException,
+    ) as caught:
+        (
+            web_server
+            .start_artwork_reviewed_apply(
+                "TV",
+                payload,
+            )
+        )
+
+    assert (
+        caught.value.status_code
+        == 409
+    )
+
+    detail = str(
+        caught.value.detail
+    )
+
+    assert "Anime" in detail
+    assert "TV" in detail
+    assert (
+        "already running"
+        in detail
+    )
+
+
 def test_artwork_reviewed_apply_rejects_active_scan(
     monkeypatch,
 ):

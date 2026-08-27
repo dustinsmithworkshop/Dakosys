@@ -2445,6 +2445,43 @@ def start_artwork_reviewed_apply(
                     ),
                 )
 
+        for (
+            active_library,
+            candidate_apply_id,
+        ) in (
+            ARTWORK_ACTIVE_APPLIES.items()
+        ):
+            if (
+                active_library
+                == normalized
+            ):
+                continue
+
+            candidate_apply = (
+                ARTWORK_APPLIES.get(
+                    candidate_apply_id
+                )
+            )
+
+            if (
+                candidate_apply
+                is not None
+                and candidate_apply.get(
+                    "status"
+                )
+                == "running"
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Artwork Manager apply "
+                        f"for {active_library!r} "
+                        "is already running; "
+                        "wait for it to finish "
+                        f"before applying {normalized!r}"
+                    ),
+                )
+
         active_scan_id = (
             ARTWORK_ACTIVE_SCANS.get(
                 normalized
