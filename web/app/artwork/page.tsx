@@ -1117,7 +1117,6 @@ function TargetCard({
       preview !== null &&
       !preview.safety.safe_to_apply
     ) ||
-    canReviewApply ||
     apply?.status === "stale" ||
     apply?.status === "blocked" ||
     apply?.status === "failed";
