@@ -1039,6 +1039,7 @@ function TargetCard({
   previewError,
   scannedAt,
   reviewFingerprint,
+  onRefresh,
   onReviewApply,
 }: {
   target: ArtworkTarget;
@@ -1049,6 +1050,9 @@ function TargetCard({
   previewError: string | null;
   scannedAt: string | null;
   reviewFingerprint: string | null;
+  onRefresh: (
+    library: string
+  ) => void;
   onReviewApply: (
     target: ArtworkTarget,
     preview: ArtworkLibraryPreview,
@@ -1061,9 +1065,21 @@ function TargetCard({
   const applying =
     apply?.status === "running";
 
+  const retryScan =
+    previewError !== null ||
+    (
+      preview !== null &&
+      !preview.safety.safe_to_apply
+    );
+
+  const canRefresh =
+    target.supported &&
+    !scanning &&
+    !applying &&
+    !applyBusy;
+
   const canReviewApply =
     target.supported &&
-    target.media_type === "show" &&
     preview !== null &&
     preview.safety.safe_to_apply &&
     preview.output.needs_apply &&
@@ -1154,6 +1170,29 @@ function TargetCard({
                         ? "Current State"
                         : "Waiting"}
                 </Chip>
+
+                <Button
+                  size="sm"
+                  variant="flat"
+                  color={
+                    retryScan
+                      ? "warning"
+                      : "default"
+                  }
+                  isLoading={scanning}
+                  isDisabled={!canRefresh}
+                  onPress={() => {
+                    onRefresh(
+                      target.library
+                    );
+                  }}
+                >
+                  {scanning
+                    ? "Refreshing"
+                    : retryScan
+                      ? "Retry Scan"
+                      : "Refresh Current State"}
+                </Button>
 
                 {canReviewApply && (
                   <Button
@@ -2504,6 +2543,11 @@ export default function ArtworkPage() {
                   target.library
                 ] ?? null
               }
+              onRefresh={(library) => {
+                void scanLibraryState(
+                  library
+                );
+              }}
               onReviewApply={(
                 selectedTarget,
                 selectedPreview,
@@ -2545,6 +2589,9 @@ export default function ArtworkPage() {
             const preview =
               reviewDialog.preview;
 
+            const isMovie =
+              preview.media_type === "movie";
+
             const generator =
               preview.generator ?? {
                 changed_shows: 0,
@@ -2567,39 +2614,74 @@ export default function ArtworkPage() {
                     before writing anything.
                   </p>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <Stat
-                      label="Changed Shows"
-                      value={
-                        generator.changed_shows
-                          .toLocaleString()
-                      }
-                    />
+                  {isMovie ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      <Stat
+                        label="File Changes"
+                        value={
+                          preview.output.changed_files
+                            .toLocaleString()
+                        }
+                      />
 
-                    <Stat
-                      label="Generated Cards"
-                      value={
-                        generator.planned_cards
-                          .toLocaleString()
-                      }
-                    />
+                      <Stat
+                        label="Posters"
+                        value={
+                          preview.presentation.show_posters
+                            .toLocaleString()
+                        }
+                      />
 
-                    <Stat
-                      label="To Materialize"
-                      value={
-                        generator
-                          .materialization_needed
-                          .toLocaleString()
-                      }
-                    />
+                      <Stat
+                        label="Backgrounds"
+                        value={
+                          preview.presentation.backgrounds
+                            .toLocaleString()
+                        }
+                      />
 
-                    <Stat
-                      label="Safety Issues"
-                      value={
-                        preview.safety.issues.length
-                      }
-                    />
-                  </div>
+                      <Stat
+                        label="Safety Issues"
+                        value={
+                          preview.safety.issues.length
+                        }
+                      />
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-3">
+                      <Stat
+                        label="Changed Shows"
+                        value={
+                          generator.changed_shows
+                            .toLocaleString()
+                        }
+                      />
+
+                      <Stat
+                        label="Generated Cards"
+                        value={
+                          generator.planned_cards
+                            .toLocaleString()
+                        }
+                      />
+
+                      <Stat
+                        label="To Materialize"
+                        value={
+                          generator
+                            .materialization_needed
+                            .toLocaleString()
+                        }
+                      />
+
+                      <Stat
+                        label="Safety Issues"
+                        value={
+                          preview.safety.issues.length
+                        }
+                      />
+                    </div>
+                  )}
 
                   <Card className="bg-zinc-950 border border-zinc-800">
                     <CardBody className="p-4">
@@ -2638,27 +2720,51 @@ export default function ArtworkPage() {
                     </CardBody>
                   </Card>
 
-                  <Card className="bg-zinc-950 border border-zinc-800">
-                    <CardBody className="p-4">
-                      <p className="text-zinc-400 text-xs uppercase tracking-wider">
-                        Episode Coverage
-                      </p>
+                  {isMovie ? (
+                    <Card className="bg-zinc-950 border border-zinc-800">
+                      <CardBody className="p-4">
+                        <p className="text-zinc-400 text-xs uppercase tracking-wider">
+                          Managed Movies
+                        </p>
 
-                      <p className="text-zinc-200 text-lg font-semibold mt-2">
-                        {preview.coverage.cards_before
-                          .toLocaleString()}
-                        {" → "}
-                        {preview.coverage.cards_after
-                          .toLocaleString()}
-                      </p>
+                        <p className="text-zinc-200 text-lg font-semibold mt-2">
+                          {preview.inventory.managed_before
+                            .toLocaleString()}
+                          {" → "}
+                          {preview.inventory.managed_after
+                            .toLocaleString()}
+                        </p>
 
-                      <p className="text-zinc-500 text-xs mt-1">
-                        of{" "}
-                        {preview.coverage.expected_episodes
-                          .toLocaleString()} expected episodes
-                      </p>
-                    </CardBody>
-                  </Card>
+                        <p className="text-zinc-500 text-xs mt-1">
+                          of{" "}
+                          {preview.inventory.plex_shows
+                            .toLocaleString()} Plex movies
+                        </p>
+                      </CardBody>
+                    </Card>
+                  ) : (
+                    <Card className="bg-zinc-950 border border-zinc-800">
+                      <CardBody className="p-4">
+                        <p className="text-zinc-400 text-xs uppercase tracking-wider">
+                          Episode Coverage
+                        </p>
+
+                        <p className="text-zinc-200 text-lg font-semibold mt-2">
+                          {preview.coverage.cards_before
+                            .toLocaleString()}
+                          {" → "}
+                          {preview.coverage.cards_after
+                            .toLocaleString()}
+                        </p>
+
+                        <p className="text-zinc-500 text-xs mt-1">
+                          of{" "}
+                          {preview.coverage.expected_episodes
+                            .toLocaleString()} expected episodes
+                        </p>
+                      </CardBody>
+                    </Card>
+                  )}
 
                   <div className="bg-violet-950/30 border border-violet-900/60 rounded-lg p-4">
                     <p className="text-violet-200 text-sm font-medium">

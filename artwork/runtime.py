@@ -863,11 +863,14 @@ def run_configured_reviewed_artwork_manager(
 
     if (
         target.media_type
-        is not MediaType.SHOW
+        not in {
+            MediaType.SHOW,
+            MediaType.MOVIE,
+        }
     ):
         raise ValueError(
             "Reviewed Artwork Manager apply "
-            "currently supports show libraries only"
+            "supports show and movie libraries only"
         )
 
     run = (

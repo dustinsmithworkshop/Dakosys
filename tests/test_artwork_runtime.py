@@ -1462,13 +1462,16 @@ def test_configured_reviewed_runner_returns_none_when_disabled(
     assert result is None
 
 
-def test_configured_reviewed_runner_rejects_movie_target(
+def test_configured_reviewed_runner_accepts_movie_target(
     monkeypatch,
 ):
     from pathlib import Path
 
     from artwork.apply_policy import (
         ArtworkApplyMode,
+    )
+    from artwork.runner import (
+        ArtworkRunOutcome,
     )
     from artwork.runtime import (
         run_configured_reviewed_artwork_manager,
@@ -1478,9 +1481,12 @@ def test_configured_reviewed_runner_rejects_movie_target(
         MediaType,
     )
 
+    provider = object()
+    tmdb_client = object()
+
     runtime = SimpleNamespace(
-        provider=object(),
-        tmdb_client=None,
+        provider=provider,
+        tmdb_client=tmdb_client,
         generator_options=None,
         apply_mode=(
             ArtworkApplyMode.AUTO
@@ -1520,12 +1526,59 @@ def test_configured_reviewed_runner_rejects_movie_target(
             ),
     )
 
-    with pytest.raises(
-        ValueError,
-        match="show libraries only",
+    workflow = SimpleNamespace(
+        library="Movies",
+    )
+
+    built = {}
+
+    def fake_build(
+        **kwargs,
     ):
+        built.update(
+            kwargs
+        )
+
+        return workflow
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "build_artwork_target_workflow",
+        fake_build,
+    )
+
+    library_result = SimpleNamespace(
+        library="Movies",
+        outcome=(
+            ArtworkRunOutcome.APPLIED
+        ),
+    )
+
+    reviewed = {}
+
+    def fake_reviewed_execute(
+        run,
+        *,
+        review_fingerprint,
+    ):
+        reviewed["run"] = run
+        reviewed[
+            "review_fingerprint"
+        ] = review_fingerprint
+
+        return library_result
+
+    monkeypatch.setattr(
+        "artwork.runtime."
+        "execute_reviewed_artwork_library_workflow",
+        fake_reviewed_execute,
+    )
+
+    plex = object()
+
+    result = (
         run_configured_reviewed_artwork_manager(
-            plex=object(),
+            plex=plex,
             config=_config(),
             library="Movies",
             review_fingerprint=(
@@ -1533,6 +1586,47 @@ def test_configured_reviewed_runner_rejects_movie_target(
             ),
             environ={},
         )
+    )
+
+    assert result is not None
+
+    assert (
+        result.apply_mode
+        is ArtworkApplyMode.MANUAL
+    )
+
+    assert result.libraries == (
+        library_result,
+    )
+
+    assert built[
+        "plex"
+    ] is plex
+
+    assert built[
+        "target"
+    ] is target
+
+    assert built[
+        "provider"
+    ] is provider
+
+    assert built[
+        "tmdb_client"
+    ] is tmdb_client
+
+    assert (
+        built["generator_options"]
+        is None
+    )
+
+    assert reviewed == {
+        "run":
+            workflow,
+
+        "review_fingerprint":
+            "reviewed-movie-plan",
+    }
 
 
 def test_configured_reviewed_runner_preserves_review_mismatch(
