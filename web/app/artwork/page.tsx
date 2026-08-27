@@ -1059,6 +1059,27 @@ function TargetCard({
     reviewFingerprint: string,
   ) => void;
 }) {
+  const collapseStorageKey =
+    `dakosys:artwork:collapsed:${target.library}`;
+
+  const [
+    collapsePreference,
+    setCollapsePreference,
+  ] = useState(false);
+
+  useEffect(() => {
+    try {
+      setCollapsePreference(
+        window.localStorage.getItem(
+          collapseStorageKey
+        ) === "true"
+      );
+    } catch {
+      // localStorage is optional. Failure to persist
+      // presentation state must not affect Artwork Manager.
+    }
+  }, [collapseStorageKey]);
+
   const scanning =
     scan?.status === "running";
 
@@ -1087,6 +1108,45 @@ function TargetCard({
     !scanning &&
     !applyBusy &&
     previewError === null;
+
+  const requiresAttention =
+    scanning ||
+    applying ||
+    previewError !== null ||
+    (
+      preview !== null &&
+      !preview.safety.safe_to_apply
+    ) ||
+    canReviewApply ||
+    apply?.status === "stale" ||
+    apply?.status === "blocked" ||
+    apply?.status === "failed";
+
+  const collapsed =
+    collapsePreference &&
+    !requiresAttention;
+
+  const toggleCollapsed = () => {
+    if (requiresAttention) {
+      return;
+    }
+
+    const next =
+      !collapsePreference;
+
+    setCollapsePreference(
+      next
+    );
+
+    try {
+      window.localStorage.setItem(
+        collapseStorageKey,
+        String(next)
+      );
+    } catch {
+      // Presentation persistence is best-effort only.
+    }
+  };
 
   const progress =
     scanning
@@ -1215,6 +1275,25 @@ function TargetCard({
                     Apply Reviewed Plan
                   </Button>
                 )}
+
+                <Button
+                  size="sm"
+                  variant="light"
+                  isDisabled={requiresAttention}
+                  aria-expanded={!collapsed}
+                  aria-label={
+                    `${
+                      collapsed
+                        ? "Expand"
+                        : "Collapse"
+                    } ${target.library} artwork details`
+                  }
+                  onPress={toggleCollapsed}
+                >
+                  {collapsed
+                    ? "Expand"
+                    : "Collapse"}
+                </Button>
               </div>
             ) : (
               <Chip
@@ -1227,7 +1306,7 @@ function TargetCard({
           </div>
         </div>
 
-        {scanning && progress && (
+        {!collapsed && scanning && progress && (
           <div className="border-t border-zinc-800 p-5">
             <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-4">
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 mb-3">
@@ -1280,7 +1359,7 @@ function TargetCard({
           </div>
         )}
 
-        {apply && (
+        {!collapsed && apply && (
           <div className="border-t border-zinc-800 p-5">
             <div
               className={
@@ -1412,7 +1491,7 @@ function TargetCard({
           </div>
         )}
 
-        {previewError && (
+        {!collapsed && previewError && (
           <div className="border-t border-zinc-800 p-5">
             <div className="bg-red-950/40 border border-red-900 rounded-lg p-4">
               <p className="text-red-300 font-semibold text-sm">
@@ -1434,7 +1513,7 @@ function TargetCard({
           </div>
         )}
 
-        {preview && (
+        {!collapsed && preview && (
           <PreviewPanel
             preview={preview}
           />
