@@ -8,6 +8,7 @@ import type {
   RunResponse,
   RunStatusResponse,
   ServiceName,
+  ConfigurableServiceName,
   AnimeScheduleResponse,
   PlexShowsResponse,
   AflSearchResponse,
@@ -134,7 +135,7 @@ export const api = {
   getRunStatus: (service: ServiceName) =>
     apiFetch<RunStatusResponse>(`/api/run/${service}/status`),
 
-  setServiceEnabled: (service: ServiceName, enabled: boolean) =>
+  setServiceEnabled: (service: ConfigurableServiceName, enabled: boolean) =>
     apiFetch<{ success: boolean; service: string; enabled: boolean }>(
       `/api/services/${service}`,
       { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) },

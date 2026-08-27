@@ -1285,6 +1285,79 @@ def test_artwork_scan_status_unknown_id_is_404(
     )
 
 
+def test_artwork_manager_can_be_toggled_but_not_generic_run(
+    monkeypatch,
+    tmp_path,
+):
+    import yaml
+
+    config = {
+        "services": {
+            "artwork_manager": {
+                "enabled": False,
+            },
+        },
+    }
+
+    config_path = (
+        tmp_path
+        / "config.yaml"
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "CONFIG_FILE",
+        str(config_path),
+    )
+
+    monkeypatch.setattr(
+        web_server,
+        "load_config",
+        lambda: config,
+    )
+
+    result = (
+        web_server
+        .set_service_enabled(
+            "artwork_manager",
+            web_server.ServiceEnabledPayload(
+                enabled=True
+            ),
+        )
+    )
+
+    assert result == {
+        "success": True,
+        "service": "artwork_manager",
+        "enabled": True,
+    }
+
+    saved = yaml.safe_load(
+        config_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        saved["services"]
+        ["artwork_manager"]
+        ["enabled"]
+        is True
+    )
+
+    with pytest.raises(
+        HTTPException,
+    ) as caught:
+        web_server.trigger_run(
+            "artwork_manager"
+        )
+
+    assert (
+        caught.value.status_code
+        == 404
+    )
+
+
 def _reviewed_current_state(
     fingerprint="reviewed-anime-plan",
 ):

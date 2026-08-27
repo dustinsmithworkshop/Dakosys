@@ -1202,13 +1202,22 @@ def get_logs(service: str, lines: int = 200):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-_VALID_SERVICES = {"anime_episode_type", "tv_status_tracker", "size_overlay"}
+_RUNNABLE_SERVICES = {
+    "anime_episode_type",
+    "tv_status_tracker",
+    "size_overlay",
+}
+
+_CONFIGURABLE_SERVICES = {
+    *_RUNNABLE_SERVICES,
+    "artwork_manager",
+}
 
 
 @app.post("/api/run/{service}")
 def trigger_run(service: str):
     """Trigger a manual run of the given service in a background thread."""
-    if service not in _VALID_SERVICES:
+    if service not in _RUNNABLE_SERVICES:
         raise HTTPException(status_code=404, detail=f"Unknown service: {service}")
     if run_status.get(service):
         return {"started": False, "message": f"{service} is already running"}
@@ -1235,7 +1244,7 @@ def trigger_run(service: str):
 @app.get("/api/run/{service}/status")
 def get_run_status(service: str):
     """Check whether a service manual run is in progress."""
-    if service not in _VALID_SERVICES:
+    if service not in _RUNNABLE_SERVICES:
         raise HTTPException(status_code=404, detail=f"Unknown service: {service}")
     return {"service": service, "running": run_status.get(service, False)}
 
@@ -1247,7 +1256,7 @@ class ServiceEnabledPayload(BaseModel):
 @app.put("/api/services/{service}")
 def set_service_enabled(service: str, payload: ServiceEnabledPayload):
     """Enable or disable a service in config.yaml."""
-    if service not in _VALID_SERVICES:
+    if service not in _CONFIGURABLE_SERVICES:
         raise HTTPException(status_code=404, detail=f"Unknown service: {service}")
     config = load_config()
     if not config:

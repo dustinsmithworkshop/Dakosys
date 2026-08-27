@@ -105,7 +105,14 @@ export interface RunStatusResponse {
   running: boolean;
 }
 
-export type ServiceName = "anime_episode_type" | "tv_status_tracker" | "size_overlay";
+export type ServiceName =
+  | "anime_episode_type"
+  | "tv_status_tracker"
+  | "size_overlay";
+
+export type ConfigurableServiceName =
+  | ServiceName
+  | "artwork_manager";
 
 export interface AnimeEntry {
   afl_name: string;

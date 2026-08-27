@@ -12,6 +12,7 @@ import {
   ModalHeader,
   Progress,
   Spinner,
+  Switch,
 } from "@nextui-org/react";
 import { useEffect, useState } from "react";
 
@@ -1615,6 +1616,11 @@ export default function ArtworkPage() {
   ] = useState(true);
 
   const [
+    artworkToggleBusy,
+    setArtworkToggleBusy,
+  ] = useState(false);
+
+  const [
     error,
     setError,
   ] = useState<string | null>(null);
@@ -2289,6 +2295,48 @@ export default function ArtworkPage() {
         apply.status === "running"
     );
 
+  const scanBusy =
+    Object.values(
+      scans
+    ).some(
+      (scan) =>
+        scan.status === "running"
+    );
+
+  const setArtworkManagerEnabled = async (
+    enabled: boolean
+  ) => {
+    setArtworkToggleBusy(
+      true
+    );
+
+    try {
+      await api.setServiceEnabled(
+        "artwork_manager",
+        enabled
+      );
+
+      await Promise.allSettled([
+        loadArtworkStatus(),
+        loadTargets(),
+      ]);
+
+      setError(
+        null
+      );
+    } catch (e: unknown) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Failed to update Artwork Manager"
+      );
+    } finally {
+      setArtworkToggleBusy(
+        false
+      );
+    }
+  };
+
   const showCount =
     targets.filter(
       (target) =>
@@ -2341,6 +2389,54 @@ export default function ArtworkPage() {
           )}
         </div>
       </Spotlight>
+
+      {artworkStatus && (
+        <Card className="bg-zinc-900 border border-zinc-800 mb-6">
+          <CardBody className="p-4">
+            <div className="flex items-center justify-between gap-4">
+              <Switch
+                isSelected={artworkStatus.enabled}
+                isDisabled={
+                  artworkToggleBusy ||
+                  scanBusy ||
+                  applyBusy
+                }
+                onValueChange={(value) => {
+                  void setArtworkManagerEnabled(
+                    value
+                  );
+                }}
+                color="success"
+                size="sm"
+              >
+                <span
+                  className={`text-sm font-semibold ${
+                    artworkStatus.enabled
+                      ? "text-green-400"
+                      : "text-zinc-500"
+                  }`}
+                >
+                  {artworkStatus.enabled
+                    ? "Enabled"
+                    : "Disabled"}
+                </span>
+              </Switch>
+
+              <div className="text-right">
+                <p className="text-zinc-400 text-xs uppercase tracking-wider mb-1">
+                  Apply Mode
+                </p>
+
+                <p className="text-violet-300 font-semibold">
+                  {artworkStatus.apply_mode === "auto"
+                    ? "Automatic"
+                    : "Manual Review"}
+                </p>
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+      )}
 
       {artworkStatus && (
         <Card className="bg-zinc-900 border border-zinc-800 mb-6">
@@ -2528,12 +2624,7 @@ export default function ArtworkPage() {
         recent={recentRuns}
         loading={
           historyLoading ||
-          Object.values(
-            scans
-          ).some(
-            (scan) =>
-              scan.status === "running"
-          ) ||
+          scanBusy ||
           applyBusy
         }
         onRefresh={refreshArtworkStatus}
