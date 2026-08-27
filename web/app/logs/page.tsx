@@ -5,26 +5,42 @@ import { Button, Chip, Tab, Tabs } from "@nextui-org/react";
 import { api } from "@/lib/api";
 import type { ServiceName } from "@/types/api";
 
-type LogService = ServiceName | "main";
+type LogBackendService =
+  | ServiceName
+  | "artwork_manager";
 
-const SERVICES: { key: LogService; label: string; tag: string }[] = [
-  { key: "main",                label: "All Logs",       tag: "Anime"     },
-  { key: "anime_episode_type",  label: "Anime Episodes", tag: "Anime"     },
-  { key: "tv_status_tracker",   label: "TV Status",      tag: "TV Status" },
-  { key: "size_overlay",        label: "Size Overlay",   tag: "Size"      },
+type LogService =
+  | LogBackendService
+  | "main";
+
+const SERVICES: {
+  key: LogService;
+  label: string;
+  tag: string;
+}[] = [
+  { key: "main",               label: "All Logs",       tag: "Anime"     },
+  { key: "anime_episode_type", label: "Anime Episodes", tag: "Anime"     },
+  { key: "tv_status_tracker",  label: "TV Status",      tag: "TV Status" },
+  { key: "size_overlay",       label: "Size Overlay",   tag: "Size"      },
+  { key: "artwork_manager",    label: "Artwork",        tag: "Artwork"   },
 ];
 
 const TAG_COLOR: Record<string, string> = {
   "Anime":     "text-violet-400",
   "TV Status": "text-blue-400",
   "Size":      "text-yellow-400",
+  "Artwork":   "text-fuchsia-400",
 };
 
 // Services to fetch when "All Logs" is selected
-const ALL_SERVICES: { key: ServiceName; tag: string }[] = [
+const ALL_SERVICES: {
+  key: LogBackendService;
+  tag: string;
+}[] = [
   { key: "anime_episode_type", tag: "Anime"     },
   { key: "tv_status_tracker",  tag: "TV Status" },
   { key: "size_overlay",       tag: "Size"      },
+  { key: "artwork_manager",    tag: "Artwork"   },
 ];
 
 interface TaggedLine {
@@ -94,7 +110,10 @@ export default function LogsPage() {
           incoming = merged;
         } else {
           const svc = SERVICES.find((s) => s.key === service)!;
-          const res = await api.getLogs(service as ServiceName, 1000);
+          const res = await api.getLogs(
+            service as LogBackendService,
+            1000
+          );
           incoming = res.lines.map((line) => ({ line, tag: svc.tag }));
         }
 

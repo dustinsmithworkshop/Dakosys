@@ -21,6 +21,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from artwork.activity_log import (
+    write_artwork_activity,
+)
 from artwork.status import (
     build_artwork_status,
 )
@@ -69,6 +72,10 @@ else:
     WEB_OUT = "web/out"
 
 LOG_FILE = os.path.join(DATA_DIR, "anime_trakt_manager.log")
+ARTWORK_LOG_FILE = os.path.join(
+    DATA_DIR,
+    "artwork_manager.log",
+)
 TV_STATUS_CACHE = os.path.join(DATA_DIR, "tv_status_cache.json")
 NEXT_AIRING_SNAPSHOT = os.path.join(DATA_DIR, "next_airing.json")
 PREVIOUS_SIZES_FILE = os.path.join(DATA_DIR, "previous_sizes.json")
@@ -105,6 +112,23 @@ ARTWORK_ACTIVE_APPLIES: Dict[
     str,
     str,
 ] = {}
+
+
+def _artwork_log(
+    level: str,
+    message: str,
+) -> None:
+    """Best-effort operational logging for Artwork Manager."""
+
+    try:
+        write_artwork_activity(
+            ARTWORK_LOG_FILE,
+            level,
+            message,
+        )
+    except Exception:
+        # Logging must never change scan/apply behavior.
+        pass
 
 
 def _artwork_utc_now() -> str:
@@ -239,6 +263,11 @@ def _run_artwork_current_state_scan(
 ) -> None:
     """Build and cache one read-only library scan in a worker thread."""
 
+    _artwork_log(
+        "INFO",
+        f"Current-state scan started: {library}",
+    )
+
     def progress_callback(
         progress: ArtworkScanProgress,
     ) -> None:
@@ -359,7 +388,60 @@ def _run_artwork_current_state_scan(
             error=None,
         )
 
+        safety = (
+            preview.get(
+                "safety",
+                {},
+            )
+            or {}
+        )
+
+        output = (
+            preview.get(
+                "output",
+                {},
+            )
+            or {}
+        )
+
+        issues = (
+            safety.get(
+                "issues",
+                [],
+            )
+            or []
+        )
+
+        safe = bool(
+            safety.get(
+                "safe_to_apply",
+                False,
+            )
+        )
+
+        _artwork_log(
+            "INFO"
+            if safe
+            else "WARNING",
+            (
+                "Current-state scan complete: "
+                f"{library}, "
+                f"safe={str(safe).lower()}, "
+                f"{output.get('changed_files', 0)} file changes, "
+                f"{len(issues)} issues"
+            ),
+        )
+
     except Exception as exc:
+        _artwork_log(
+            "ERROR",
+            (
+                "Current-state scan failed: "
+                f"{library}: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+        )
+
         _update_artwork_scan(
             scan_id,
             status="failed",
@@ -468,6 +550,11 @@ def _run_artwork_reviewed_apply(
     review_fingerprint: str,
 ) -> None:
     """Rebuild and apply one exact reviewed plan in a worker thread."""
+
+    _artwork_log(
+        "INFO",
+        f"Reviewed apply started: {library}",
+    )
 
     def progress_callback(
         progress: ArtworkScanProgress,
@@ -700,7 +787,37 @@ def _run_artwork_reviewed_apply(
             ),
         )
 
+        log_level = (
+            "WARNING"
+            if refresh_error is not None
+            else {
+                "applied": "INFO",
+                "no_changes": "INFO",
+                "blocked": "WARNING",
+                "failed": "ERROR",
+            }[outcome]
+        )
+
+        _artwork_log(
+            log_level,
+            (
+                "Reviewed apply complete: "
+                f"{library}, "
+                f"outcome={outcome}, "
+                "current_state_refreshed="
+                f"{str(current_state_refreshed).lower()}"
+            ),
+        )
+
     except ArtworkReviewMismatchError as exc:
+        _artwork_log(
+            "WARNING",
+            (
+                "Reviewed apply stale: "
+                f"{library}: {exc}"
+            ),
+        )
+
         _update_artwork_apply(
             apply_id,
             status="stale",
@@ -718,6 +835,15 @@ def _run_artwork_reviewed_apply(
         )
 
     except Exception as exc:
+        _artwork_log(
+            "ERROR",
+            (
+                "Reviewed apply failed: "
+                f"{library}: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+        )
+
         _update_artwork_apply(
             apply_id,
             status="failed",
@@ -1183,6 +1309,7 @@ _LOG_SERVICES = {
     "anime_episode_type": LOG_FILE,
     "tv_status_tracker": os.path.join(DATA_DIR, "tv_status_tracker.log"),
     "size_overlay": os.path.join(DATA_DIR, "size_overlay.log"),
+    "artwork_manager": ARTWORK_LOG_FILE,
 }
 
 

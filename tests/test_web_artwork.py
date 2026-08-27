@@ -1358,6 +1358,45 @@ def test_artwork_manager_can_be_toggled_but_not_generic_run(
     )
 
 
+def test_artwork_log_service_reads_dedicated_log(
+    monkeypatch,
+    tmp_path,
+):
+    log_path = (
+        tmp_path
+        / "artwork_manager.log"
+    )
+
+    log_path.write_text(
+        (
+            "2026-08-27 17:00:00 [INFO] first\n"
+            "2026-08-27 17:01:00 [INFO] second\n"
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setitem(
+        web_server._LOG_SERVICES,
+        "artwork_manager",
+        str(log_path),
+    )
+
+    result = (
+        web_server.get_logs(
+            "artwork_manager",
+            lines=1,
+        )
+    )
+
+    assert result == {
+        "lines": [
+            "2026-08-27 17:01:00 [INFO] second",
+        ],
+        "service":
+            "artwork_manager",
+    }
+
+
 def _reviewed_current_state(
     fingerprint="reviewed-anime-plan",
 ):

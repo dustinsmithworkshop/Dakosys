@@ -14,6 +14,7 @@ import re
 import schedule
 from threading import Event
 from shared_utils import setup_rotating_logger
+from artwork.activity_log import write_artwork_activity
 
 # Set up data directory
 DATA_DIR = "data"
@@ -29,7 +30,33 @@ else:
     data_dir = DATA_DIR
 
 log_file = os.path.join(data_dir, "anime_trakt_manager.log")
-logger = setup_rotating_logger("anime_trakt_manager", log_file)
+artwork_log_file = os.path.join(
+    data_dir,
+    "artwork_manager.log",
+)
+
+logger = setup_rotating_logger(
+    "anime_trakt_manager",
+    log_file,
+)
+
+
+def _artwork_log(
+    level,
+    message,
+):
+    """Best-effort dedicated Artwork Manager activity logging."""
+
+    try:
+        write_artwork_activity(
+            artwork_log_file,
+            level,
+            message,
+        )
+    except Exception:
+        # Logging must never change scheduler behavior.
+        pass
+
 
 # Global variables
 CONFIG_FILE = "config/config.yaml"
@@ -231,6 +258,12 @@ def run_artwork_manager_update():
         logger.error(
             "Artwork Manager: failed to load configuration"
         )
+
+        _artwork_log(
+            "ERROR",
+            "Scheduled run failed: configuration could not be loaded",
+        )
+
         return False
 
     service = (
@@ -247,6 +280,12 @@ def run_artwork_manager_update():
         logger.info(
             "Artwork Manager is disabled; skipping update"
         )
+
+        _artwork_log(
+            "INFO",
+            "Scheduled run skipped: Artwork Manager is disabled",
+        )
+
         return True
 
     plex_config = (
@@ -268,6 +307,12 @@ def run_artwork_manager_update():
         logger.error(
             "Artwork Manager requires Plex URL and token"
         )
+
+        _artwork_log(
+            "ERROR",
+            "Scheduled run failed: Plex URL or token is missing",
+        )
+
         return False
 
     history_directory = os.path.join(
@@ -285,6 +330,11 @@ def run_artwork_manager_update():
 
         logger.info(
             "Running scheduled Artwork Manager update"
+        )
+
+        _artwork_log(
+            "INFO",
+            "Scheduled run started",
         )
 
         plex = PlexServer(
@@ -307,6 +357,12 @@ def run_artwork_manager_update():
                 "Artwork Manager became disabled; "
                 "nothing to run"
             )
+
+            _artwork_log(
+                "INFO",
+                "Scheduled run skipped: Artwork Manager became disabled",
+            )
+
             return True
 
         logger.info(
@@ -325,6 +381,25 @@ def run_artwork_manager_update():
             len(result.skipped),
         )
 
+        _artwork_log(
+            (
+                "ERROR"
+                if result.failed_count > 0
+                else "WARNING"
+                if result.blocked_count > 0
+                else "INFO"
+            ),
+            (
+                "Scheduled run complete: "
+                f"{result.applied_count} applied, "
+                f"{result.no_changes_count} no changes, "
+                f"{result.pending_review_count} pending review, "
+                f"{result.blocked_count} blocked, "
+                f"{result.failed_count} failed, "
+                f"{len(result.skipped)} skipped"
+            ),
+        )
+
         for library in result.libraries:
             logger.info(
                 "Artwork Manager library %s: %s",
@@ -332,11 +407,35 @@ def run_artwork_manager_update():
                 library.outcome.value,
             )
 
+            _artwork_log(
+                (
+                    "ERROR"
+                    if library.outcome.value == "failed"
+                    else "WARNING"
+                    if library.outcome.value == "blocked"
+                    else "INFO"
+                ),
+                (
+                    "Scheduled library result: "
+                    f"{library.library}, "
+                    f"outcome={library.outcome.value}"
+                ),
+            )
+
         for skipped in result.skipped:
             logger.info(
                 "Artwork Manager library %s: skipped (%s)",
                 skipped.target.library,
                 skipped.reason.value,
+            )
+
+            _artwork_log(
+                "INFO",
+                (
+                    "Scheduled library skipped: "
+                    f"{skipped.target.library}, "
+                    f"reason={skipped.reason.value}"
+                ),
             )
 
         return (
@@ -348,6 +447,14 @@ def run_artwork_manager_update():
         logger.error(
             "Error running Artwork Manager: %s",
             exc,
+        )
+
+        _artwork_log(
+            "ERROR",
+            (
+                "Scheduled run failed: "
+                f"{type(exc).__name__}: {exc}"
+            ),
         )
 
         import traceback

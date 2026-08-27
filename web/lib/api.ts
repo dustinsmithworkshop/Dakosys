@@ -126,7 +126,13 @@ export const api = {
       body: JSON.stringify({ config }),
     }),
 
-  getLogs: (service: ServiceName | "main", lines = 200) =>
+  getLogs: (
+    service:
+      | ServiceName
+      | "artwork_manager"
+      | "main",
+    lines = 200,
+  ) =>
     apiFetch<LogsResponse>(`/api/logs/${service}?lines=${lines}`),
 
   triggerRun: (service: ServiceName) =>
