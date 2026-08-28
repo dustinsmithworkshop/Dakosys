@@ -22,6 +22,7 @@ COPY fonts/artwork-generator/ /app/fonts/artwork-generator/
 COPY *.py ./
 COPY tv_metadata/ ./tv_metadata/
 COPY artwork/ ./artwork/
+COPY mosaic/ ./mosaic/
 
 COPY --from=frontend-builder /frontend/out /app/web/out
 
