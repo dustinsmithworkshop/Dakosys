@@ -294,6 +294,213 @@ Creates Kometa overlays showing media file sizes for movies and TV shows. Size h
 
 ---
 
+Artwork Manager
+
+Artwork Manager is the DAKOSYS service for managing Plex artwork through Kometa metadata.
+
+It discovers configured Plex show and movie libraries automatically and maintains an independent metadata item store for each library.
+
+Artwork Priority
+
+For episode artwork, DAKOSYS uses this priority:
+
+MediUX curated
+    ↓
+Dakosys Generated
+    ↓
+TMDB / existing fallback
+
+MediUX remains the preferred artwork source. Generated artwork is used only when a higher-priority curated episode card is unavailable and generation is enabled.
+
+Manual or locked artwork is protected from automatic replacement.
+
+Generated artwork remains upgradeable. If a better supported MediUX set becomes available later, DAKOSYS can replace generated artwork with the curated set.
+
+Library Support
+
+Artwork Manager supports Plex show and movie libraries. Library names are discovered from Plex and are not hard-coded by DAKOSYS.
+
+Each managed library receives its own Kometa metadata item store. Default output layout:
+
+<output_dir>/
+  artwork-<plex-library>/
+
+Each managed show or movie is rendered to its own YAML file. DAKOSYS also maintains ownership and durable state so later runs can safely preserve, refresh, or migrate artwork selections.
+
+Apply Modes
+
+Artwork Manager supports two Apply modes:
+
+auto — safe scheduled plans may be applied automatically.
+
+manual — safe plans are retained for review and can be applied from the Artwork Manager web interface.
+
+Apply mode does not weaken Artwork Manager safety rules. Unsafe plans are blocked regardless of Apply mode.
+
+services:
+  artwork_manager:
+    enabled: true
+    apply_mode: manual
+    output_dir: /kometa/metadata
+
+Web Interface
+
+The Artwork Manager page provides service Enabled/Disabled control, current resolved configuration, current-state scans, per-library status, file-change counts, provider activity, generated-card activity, coverage information for show libraries, reviewed Apply, persistent per-library collapse/expand state, run history, and live scan/Apply progress.
+
+Read-only scans for different libraries may run concurrently. Reviewed Applies are globally serialized so only one library can mutate Artwork Manager state at a time.
+
+Current-State Refresh
+
+Refresh Current State performs a new read-only scan. A failed or unsafe current state is presented as Retry Scan.
+
+Refreshing does not mutate metadata, durable artwork state, or generated-card files.
+
+Service Toggle
+
+The Artwork Manager Enabled switch controls:
+
+services:
+  artwork_manager:
+    enabled: true
+
+Disabling the service stops new Artwork Manager work. It does not delete generated artwork, Kometa metadata already written, Artwork Manager durable state, or cached current-state history.
+
+Artwork Manager is intentionally not exposed through the generic service-run API because its reviewed scan/Apply workflow has stronger safety semantics.
+
+---
+
+Dakosys Episode Artwork Generator
+
+The DAKOSYS episode artwork generator creates deterministic local episode title cards when suitable curated artwork is unavailable.
+
+The generator is a transformation stage, not an artwork provider.
+
+Default State
+
+Generated episode cards are disabled by default.
+
+services:
+  artwork_manager:
+    generated_episode_cards:
+      enabled: true
+      kometa_asset_directory: /config/assets
+      config_file: config/artwork-generator.yaml
+
+Disabling the generator prevents new generation. It does not remove artwork that was already generated and activated.
+
+Source Priority
+
+MediUX curated
+    >
+Dakosys generated
+    >
+TMDB / existing fallback
+
+Generated cards never override manual or locked artwork. Generated cards may later be replaced by better curated MediUX artwork.
+
+Episode Title Source
+
+Plex episode title
+    >
+TMDB episode name
+
+Image Source
+
+usable TMDB still
+    >
+usable Plex thumbnail
+
+If no valid source image is available, DAKOSYS preserves the fallback artwork instead of fabricating a card from an unsuitable source.
+
+Rendering
+
+Rendering is deterministic and local using Pillow. No AI image generation, face detection, ImageMagick, or FFmpeg is required.
+
+Output is a 1920×1080 JPEG. The card contains the episode title with restrained lower-screen styling and a subtle gradient for readability. Titles are constrained to avoid oversized or invalid layouts.
+
+Fonts
+
+Bundled font choices:
+
+Marcellus
+
+Prata
+
+Cormorant Garamond
+
+Syne
+
+Libre Baskerville
+
+Cinzel
+
+Japanese/CJK text automatically falls back to bundled Noto Sans JP when needed.
+
+Creative Configuration
+
+Creative settings live separately from the main DAKOSYS configuration:
+
+config/artwork-generator.yaml
+
+Start from:
+
+artwork-generator.example.yaml
+
+Creative inheritance is:
+
+Show > Library > Global
+
+Example:
+
+version: 1
+
+defaults:
+  font: marcellus
+
+libraries:
+  Anime:
+    font: cormorant_garamond
+
+shows:
+  "tmdb:1398":
+    font: prata
+
+Show overrides use stable artwork identities such as tmdb:1398, not display titles.
+
+Generated Cache
+
+Generated artwork is stored below the configured Kometa asset directory.
+
+generated-artwork/
+  tv/
+    tmdb-1398/
+      season-01/
+        S01E01-<fingerprint>.jpg
+
+The filename fingerprint is stable for the rendering inputs. Cached generated files are reused when possible.
+
+DAKOSYS emits generated local artwork to Kometa using file_poster paths rather than file:// URLs.
+
+Preview vs Apply
+
+Preview/build is read-only. During preview DAKOSYS may resolve titles, resolve source images, calculate fingerprints, calculate cache paths, inspect whether a cached file exists, and build generated-card plans.
+
+Preview does not download source images, render JPEGs, write cache files, activate metadata, or activate durable state.
+
+Materialization occurs during Apply only.
+
+If durable Generated state refers to a missing cache JPEG, the library is considered to need Apply so the missing file can be materialized safely.
+
+Invalid Source Images
+
+DAKOSYS fully decodes generator source images before using them. Invalid or corrupt exact sources are quarantined temporarily.
+
+The quarantine identity uses the exact image source and provider/source asset identity. A changed source identity is reconsidered immediately, allowing recovery when Plex or a provider repairs the image.
+
+A known bad source is treated as unavailable on later scans rather than repeatedly causing destructive retries.
+
+---
+
 ## Web Dashboard
 
 The DAKOSYS web UI is normally available at:
@@ -911,6 +1118,81 @@ source episode title → mapped episode title
 ```
 
 rather than as a Trakt-only mapping.
+
+---
+
+Artwork Manager Reviewed Apply Safety
+
+DAKOSYS separates artwork planning from mutation. This is the core safety model used by the Artwork Manager web interface.
+
+Read-Only Planning
+
+resolve Plex/library state
+        ↓
+resolve provider artwork
+        ↓
+resolve generated-card plans
+        ↓
+render desired Kometa metadata in memory
+        ↓
+calculate safety + file changes
+        ↓
+calculate review fingerprint
+        ↓
+NO WRITES
+
+The resulting current state is cached for the web dashboard.
+
+Review Fingerprint
+
+A safe plan that needs changes receives an exact review fingerprint.
+
+When the user chooses Apply Reviewed Plan, DAKOSYS does not blindly apply the cached result. It rebuilds the plan against fresh library/provider state and verifies that the new plan still matches the exact reviewed fingerprint.
+
+If the plan changed, Apply is rejected as stale. No writes are performed for a stale reviewed plan. The user must refresh current state and review the new plan.
+
+Apply
+
+rebuild fresh plan
+        ↓
+verify exact fingerprint
+        ↓
+materialize required generated images
+        ↓
+verify generated files
+        ↓
+transactionally write metadata/state
+        ↓
+refresh current state
+
+Generated-image materialization occurs before generated artwork is activated in metadata or durable state.
+
+Safety Outcomes
+
+Artwork Manager records outcomes such as applied, no_changes, pending_review, blocked, and failed. Reviewed Apply also uses stale when the exact reviewed plan no longer matches.
+
+Unsafe plans remain blocked regardless of whether configuration uses automatic or manual Apply mode.
+
+Global Apply Serialization
+
+Only one reviewed Artwork Apply can run at a time across all libraries.
+
+Anime Apply running
+  ├─ Anime + same fingerprint -> reuse existing Apply
+  ├─ Anime + different plan   -> reject
+  ├─ TV Apply                 -> reject until Anime finishes
+  ├─ Movies Apply             -> reject until Anime finishes
+  └─ Cartoons Apply           -> reject until Anime finishes
+
+This serialization is enforced by both the UI and backend API.
+
+Read-only current-state scans are not globally serialized and may run concurrently for different libraries.
+
+Failure Behavior
+
+Apply fails closed. Examples include provider failure, unsafe artwork selection, invalid generated source image, generated-file materialization failure, stale reviewed fingerprint, and transactional write failure.
+
+A failed or stale Apply does not silently submit a different plan.
 
 ---
 

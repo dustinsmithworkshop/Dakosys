@@ -16,6 +16,18 @@ All notable changes to this fork are documented here.
 - Artwork Manager CLI commands for status, read-only scan, run, and persistent history.
 - Live progress reporting for long-running Artwork Manager scans and runs.
 - Artwork Manager scheduler integration and web dashboard/current-state/history/progress support.
+- Deterministic Dakosys-generated episode title cards using local Pillow rendering when higher-priority curated artwork is unavailable.
+- Generated episode-card creative configuration with Global -> Library -> Show overrides and bundled Marcellus, Prata, Cormorant Garamond, Syne, Libre Baskerville, and Cinzel fonts.
+- Automatic Noto Sans JP fallback for Japanese/CJK generated episode titles.
+- Read-only generated-card planning with stable cache fingerprints and deferred materialization during Apply.
+- Reviewed web Apply workflow using exact review fingerprints and stale-plan rejection immediately before transactional writes.
+- Reviewed Apply support for both show and movie libraries.
+- Per-library current-state Refresh / Retry controls with asynchronous scan progress.
+- Persistent collapsible Artwork library cards with independent per-library UI state.
+- Artwork Manager Enabled toggle in the web UI without exposing Artwork Manager through the generic service-run endpoint.
+- Dedicated `artwork_manager.log` activity logging for current-state scans, reviewed Applies, scheduled runs, and failures.
+- Artwork log filtering in the web Logs page and inclusion in the combined All Logs view.
+- Invalid generator source-image validation and quarantine so corrupt Plex/TMDB source images fail safely without repeated destructive retries.
 
 - Hybrid TV metadata provider architecture using stable Plex external IDs with Sonarr, TMDB, and TVmaze providers.
 - Provider-independent normalization for TV lifecycle state and upcoming episodes.
@@ -38,6 +50,14 @@ All notable changes to this fork are documented here.
 - Artwork Manager prioritizes curated MediUX artwork and uses TMDB to fill eligible gaps without replacing usable MediUX assets.
 - Safe Artwork Manager plans default to automatic application; manual mode remains available for review-first operation.
 - Artwork Manager persists provider selection and ownership so later runs can safely refresh or migrate cohesive artwork sets.
+- Episode-card priority is now MediUX curated artwork -> Dakosys generated artwork -> raw/existing fallback.
+- Generated artwork remains upgradeable when better curated MediUX artwork later becomes available.
+- Manual/locked artwork remains protected from automatic replacement.
+- Generated episode-card preview/build paths are read-only; source download, rendering, cache writes, metadata activation, and state activation occur only during Apply.
+- Generated local artwork is emitted to Kometa through `file_poster` paths rather than `file://` URLs.
+- Missing generated cache files are treated as pending materialization and require Apply rather than being accepted as current durable state.
+- Reviewed Applies are globally serialized across libraries while read-only current-state scans may still run concurrently.
+- Safe reviewed plans may remain collapsed in the web UI; scanning, applying, unsafe, stale, blocked, and failed states force the relevant library card open.
 
 - TV / Anime Status Tracker now resolves normal metadata locally instead of requiring Trakt.
 - TV Status uses stable Plex external IDs rather than fuzzy title matching between providers.
@@ -66,9 +86,16 @@ All notable changes to this fork are documented here.
 ### Validation
 
 - Artwork Manager show and movie workflows were exercised end-to-end against real Plex and Kometa mounts.
-- Production-scale Movies processing managed 3,058 of 3,059 Plex movies using MediUX with TMDB fallback.
-- A full four-library automatic production run completed with zero blocked and zero failed libraries.
-- Production runs exercised provider migrations, set refreshes, TMDB gap filling, transactional writes, durable state, and no-change behavior.
+- Production-scale Movies processing managed 3,058 of 3,059 Plex movies using MediUX with TMDB fallback during rollout validation.
+- TV, Anime, Movies, and Cartoons were all planned, reviewed/applied, and verified Current in production.
+- Dakosys-generated episode title cards were verified live in production Plex after the Kometa run.
+- Production runs exercised curated MediUX selection, generated-card fallback, TMDB gap filling, provider migrations, set refreshes, transactional writes, durable state, cache reuse, and no-change/idempotent behavior.
+- TV post-Apply verification showed an idempotent follow-up scan with zero changed files and zero generator materialization required.
+- Anime generator rollout exercised retry handling, oversized-title truncation, full source-image decode validation, exact-source quarantine, and recovery after a repaired Plex source changed identity.
+- Reviewed Apply concurrency is protected both in the web UI and backend with one global Apply at a time.
+- Artwork web regression coverage reached 33 tests after service-control and activity-log integration.
+- Artwork-focused Python regression coverage reached 623 passing tests after scheduler activity logging.
+- Next.js production build, lint/type validation, Python compilation, and `git diff --check` passed after the final Artwork Manager GUI/logging changes.
 
 - Full TV metadata regression suite passes with 102 Python tests.
 - Next.js production build passes after provider setup and Next Airing UI migration.
