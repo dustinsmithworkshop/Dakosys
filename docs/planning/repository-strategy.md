@@ -8,6 +8,12 @@ The current repository contains the implementation history that led to DAKOSYS 3
 
 A standalone MOSAIC repository should be considered only after the licensing/permission status of the inherited upstream DAKOSYS code is resolved.
 
+## Compatibility contract
+
+The repository decision is part of the broader MOSAIC 4.x compatibility promise.
+
+See [`mosaic-4-compatibility-contract.md`](mosaic-4-compatibility-contract.md) for the canonical policy covering DAKOSYS 3.1 configuration, environment variables, durable state, filesystem/runtime names, Plex and Kometa continuity, attribution, and deprecation boundaries.
+
 ## Why this path
 
 ### Preserve history
